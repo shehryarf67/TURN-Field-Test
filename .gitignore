@@ -1,0 +1,20 @@
+*.iml
+.gradle/
+.kotlin/
+.idea/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+build/
+**/build/
+*.apk
+*.aab
+*.jks
+*.keystore
+keystore.properties
+.tooling/
+
+# Field data may reveal venue infrastructure. Export it deliberately instead.
+field-data/
+exports/
