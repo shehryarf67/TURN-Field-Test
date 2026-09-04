@@ -8,6 +8,8 @@ The application deliberately keeps four estimates visible: raw PDR, Wi-Fi-only, 
 
 > **Research prototype:** Demo mode proves software behavior with deterministic prerecorded data. It does not prove physical-device accuracy.
 
+New team members should begin with [PARTNER_SETUP_AND_FIELD_GUIDE.md](PARTNER_SETUP_AND_FIELD_GUIDE.md), which covers repository access, installation, phone setup, fingerprint surveys, physical Live Locate runs, troubleshooting and the current research-build boundaries.
+
 ## What is included
 
 - Metric venue and floor-plan data model, including walkable regions, walls, vertical transitions, POIs, QR anchors, reference points and checkpoints.
