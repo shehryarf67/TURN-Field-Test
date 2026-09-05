@@ -9,7 +9,7 @@ TURN is an offline, foreground-only research application. It creates Wi-Fi finge
 You need:
 
 - a Windows Surface Laptop or another Windows computer;
-- permission to access the private GitHub repository;
+- access to the public GitHub repository (collaborator access is needed to push changes);
 - Android Studio and a compatible JDK 17 selected for Gradle;
 - an Android phone running Android 8.0/API 26 or newer;
 - a USB data cable;
@@ -19,13 +19,13 @@ You need:
 
 An iPhone cannot run this application. An Android emulator can run Demo mode, but it cannot validate real Wi-Fi scanning, step detection, relative heading or BLE behavior.
 
-Do not collect participant names, phone numbers or other identities. Building plans and BSSIDs can be sensitive; keep the repository private and share exports only with the authorized project team.
+Do not collect participant names, phone numbers or other identities. The source repository is public. Keep actual field exports and non-public building plans in your team's research-data storage, separate from source-code commits.
 
 ## 2. Get access to the repository
 
 The repository owner must:
 
-1. Open the private TURN repository on GitHub.
+1. Open the public TURN repository on GitHub. Anyone can read or clone it; the following invitation grants contribution access.
 2. Open **Settings → Collaborators and teams**.
 3. Invite each project partner using the correct GitHub username.
 
