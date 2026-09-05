@@ -17,6 +17,14 @@ import kotlin.test.assertTrue
 
 class PlatformContractsTest {
     @Test
+    fun stepPermissionStartsAtAndroidTenAndDoesNotAffectWifi() {
+        assertTrue(TurnPermissionPolicy.requiredPermissions(TurnCapability.PDR_MOTION, 28).isEmpty())
+        assertEquals(setOf(Manifest.permission.ACTIVITY_RECOGNITION),
+            TurnPermissionPolicy.requiredPermissions(TurnCapability.PDR_MOTION, 29))
+        assertTrue(Manifest.permission.ACTIVITY_RECOGNITION !in
+            TurnPermissionPolicy.requiredPermissions(TurnCapability.WIFI_SCAN, 35))
+    }
+    @Test
     fun wifiFreshnessRequiresUpdatedRecentAndNovelTimestamp() {
         assertEquals(
             WifiFreshness.FRESH,

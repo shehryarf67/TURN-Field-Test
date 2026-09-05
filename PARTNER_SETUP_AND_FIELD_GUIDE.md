@@ -10,7 +10,7 @@ You need:
 
 - a Windows Surface Laptop or another Windows computer;
 - permission to access the private GitHub repository;
-- Android Studio with its bundled JDK 17;
+- Android Studio and a compatible JDK 17 selected for Gradle;
 - an Android phone running Android 8.0/API 26 or newer;
 - a USB data cable;
 - permission to survey the chosen university area;
@@ -56,6 +56,8 @@ If Git asks for a password, use GitHub's browser sign-in or a personal access to
 6. Accept the Android SDK licences.
 7. In Android Studio, open the cloned `TURN-Field-Test` folder—not the `app` subfolder.
 8. Allow Gradle sync and dependency downloads to complete.
+
+Select JDK 17 in **Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK**. Use Android Studio's bundled runtime only if its version is compatible; Studio releases can bundle a different Java version. For PowerShell builds, set `JAVA_HOME` to the same JDK 17 installation. The local verification for this project uses JDK 17.
 
 The project uses the checked-in Gradle wrapper. Do not install a separate global Gradle version. Android Studio normally creates the machine-specific `local.properties` file automatically. This file must never be committed.
 
@@ -113,7 +115,7 @@ Alternatively, after building the APK:
 adb install -r .\app\build\outputs\apk\debug\app-debug.apk
 ```
 
-`-r` updates an existing installation while retaining its local Room database. To perform a clean reinstall, uninstall TURN from the phone first, but understand that uninstalling or clearing app storage deletes all locally collected fingerprints and sessions.
+`-r` updates an existing installation while retaining its local Room database, provided both APKs use the same signing key. Keep building updates on the same development machine. APKs built by different teammates or fresh CI runners may have different debug signing keys. If installation reports `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, obtain an update from the original signing machine; do not uninstall a phone containing unexported research data. Uninstalling or clearing app storage deletes locally collected fingerprints and sessions.
 
 ## 5. Understand the two data modes
 
@@ -132,6 +134,7 @@ When switching to Real Device mode or requesting a scan, approve:
 
 - coarse and fine location;
 - nearby Wi-Fi devices on Android versions that require it;
+- Physical activity when starting a diagnostic walk or live PDR session on Android 10 or newer;
 - camera only when QR scanning is used.
 
 Also enable the phone's main **Wi-Fi** and **Location** switches. Android can deny Wi-Fi scan results when Location services are off even if the app permission is granted.
@@ -162,11 +165,13 @@ An official architectural plan is not required. A simple measured sketch is enou
 
 The included version contains a 42 m × 28 m pilot workspace with reference points such as `RP-G-01`, `RP-G-04`, `RP-G-07` and `RP-G-10`. Edit the draft to match the actual measured pilot before treating results as research evidence.
 
-### Current 0.1 map-editor boundary
+### Current map-editor boundary
 
-The core Room schema, metric geometry and import/export adapters are implemented, but the current Compose editor is still a pilot draft surface. Custom points and geometry added in the current app process are used by Survey and Live Locate; reference points are written to Room when a real survey begins. The full custom map is not yet restored into the editor after an app restart. Keep the app open during an initial custom-map survey session and preserve a separate written copy of all measured coordinates.
+In Real Device mode, press **Save** in the floor editor to persist the pilot polygon, walls and reference points to Room. They reload when you switch to Real Device after restarting the app. Save also validates the polygon and rejects reference points outside walkable space. Stop Survey and Live locate before editing. A saved reference-point ID identifies one coordinate; use a new point ID when relocating a marker.
 
-Do not claim final building-scale validation until persistent custom venue editing and image import are completed and retested.
+The current editor still uses a fixed 42 × 28 metre, single-ground-floor workspace. Image import, two-point image calibration, editable dimensions, full venue management and vertical-transition editing remain unfinished. Their controls no longer report a successful operation. QR anchor draft edits are not included in the pilot Save operation. Keep a separate measured drawing and coordinate notebook. See [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) before planning a larger campaign.
+
+Do not claim final building-scale validation until custom venue editing and image import are completed and retested.
 
 ## 8. Plan reference points correctly
 
@@ -199,7 +204,7 @@ A successful `startScan()` request does not guarantee a new scan. Android may re
 
 1. Confirm that Step detector is available.
 2. Confirm that Game rotation vector is selected when available; gyroscope is the fallback relative-heading source.
-3. Press **Start walk**.
+3. Press **Start walk** and grant **Physical activity** if prompted. A denied permission prevents step tracking; Wi-Fi surveying remains available.
 4. Walk a measured straight line.
 5. Compare detected steps and estimated distance with the real walk.
 6. Turn left and right and confirm the relative heading changes in the expected direction.
@@ -315,11 +320,33 @@ TURN stores data in a Room database inside the app's private storage, including:
 
 Raw survey data is not sent to a server. Data collected on one phone is not automatically synchronized to another phone or teammate.
 
-### Current 0.1 export/evaluation boundary
+### Export physical data after each session
 
-The versioned JSON/CSV models, Room backup repository and Storage Access Framework adapters are implemented and unit-tested. The Real Device **Data/export** and **Evaluate** screens remain guarded until their final UI-to-repository wiring is completed. Do not rely on the demo export buttons for physical research data, and never describe demo checkpoint errors as real results.
+1. Stop the Survey or Live locate session and wait for it to close.
+2. Open **Data/export** in **Real Device** mode.
+3. Select **Save complete database JSON**.
+4. Choose a destination using Android's document picker and wait for **Exported**.
+5. Also export the CSV datasets needed for analysis: fingerprints, raw observations, scan snapshots, survey metadata, PDR events, positions, correction events and independent test samples.
+6. Copy the files to your team's research-data folder on the laptop. Open the JSON or CSV to confirm it contains the expected session IDs before deleting anything from the phone.
 
-Until that wiring is completed, treat each physical phone's app storage as the authoritative local dataset. Do not uninstall TURN, clear its storage or factory-reset the phone after collection. This limitation should be resolved before the final multi-phone evaluation campaign.
+The JSON contains all stored database tables, including raw lineage. It references image URIs without embedding image bytes; preserve original floor-plan images separately. CSV files include every entity field and join through IDs. A dataset with no records exports a header-only CSV. A cancelled or failed export leaves the database unchanged. Exporting a large accumulated database requires memory proportional to its size; use short pilot sessions initially.
+
+The app does not yet expose an import/restore workflow. Keep the JSON and the installed app data; a backup file is readable research data, but restoring it through the app is not yet verified.
+
+### Capture independent checkpoints
+
+1. Physically mark checkpoints separate from training reference points and measure their x/y coordinates independently.
+2. Start **Live locate**, obtain a fix and walk to a checkpoint.
+3. Keep the live session running and open **Evaluate**.
+4. Enter the checkpoint code and measured x/y. The current physical workflow evaluates ground floor `FL-G` only.
+5. Press **Capture test sample**. The estimates are frozen at button-press time, then stored with independent truth in evaluation tables. The checkpoint never corrects the live estimate and no test scan is added to the fingerprint database.
+6. Repeat at other checkpoints. Reusing a checkpoint code requires the same coordinate. A checkpoint at a training reference point is rejected.
+7. Review Wi-Fi-only, raw-PDR and fused mean, median, p90, maximum, within-3m/5m, floor correctness and failure rate.
+8. Stop Live locate, then export test samples and the complete JSON.
+
+Missing estimates are retained as failures, with null errors rather than zero. Distance statistics use available estimates; within-distance and floor percentages use all captures. Horizontal error and floor correctness remain separate. Wi-Fi-only is the latest available fresh fix and may be older than PDR/fused output. The current on-screen summary covers the active session; past samples remain in the database exports. Multi-floor evaluation, richer per-device dashboards and a separately stabilized trajectory are still pending.
+
+Treat each phone's app storage and exported JSON as research records. Do not uninstall TURN, clear storage or reset the phone after collection until the team has verified its copies and a restore workflow.
 
 ## 13. BLE and QR status
 
@@ -454,7 +481,8 @@ Before the first real tracking walk, confirm all boxes:
 - [ ] PDR moves between Wi-Fi corrections.
 - [ ] Map matching rejects an intentionally impossible wall crossing in a controlled test.
 - [ ] The session is stopped cleanly before leaving TURN.
-- [ ] No one uninstalls or clears the app before data extraction is implemented/verified.
+- [ ] A complete JSON and the required CSV files were exported and checked on the laptop.
+- [ ] No one uninstalls or clears the app before the team has verified its data copies and restore procedure.
 
 ## 17. Further technical references
 

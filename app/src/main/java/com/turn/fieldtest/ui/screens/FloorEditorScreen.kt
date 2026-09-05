@@ -75,8 +75,8 @@ private const val DemoFloorWidth = 42f
 private const val DemoFloorHeight = 28f
 
 @Composable
-fun FloorEditorScreen(state: TurnAppState, compact: Boolean) {
-    var showBackground by remember { mutableStateOf(true) }
+fun FloorEditorScreen(state: TurnAppState, compact: Boolean, onSave: () -> Unit = {}) {
+    var showBackground by remember(state.mode) { mutableStateOf(state.mode == com.turn.fieldtest.ui.model.DataMode.DEMO) }
     var showMetricGrid by remember { mutableStateOf(true) }
     var calibrationDistance by remember { mutableStateOf("8.00") }
 
@@ -94,12 +94,12 @@ fun FloorEditorScreen(state: TurnAppState, compact: Boolean) {
             compact = compact,
             action = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { state.editorStatus = "Venue JSON export queued through Storage Access Framework" }) {
+                    OutlinedButton(onClick = { state.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.DATA_EXPORT) }) {
                         Icon(Icons.Outlined.FileDownload, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("JSON")
                     }
-                    Button(onClick = { state.editorStatus = "Metric floor draft saved" }) {
+                    Button(onClick = onSave, enabled = !state.surveyRunning && !state.liveRunning) {
                         Icon(Icons.Outlined.Save, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("Save")
@@ -122,13 +122,15 @@ fun FloorEditorScreen(state: TurnAppState, compact: Boolean) {
                 SectionCard(
                     title = "Ground floor · FL-G",
                     subtitle = "42.0 m × 28.0 m · origin lower-left",
-                    trailing = { StatusPill("1 px = 0.0131 m", EventSeverity.GOOD) }
+                    trailing = { StatusPill("Fixed metric pilot canvas", EventSeverity.INFO) }
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LayerChip("Background", showBackground) { showBackground = !showBackground }
+                        if (state.mode == com.turn.fieldtest.ui.model.DataMode.DEMO) {
+                            LayerChip("Example background", showBackground) { showBackground = !showBackground }
+                        }
                         LayerChip("Metric grid", showMetricGrid) { showMetricGrid = !showMetricGrid }
                         LayerChip("Geometry", state.geometryLayerVisible) { state.geometryLayerVisible = !state.geometryLayerVisible }
                         LayerChip("Labels", state.labelsLayerVisible) { state.labelsLayerVisible = !state.labelsLayerVisible }
@@ -160,7 +162,8 @@ fun FloorEditorScreen(state: TurnAppState, compact: Boolean) {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SectionCard("Floor calibration", "Image points A–B define pixel-to-metre scale") {
                         OutlinedButton(
-                            onClick = { state.editorStatus = "Background image picker requested" },
+                            onClick = {},
+                            enabled = false,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Outlined.Image, contentDescription = null)
@@ -177,11 +180,12 @@ fun FloorEditorScreen(state: TurnAppState, compact: Boolean) {
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(Modifier.height(8.dp))
-                        LabelValue("Image separation", "612 px")
-                        LabelValue("Computed scale", "0.01307 m / px")
+                        LabelValue("Image import", "Not connected in this build")
+                        LabelValue("Calibration", "Not connected in this build")
                         LabelValue("Coordinate origin", "lower-left")
                         FilledTonalButton(
-                            onClick = { state.editorStatus = "Scale calibrated using $calibrationDistance m reference" },
+                            onClick = {},
+                            enabled = false,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Outlined.CenterFocusStrong, contentDescription = null)
@@ -191,21 +195,15 @@ fun FloorEditorScreen(state: TurnAppState, compact: Boolean) {
                     }
 
                     SectionCard("Geometry summary", "Stored in metres") {
-                        LabelValue("Walkable regions", "1 draft · 8 vertices")
+                        LabelValue("Walkable regions", "1 draft · ${state.draftWalkablePolygon.size} vertices")
                         LabelValue("Wall segments", "${state.draftWalls.size}")
-                        LabelValue("Doors", "4")
-                        LabelValue("Junctions", "3")
-                        LabelValue("Stairs / lifts", "1 / 1")
+                        LabelValue("Transition editing", "Not connected")
                         LabelValue("QR anchors", state.qrAnchors.size.toString())
                         LabelValue("Survey points", state.referencePoints.size.toString())
                     }
 
                     SectionCard("Map topology", "Validation before survey") {
-                        ValidationRow("Walkable polygon closed", true)
-                        ValidationRow("Corridors connected", true)
-                        ValidationRow("Walls have no gaps", false)
-                        ValidationRow("Floor transition paired", true)
-                        ValidationRow("All survey points valid", false)
+                        Text("Save validates the walkable polygon and reference points. Inspect walls and corridor connectivity against the physical site; automatic topology certification is not available.")
                     }
                 }
             }
@@ -223,7 +221,7 @@ fun FloorEditorScreen(state: TurnAppState, compact: Boolean) {
                             Box(Modifier.size(10.dp).background(TurnCyan, RoundedCornerShape(50)))
                             Text(point.id, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             Text("x %.1f m  ·  y %.1f m".format(point.metres.x, point.metres.y), style = MaterialTheme.typography.bodySmall)
-                            StatusPill("walkable", EventSeverity.GOOD)
+                            Text("Validate on save", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }

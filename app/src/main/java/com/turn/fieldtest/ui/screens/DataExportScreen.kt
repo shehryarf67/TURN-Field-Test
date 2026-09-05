@@ -51,15 +51,13 @@ import com.turn.fieldtest.ui.model.TurnDemoData
 import com.turn.fieldtest.ui.theme.TurnMint
 
 @Composable
-fun DataExportScreen(state: TurnAppState, compact: Boolean) {
+fun DataExportScreen(
+    state: TurnAppState,
+    compact: Boolean,
+    onRealExport: (Uri, com.turn.fieldtest.data.export.ResearchDataset) -> Unit = { _, _ -> },
+) {
     if (state.mode == DataMode.REAL_DEVICE) {
-        RealDeviceGuard(
-            eyebrow = "07 · Research data",
-            title = "Data & export",
-            description = "Demo manifests are blocked in real-device mode so simulated rows cannot be mistaken for field data.",
-            nextStep = "Real observations are stored in Room. Use the validated database backup/export service once a physical survey has completed; no demo payload will be written in this mode.",
-            compact = compact,
-        )
+        RealDataExportScreen(state, compact, onRealExport)
         return
     }
     val context = LocalContext.current

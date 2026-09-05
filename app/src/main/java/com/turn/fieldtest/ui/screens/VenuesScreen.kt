@@ -56,6 +56,22 @@ import com.turn.fieldtest.ui.model.VenueSummary
 
 @Composable
 fun VenuesScreen(state: TurnAppState, compact: Boolean) {
+    if (state.mode == com.turn.fieldtest.ui.model.DataMode.REAL_DEVICE) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            PageHeader("01 · Setup", "Physical pilot workspace",
+                "This build uses one fixed ground-floor workspace. Verify its metric geometry before surveying.", compact)
+            SectionCard("Computing Block Pilot", "VEN-CS-01 · Ground floor FL-G") {
+                LabelValue("Canvas", "42 × 28 metres · lower-left origin")
+                LabelValue("Reference points loaded", state.referencePoints.size.toString())
+                LabelValue("Wall segments loaded", state.draftWalls.size.toString())
+                Text(state.editorStatus)
+                Button(onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Open metric editor") }
+            }
+            Text("Multiple venue/floor creation, image import and calibrated backgrounds are still pending. Demo workspace coverage and readiness figures are examples and do not describe physical data.")
+        }
+        return
+    }
     var addVenueDialog by remember { mutableStateOf(false) }
     var addFloorDialog by remember { mutableStateOf(false) }
     var setupMessage by remember { mutableStateOf("Venue definition stored locally · schema v1") }

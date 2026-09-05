@@ -33,6 +33,7 @@ class TurnAppState {
     var geometryLayerVisible by mutableStateOf(true)
     var labelsLayerVisible by mutableStateOf(true)
     var editorStatus by mutableStateOf("Metric geometry ready")
+    var realMapReady by mutableStateOf(false)
     val draftWalkablePolygon = mutableStateListOf(
         Offset(4f, 7f), Offset(37f, 7f), Offset(37f, 12f), Offset(17f, 12f),
         Offset(17f, 23f), Offset(9f, 23f), Offset(9f, 12f), Offset(4f, 12f)
@@ -105,6 +106,8 @@ class TurnAppState {
     var realLivePosition by mutableStateOf<Offset?>(null)
     var realRawPdrPosition by mutableStateOf<Offset?>(null)
     var realWifiPosition by mutableStateOf<Offset?>(null)
+    var realWifiFloorId by mutableStateOf<String?>(null)
+    var realWifiUncertaintyMetres by mutableStateOf<Double?>(null)
     var realFusedTrail by mutableStateOf<List<Offset>>(emptyList())
     var realRawPdrTrail by mutableStateOf<List<Offset>>(emptyList())
     var realWifiFixes by mutableStateOf<List<Offset>>(emptyList())
@@ -129,6 +132,10 @@ class TurnAppState {
     }
 
     var lastDataAction by mutableStateOf("No import or export operation in progress")
+    var realExportBusy by mutableStateOf(false)
+    var realEvaluationBusy by mutableStateOf(false)
+    var realEvaluationStatus by mutableStateOf("Start Live locate to capture independent checkpoints")
+    val realTestSamples = mutableStateListOf<com.turn.fieldtest.data.local.TestSampleEntity>()
 
     var knnK by mutableIntStateOf(4)
     var missingRssi by mutableIntStateOf(-100)
@@ -145,6 +152,10 @@ class TurnAppState {
     }
 
     fun addMapPoint(metricPoint: Offset) {
+        if (mode == DataMode.REAL_DEVICE && (surveyRunning || liveRunning || !realMapReady)) {
+            editorStatus = "Wait for map loading and stop physical sessions before editing"
+            return
+        }
         when (editorTool) {
             EditorTool.WALKABLE -> {
                 draftWalkablePolygon.add(metricPoint)
@@ -162,7 +173,7 @@ class TurnAppState {
                 }
             }
             EditorTool.REFERENCE_POINT -> {
-                val id = "RP-G-${(referencePoints.size + 1).toString().padStart(2, '0')}"
+                val id = "RP-G-${java.util.UUID.randomUUID().toString().take(8)}"
                 referencePoints.add(MapPointUi(id, "Ground", metricPoint, id.removePrefix("RP-G-")))
                 editorStatus = "$id placed at ${formatPoint(metricPoint)}"
             }

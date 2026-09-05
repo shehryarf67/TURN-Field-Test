@@ -8,6 +8,17 @@ import kotlin.test.assertTrue
 
 class WifiPositioningTest {
     @Test
+    fun unrelatedWeakAccessPointsCannotInitializeLocation() {
+        val result = WeightedKnnWifiMatcher().match(
+            mapOf("unrelated-ap" to -95.0),
+            listOf(WifiFingerprint("rp", "G", MetricPoint(1.0, 1.0), mapOf("survey-ap" to -95.0))),
+        )
+        assertTrue(result.unlikeDatabase)
+        assertEquals(null, result.estimatedPosition)
+        assertTrue(result.neighbours.isEmpty())
+    }
+
+    @Test
     fun aggregationUsesOnlyDistinctFreshSnapshots() {
         val snapshots = listOf(
             snapshot(

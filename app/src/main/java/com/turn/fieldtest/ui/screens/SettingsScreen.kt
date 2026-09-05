@@ -138,12 +138,7 @@ fun SettingsScreen(
                         steps = 13,
                         onChange = { state.particleCount = (it / 100f).roundToInt() * 100 }
                     )
-                    SettingToggle(
-                        "Accelerometer step fallback",
-                        "Used only when the step detector is unavailable; never double-counted",
-                        state.accelerometerFallback,
-                        { state.accelerometerFallback = it }
-                    )
+                    LabelValue("Accelerometer fallback", "Not implemented; step detector required")
                     LabelValue("Heading preference", "Game rotation vector")
                     LabelValue("Global relocalization", "Explicit strong-match recovery")
                 }
@@ -158,6 +153,7 @@ fun SettingsScreen(
                     PermissionRow("Wi-Fi state", "manifest ready", true)
                     PermissionRow("Coarse + fine location", "Android 12+ pair; fine is required for scan-derived location", true)
                     PermissionRow("Nearby Wi-Fi", "version-aware", true)
+                    PermissionRow("Physical activity", "requested for step tracking on Android 10+", true)
                     PermissionRow("Camera", "requested for QR scan", true)
                     PermissionRow("Bluetooth scan", "not requested while BLE is off", false)
                     Text(

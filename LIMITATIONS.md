@@ -2,6 +2,8 @@
 
 TURN is a research instrument. It must expose uncertainty and failure rather than manufacture a smooth blue dot.
 
+See [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for unfinished implementation, including the fixed pilot map, QR UI, import/restore and multi-floor runtime. Recovery options described below are architecture capabilities; only fresh Wi-Fi recovery is currently connected in the physical screen.
+
 ## Radio
 
 - Android can throttle application-requested Wi-Fi scans, so PDR—not Wi-Fi—provides frequent updates between fresh fixes.

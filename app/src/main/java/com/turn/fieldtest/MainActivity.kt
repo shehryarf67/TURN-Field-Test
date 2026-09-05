@@ -14,6 +14,16 @@ import com.turn.fieldtest.ui.model.DataMode
 class MainActivity : ComponentActivity() {
     private val runtimeViewModel by viewModels<TurnRuntimeViewModel>()
     private var afterWifiPermission: (() -> Unit)? = null
+    private var afterMotionPermission: (() -> Unit)? = null
+    private val motionPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        val pending = afterMotionPermission
+        afterMotionPermission = null
+        runtimeViewModel.refreshMotionSources()
+        if (runtimeViewModel.missingMotionPermissions().isEmpty()) pending?.invoke()
+        else runtimeViewModel.onMotionPermissionDenied()
+    }
 
     private val wifiPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -41,18 +51,25 @@ class MainActivity : ComponentActivity() {
                     onDiagnosticScanRequested = {
                         withWifiPermissions(runtimeViewModel::requestDiagnosticScan)
                     },
-                    onDiagnosticWalkToggled = runtimeViewModel::toggleDiagnosticWalk,
+                    onDiagnosticWalkToggled = {
+                        withMotionPermissions(runtimeViewModel::toggleDiagnosticWalk)
+                    },
                     onRealSurveyStarted = { metadata ->
                         withWifiPermissions { runtimeViewModel.beginRealSurvey(metadata) }
                     },
                     onRealSurveyFinished = runtimeViewModel::finishRealSurvey,
                     onRealLiveToggled = {
-                        withWifiPermissions(runtimeViewModel::toggleRealLive)
+                        withWifiPermissions {
+                            withMotionPermissions(runtimeViewModel::toggleRealLive)
+                        }
                     },
                     onRealLiveScanRequested = {
                         withWifiPermissions(runtimeViewModel::requestLiveScan)
                     },
                     onRealLiveRelocalizationRequested = runtimeViewModel::relocalizeWithNextWifi,
+                    onRealExport = runtimeViewModel::exportRealData,
+                    onMapSaved = runtimeViewModel::savePilotMap,
+                    onCheckpointCaptured = runtimeViewModel::captureCheckpoint,
                 ),
             )
         }
@@ -65,7 +82,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         runtimeViewModel.onBackground()
-        afterWifiPermission = null
         super.onStop()
     }
 
@@ -78,5 +94,16 @@ class MainActivity : ComponentActivity() {
         }
         afterWifiPermission = action
         wifiPermissionLauncher.launch(missing)
+    }
+
+    private fun withMotionPermissions(action: () -> Unit) {
+        val missing = runtimeViewModel.missingMotionPermissions()
+        if (missing.isEmpty()) {
+            runtimeViewModel.refreshMotionSources()
+            action()
+        } else {
+            afterMotionPermission = action
+            motionPermissionLauncher.launch(missing)
+        }
     }
 }

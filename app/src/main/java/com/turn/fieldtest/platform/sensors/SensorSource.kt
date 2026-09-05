@@ -1,6 +1,8 @@
 package com.turn.fieldtest.platform.sensors
 
 import android.content.Context
+import com.turn.fieldtest.platform.permissions.TurnCapability
+import com.turn.fieldtest.platform.permissions.TurnPermissionChecker
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -94,6 +96,8 @@ class AndroidSensorSource(
     private val sensorManager: SensorManager = context.applicationContext.getSystemService(SensorManager::class.java),
     private val clock: PlatformClock = SystemPlatformClock,
 ) : SensorSource, SensorEventListener {
+    private val permissions = TurnPermissionChecker(context)
+    private val registeredTypes = mutableSetOf<Int>()
     private val mutableSamples = MutableSharedFlow<SensorSample>(extraBufferCapacity = 128)
     private val mutableState = MutableStateFlow(SensorSourceState())
     private val sensorsByAndroidType: Map<Int, Sensor?> = sensorTypes.associate { (_, androidType) ->
@@ -111,13 +115,19 @@ class AndroidSensorSource(
         if (mutableState.value.running) return
         val selectedStep = selectedStepSource()
         sensorsToRegister(selectedStep).forEach { sensor ->
-            sensorManager.registerListener(this, sensor, config.samplingPeriodUs)
+            if (sensor.type in listOf(Sensor.TYPE_STEP_DETECTOR, Sensor.TYPE_STEP_COUNTER) &&
+                !permissions.isGranted(TurnCapability.PDR_MOTION)) return@forEach
+            val registered = runCatching {
+                sensorManager.registerListener(this, sensor, config.samplingPeriodUs)
+            }.getOrDefault(false)
+            if (registered) registeredTypes += sensor.type
         }
         mutableState.value = stateFromSensors(running = true)
     }
 
     override fun stop() {
         sensorManager.unregisterListener(this)
+        registeredTypes.clear()
         mutableState.value = stateFromSensors(running = false)
     }
 
@@ -180,8 +190,12 @@ class AndroidSensorSource(
 
     private fun stateFromSensors(running: Boolean) = SensorSourceState(
         running = running,
-        selectedStepSource = selectedStepSource(),
-        selectedHeadingSource = selectedHeadingSource(),
+        selectedStepSource = selectedStepSource().takeIf { selected ->
+            !running || sensorTypes.any { it.first == selected && it.second in registeredTypes }
+        },
+        selectedHeadingSource = selectedHeadingSource().takeIf { selected ->
+            !running || sensorTypes.any { it.first == selected && it.second in registeredTypes }
+        },
         availability = sensorTypes.map { (turnType, androidType) ->
             val sensor = sensorsByAndroidType[androidType]
             SensorAvailability(

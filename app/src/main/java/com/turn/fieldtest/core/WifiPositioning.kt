@@ -249,6 +249,11 @@ class WeightedKnnWifiMatcher(private val config: WifiMatcherConfig = WifiMatcher
 
         val distances = fingerprints.mapNotNull { fingerprint ->
             if (fingerprint.rssiByBssid.isEmpty()) return@mapNotNull null
+            val excluded = (globallyExcludedBssids + fingerprint.canonicalExclusions())
+                .mapTo(hashSetOf(), ::canonicalBssid)
+            val observedIds = liveRssiByBssid.filterValues { it.isFinite() }.keys
+                .mapTo(hashSetOf(), ::canonicalBssid) - excluded
+            if (fingerprint.canonicalVector().keys.none { it in observedIds }) return@mapNotNull null
             val distance = WifiVectorDistance.calculate(
                 liveRssiByBssid = liveRssiByBssid,
                 storedRssiByBssid = fingerprint.canonicalVector(),

@@ -4,16 +4,18 @@ TURN Field Test is an offline-first Android research application for collecting 
 
 `QR/manual/Wi-Fi fix -> PDR prediction -> map constraint -> Wi-Fi correction -> fused blue dot`
 
-The application deliberately keeps four estimates visible: raw PDR, Wi-Fi-only, fused, and map-constrained. Ground truth is stored only in independent evaluation records and is never available to the estimator.
+The physical screen shows raw PDR, Wi-Fi-only and map-constrained particle-filter estimates. A separate stabilized output remains pending. Ground truth is stored only in independent evaluation records and is never available to the estimator.
 
-> **Research prototype:** Demo mode proves software behavior with deterministic prerecorded data. It does not prove physical-device accuracy.
+> **Research prototype:** Demo mode uses deterministic prerecorded data. Build and unit-test verification do not establish emulator UI behavior or physical-device accuracy.
 
 New team members should begin with [PARTNER_SETUP_AND_FIELD_GUIDE.md](PARTNER_SETUP_AND_FIELD_GUIDE.md), which covers repository access, installation, phone setup, fingerprint surveys, physical Live Locate runs, troubleshooting and the current research-build boundaries.
+
+Read [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for current gaps. Physical survey, tracking, checkpoint capture, pilot-map persistence and JSON/CSV export are connected; full venue/image editing, QR camera workflows, import/restore and multi-floor runtime still need completion and device validation.
 
 ## What is included
 
 - Metric venue and floor-plan data model, including walkable regions, walls, vertical transitions, POIs, QR anchors, reference points and checkpoints.
-- Manual map editor suitable for a measured hand-drawn plan.
+- Fixed metric pilot editor with persistent polygon, walls and reference points; full image-based venue editing remains pending.
 - Version-aware Android Wi-Fi scanner with fresh/stale result handling.
 - Wi-Fi survey sessions that retain raw readings and aggregate median, mean, standard deviation, range and detection rate.
 - Weighted k-nearest-neighbour Wi-Fi positioning with floor voting, missing-signal handling, normalization and confidence.

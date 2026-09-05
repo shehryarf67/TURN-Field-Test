@@ -5,6 +5,38 @@ import android.hardware.SensorManager
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.runtime.snapshotFlow
+import android.net.Uri
+import com.turn.fieldtest.data.export.ResearchDataset
+import com.turn.fieldtest.data.export.ResearchDataExport
+import com.turn.fieldtest.data.export.TurnDatabaseExport
+import com.turn.fieldtest.platform.storage.KotlinxJsonTransferCodec
+import com.turn.fieldtest.platform.storage.CsvTableCodec
+import com.turn.fieldtest.platform.storage.TransferResult
+import com.turn.fieldtest.data.settings.TurnSettings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.room.withTransaction
+import com.turn.fieldtest.data.local.WalkableRegionEntity
+import com.turn.fieldtest.data.local.WallSegmentEntity
+import com.turn.fieldtest.ui.model.MapPointUi
+import androidx.compose.ui.geometry.Offset
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.double
+import com.turn.fieldtest.core.EvaluationEstimate
+import com.turn.fieldtest.core.evaluateAtCheckpoint
+import com.turn.fieldtest.data.local.TestRunEntity
+import com.turn.fieldtest.data.local.TestSampleEntity
+import com.turn.fieldtest.data.local.TestCheckpointEntity
+import com.turn.fieldtest.ui.screens.CheckpointInput
 import com.turn.fieldtest.BuildConfig
 import com.turn.fieldtest.TurnApplication
 import com.turn.fieldtest.data.local.FloorEntity
@@ -96,8 +128,102 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var liveYawBaselineRadians: Double? = null
     private var latestMapHeadingRadians = 0.0
     private var previousGyroscopeTimestampNanos: Long? = null
+    private var rawPdrFloorId: String? = null
+
+    fun captureCheckpoint(input: CheckpointInput) {
+        val session = activePositioningSession ?: return
+        if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning || appState.realEvaluationBusy) return
+        if (input.code.isBlank() || !input.x.isFinite() || !input.y.isFinite() ||
+            input.x !in 0.0..42.0 || input.y !in 0.0..28.0) {
+            appState.realEvaluationStatus = "Checkpoint code and finite pilot coordinates are required"
+            return
+        }
+        // Freeze estimates at the button press, before any suspend/database work. Truth is never
+        // passed to the matcher, raw PDR tracker, or particle filter.
+        val now = System.currentTimeMillis()
+        fun snapshot(point: Offset?, floor: String?, radius: Double? = null): EvaluationEstimate? =
+            if (point == null || floor == null) null else EvaluationEstimate(point.x.toDouble(), point.y.toDouble(), floor, radius)
+        val wifi = snapshot(appState.realWifiPosition, appState.realWifiFloorId, appState.realWifiUncertaintyMetres)
+        val raw = snapshot(appState.realRawPdrPosition, rawPdrFloorId)
+        val fused = if (particleFilter?.isLost == false) snapshot(appState.realLivePosition,
+            appState.realLiveFloorId, appState.realLiveUncertaintyMetres) else null
+        val truth = MetricPoint(input.x, input.y)
+        val wifiError = evaluateAtCheckpoint(truth, PILOT_FLOOR_ID, wifi)
+        val rawError = evaluateAtCheckpoint(truth, PILOT_FLOOR_ID, raw)
+        val fusedError = evaluateAtCheckpoint(truth, PILOT_FLOOR_ID, fused)
+        fun encoded(value: EvaluationEstimate?) = value?.let { Json.encodeToString(EvaluationEstimate.serializer(), it) }
+        val checkpointId = "CP-$PILOT_VENUE_ID-${input.code}"
+        val runId = "TEST-${session.id}"
+        val sample = TestSampleEntity(
+            id = "SAMPLE-${UUID.randomUUID()}", testRunId = runId, checkpointId = checkpointId,
+            trueFloorId = PILOT_FLOOR_ID, trueXMetres = input.x, trueYMetres = input.y,
+            wifiOnlyEstimateJson = encoded(wifi), rawPdrEstimateJson = encoded(raw), fusedEstimateJson = encoded(fused),
+            wifiOnlyHorizontalErrorMetres = wifiError.horizontalMetres,
+            rawPdrHorizontalErrorMetres = rawError.horizontalMetres, fusedHorizontalErrorMetres = fusedError.horizontalMetres,
+            wifiOnlyFloorCorrect = wifiError.floorCorrect, rawPdrFloorCorrect = rawError.floorCorrect,
+            fusedFloorCorrect = fusedError.floorCorrect, confidenceRadiusMetres = fused?.confidenceRadius,
+            actualErrorInsideConfidence = fusedError.insideConfidence,
+            timeSinceLastWifiCorrectionMillis = appState.realLastWifiCorrectionEpochMillis?.let { (now - it).coerceAtLeast(0) },
+            stepCount = appState.realLiveStepCount, wifiAccessPointCount = appState.realWifiAccessPoints.size,
+            nearestFingerprintDetailsJson = JsonObject(mapOf(
+                "ids" to JsonArray(appState.realNearestFingerprintIds.map(::JsonPrimitive)),
+                "matchDistance" to (appState.realWifiMatchDistance?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull),
+            )).toString(),
+            mapConstraintEventsJson = JsonObject(mapOf("rejectedParticleMoves" to JsonPrimitive(appState.realLiveMapRejectedCount))).toString(),
+            timestampEpochMillis = now,
+        )
+        appState.realEvaluationBusy = true
+        viewModelScope.launch {
+            try {
+                app.database.withTransaction {
+                    val existing = repositories.evaluation.observeCheckpoints(PILOT_VENUE_ID).first().firstOrNull { it.id == checkpointId }
+                    require(existing == null || (existing.floorId == PILOT_FLOOR_ID && existing.xMetres == input.x && existing.yMetres == input.y)) {
+                        "Checkpoint code already belongs to a different coordinate"
+                    }
+                    require(repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first().none {
+                        MetricPoint(it.xMetres, it.yMetres).distanceTo(truth) < 0.05
+                    }) { "Choose an independent checkpoint, separate from a training reference point" }
+                    val run = repositories.evaluation.observeRuns(PILOT_VENUE_ID).first().firstOrNull { it.id == runId }
+                    if (run == null) repositories.evaluation.saveRun(TestRunEntity(
+                        id = runId, venueId = PILOT_VENUE_ID, positioningSessionId = session.id,
+                        anonymousDeviceId = "DEVICE-${UUID.randomUUID()}", deviceManufacturer = Build.MANUFACTURER,
+                        deviceModel = Build.MODEL, androidVersion = Build.VERSION.RELEASE,
+                        appVersion = BuildConfig.VERSION_NAME, startedAtEpochMillis = now,
+                    ))
+                    if (existing == null) repositories.evaluation.saveCheckpoint(TestCheckpointEntity(
+                        checkpointId, PILOT_VENUE_ID, PILOT_FLOOR_ID, input.code, input.x, input.y))
+                    repositories.evaluation.saveSample(sample)
+                }
+                appState.realTestSamples.add(sample)
+                appState.realEvaluationStatus = "Saved ${input.code}: ${appState.realTestSamples.size} independent capture(s) this session"
+            } catch (error: Exception) {
+                appState.realEvaluationStatus = "Capture rejected: ${error.message}"
+            } finally {
+                appState.realEvaluationBusy = false
+            }
+        }
+    }
 
     init {
+        viewModelScope.launch {
+            val saved = app.settings.settings.first()
+            appState.knnK = saved.wifiK
+            appState.missingRssi = saved.missingRssiDbm
+            appState.deviceOffsetNormalization = saved.normalizeDeviceOffset
+            appState.strideMetres = saved.defaultStrideMetres.toFloat()
+            appState.particleCount = saved.particleCount
+            appState.darkTheme = saved.darkTheme
+            snapshotFlow {
+                TurnSettings(
+                    wifiK = appState.knnK,
+                    missingRssiDbm = appState.missingRssi,
+                    normalizeDeviceOffset = appState.deviceOffsetNormalization,
+                    defaultStrideMetres = appState.strideMetres.toDouble(),
+                    particleCount = appState.particleCount,
+                    darkTheme = appState.darkTheme,
+                )
+            }.distinctUntilChanged().collect { settings -> app.settings.update { settings } }
+        }
         viewModelScope.launch {
             wifiScanner.state.collectLatest { scannerState ->
                 appState.realWifiMonitoring = scannerState.monitoring
@@ -139,6 +265,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     fun onBackground() {
         foreground = false
+        appState.liveRunning = false
+        appState.surveyRunning = false
+        appState.diagnosticWalkRunning = false
         surveyScanJob?.cancel()
         liveScanJob?.cancel()
         if (activeSurvey != null) {
@@ -163,6 +292,42 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.liveRunning = false
         appState.diagnosticWalkRunning = false
         if (mode == DataMode.REAL_DEVICE) {
+            appState.realMapReady = false
+            viewModelScope.launch {
+                try {
+                    val points = repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first()
+                    val regions = repositories.floorPlans.observeWalkableRegions(PILOT_FLOOR_ID).first()
+                    val walls = repositories.floorPlans.observeWalls(PILOT_FLOOR_ID).first()
+                    val restoredPolygon = regions.firstOrNull { it.enabled }?.let { region ->
+                        Json.parseToJsonElement(region.polygonJson).jsonArray.map { vertex ->
+                            Offset(vertex.jsonObject.getValue("x").jsonPrimitive.double.toFloat(),
+                                vertex.jsonObject.getValue("y").jsonPrimitive.double.toFloat())
+                        }
+                    }
+                    if (points.isNotEmpty()) {
+                        appState.referencePoints.clear()
+                        appState.referencePoints.addAll(points.map {
+                            MapPointUi(it.id, "Ground", Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.name)
+                        })
+                        if (points.none { it.id == appState.selectedSurveyReferencePointId }) {
+                            appState.selectedSurveyReferencePointId = points.first().id
+                        }
+                    }
+                    if (restoredPolygon != null) {
+                        appState.draftWalkablePolygon.clear()
+                        appState.draftWalkablePolygon.addAll(restoredPolygon)
+                        appState.draftWalls.clear()
+                        appState.draftWalls.addAll(walls.filter { it.enabled }.map {
+                            Offset(it.startXMetres.toFloat(), it.startYMetres.toFloat()) to
+                                Offset(it.endXMetres.toFloat(), it.endYMetres.toFloat())
+                        })
+                    }
+                    appState.realMapReady = true
+                    appState.editorStatus = "Physical pilot map loaded; Save writes metric geometry to Room"
+                } catch (error: Exception) {
+                    appState.editorStatus = "Could not load physical map: ${error.message}"
+                }
+            }
             appState.surveyAcceptedSnapshots = 0
             appState.surveyCachedIgnored = 0
             appState.surveyRawObservationCount = 0
@@ -188,6 +353,54 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         .missingPermissions(TurnCapability.WIFI_SCAN)
         .toTypedArray()
 
+    fun missingMotionPermissions(): Array<String> = app.permissionChecker
+        .missingPermissions(TurnCapability.PDR_MOTION).toTypedArray()
+
+    fun refreshMotionSources() {
+        if (appState.mode == DataMode.REAL_DEVICE && foreground) {
+            sensorSource.stop()
+            sensorSource.start()
+        }
+    }
+
+    fun onMotionPermissionDenied() {
+        appState.realDiagnosticStatus = "Physical activity permission denied; step tracking unavailable"
+        appState.realLiveStatus = "Grant Physical activity permission to start PDR tracking"
+    }
+
+    fun exportRealData(uri: Uri, dataset: ResearchDataset) {
+        if (appState.realExportBusy) return
+        if (appState.mode != DataMode.REAL_DEVICE || activeSurvey != null || activePositioningSession != null) {
+            appState.lastDataAction = "Export blocked: stop physical collection and positioning first"
+            return
+        }
+        appState.realExportBusy = true
+        appState.lastDataAction = "Preparing ${dataset.label} from stored physical records…"
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val value = app.backupRepository.createExport(System.currentTimeMillis())
+                    ResearchDataExport.requirePhysicalData(value)
+                    if (dataset == ResearchDataset.BACKUP) {
+                        app.safTransferService.export(uri, value, KotlinxJsonTransferCodec(TurnDatabaseExport.serializer()))
+                    } else {
+                        app.safTransferService.export(uri, ResearchDataExport.csv(value, dataset), CsvTableCodec)
+                    }
+                }
+                appState.lastDataAction = when (result) {
+                    is TransferResult.Success -> "Exported ${dataset.label}; stored data unchanged"
+                    is TransferResult.Failure -> "Export failed: ${result.message}"
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                appState.lastDataAction = "Export failed: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                appState.realExportBusy = false
+            }
+        }
+    }
+
     fun refreshWifiPermissionStatus() {
         appState.wifiPermissionStatus = when {
             appState.mode == DataMode.DEMO -> "Not needed in DEMO mode"
@@ -210,6 +423,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     fun toggleDiagnosticWalk() {
         if (appState.mode != DataMode.REAL_DEVICE) return
+        if (missingMotionPermissions().isNotEmpty()) {
+            onMotionPermissionDenied()
+            return
+        }
         if (!appState.diagnosticWalkRunning) {
             appState.diagnosticWalkSteps = 0
             appState.realDiagnosticDistanceMetres = 0.0
@@ -228,6 +445,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         if (!realWifiReady("Survey")) return
+        appState.surveyRunning = true
+        appState.surveyRuntimeStatus = "Creating physical survey session…"
         viewModelScope.launch {
             runCatching {
                 val now = System.currentTimeMillis()
@@ -252,6 +471,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     startedAtEpochMillis = now,
                 ).also { repositories.surveys.save(it) }
             }.onSuccess { session ->
+                if (!foreground || appState.mode != DataMode.REAL_DEVICE || !appState.surveyRunning) {
+                    repositories.surveys.save(session.copy(endedAtEpochMillis = System.currentTimeMillis()))
+                    appState.surveyRunning = false
+                    return@onSuccess
+                }
                 activeSurvey = session
                 surveyScanSequence = 0L
                 surveyBssids.clear()
@@ -266,6 +490,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.surveyRunning = true
                 startSurveyScanLoop()
             }.onFailure { failure ->
+                appState.surveyRunning = false
                 appState.surveyRuntimeStatus = "Could not create survey session"
                 appState.surveySaveStatus = failure.message ?: failure::class.java.simpleName
             }
@@ -273,7 +498,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun finishRealSurvey() {
-        if (activeSurvey == null) return
+        if (activeSurvey == null) {
+            appState.surveyRunning = false
+            return
+        }
         viewModelScope.launch { finishActiveSurvey("Researcher finished the bounded collection") }
     }
 
@@ -294,18 +522,31 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     fun relocalizeWithNextWifi() {
         if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) return
         particleFilter = null
-        rawPdrTracker = null
         appState.realLiveInitialized = false
+        appState.realLivePosition = null
+        appState.realParticleCloud = emptyList()
+        appState.realLiveConfidence = 0.0
+        appState.realLiveFloorConfidence = 0.0
         appState.realLiveStatus = "Global relocalization armed; waiting for a fresh Wi-Fi fix"
         requestLiveScan()
     }
 
     private fun beginRealLive() {
+        if (activePositioningSession != null) {
+            appState.realLiveStatus = "Previous session is still closing; try again after it stops"
+            return
+        }
+        if (missingMotionPermissions().isNotEmpty()) {
+            onMotionPermissionDenied()
+            return
+        }
         if (activeSurvey != null || appState.surveyRunning) {
             appState.realLiveStatus = "Finish the active fingerprint survey before positioning"
             return
         }
         if (!realWifiReady("Live locate")) return
+        appState.liveRunning = true
+        appState.realLiveStatus = "Creating physical positioning session…"
         viewModelScope.launch {
             runCatching {
                 val now = System.currentTimeMillis()
@@ -332,6 +573,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 repositories.positioning.saveSession(positioningSession)
                 sensorSession to positioningSession
             }.onSuccess { (sensorSession, positioningSession) ->
+                if (!foreground || appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) {
+                    val endedAt = System.currentTimeMillis()
+                    repositories.positioning.saveSensorSession(sensorSession.copy(endedAtEpochMillis = endedAt))
+                    repositories.positioning.saveSession(positioningSession.copy(endedAtEpochMillis = endedAt))
+                    appState.liveRunning = false
+                    return@onSuccess
+                }
                 activeSensorSession = sensorSession
                 activePositioningSession = positioningSession
                 particleFilter = null
@@ -346,6 +594,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLivePosition = null
                 appState.realRawPdrPosition = null
                 appState.realWifiPosition = null
+                appState.realWifiFloorId = null
+                appState.realWifiUncertaintyMetres = null
+                appState.realTestSamples.clear()
+                appState.realEvaluationStatus = "Live session ready for independent checkpoint capture"
+                rawPdrFloorId = null
+                appState.realLastWifiCorrectionEpochMillis = null
+                appState.relocalizationCount = 0
                 appState.realFusedTrail = emptyList()
                 appState.realRawPdrTrail = emptyList()
                 appState.realWifiFixes = emptyList()
@@ -358,6 +613,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLiveStatus = "Waiting for a fresh Wi-Fi fix; hold the phone facing map +x"
                 startLiveScanLoop()
             }.onFailure { failure ->
+                appState.liveRunning = false
                 appState.realLiveStatus = "Could not create physical session: ${failure.message ?: failure::class.java.simpleName}"
             }
         }
@@ -383,6 +639,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun realWifiReady(action: String): Boolean {
         if (appState.mode != DataMode.REAL_DEVICE) return false
+        if (!appState.realMapReady) {
+            appState.realWifiIssue = "Physical map is still loading or failed to load; see Floor-plan editor"
+            return false
+        }
         if (!foreground) {
             appState.realWifiIssue = "$action unavailable while TURN is not foreground"
             return false
@@ -520,7 +780,33 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private suspend fun ensurePilotContext(now: Long) {
+    fun savePilotMap() {
+        if (appState.mode != DataMode.REAL_DEVICE) {
+            appState.editorStatus = "Demo draft kept in memory; switch to Real Device to save a physical map"
+            return
+        }
+        if (!appState.realMapReady || activeSurvey != null || activePositioningSession != null) {
+            appState.editorStatus = "Wait for map loading and stop physical sessions before saving"
+            return
+        }
+        viewModelScope.launch {
+            runCatching { ensurePilotContext(System.currentTimeMillis()) }
+                .onSuccess { appState.editorStatus = "Metric polygon, walls and reference points saved to Room" }
+                .onFailure { appState.editorStatus = "Map save rejected: ${it.message}" }
+        }
+    }
+
+    private suspend fun ensurePilotContext(now: Long) = app.database.withTransaction {
+        val polygon = MetricPolygon(appState.draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) })
+        com.turn.fieldtest.core.validateSimpleWalkablePolygon(polygon)
+        require(appState.referencePoints.map { it.id }.distinct().size == appState.referencePoints.size) {
+            "Duplicate reference-point IDs"
+        }
+        appState.referencePoints.forEach { point ->
+            require(polygon.contains(MetricPoint(point.metres.x.toDouble(), point.metres.y.toDouble()))) {
+                "${point.id} is outside walkable space"
+            }
+        }
         if (repositories.venues.venue(PILOT_VENUE_ID) == null) {
             repositories.venues.save(
                 VenueEntity(
@@ -547,6 +833,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             )
         }
         appState.referencePoints.forEach { point ->
+            val previous = repositories.floorPlans.referencePoint(point.id)
+            require(previous == null ||
+                (previous.xMetres == point.metres.x.toDouble() && previous.yMetres == point.metres.y.toDouble())) {
+                "${point.id} already identifies a saved coordinate; create a new point ID to relocate it"
+            }
             repositories.floorPlans.save(
                 ReferencePointEntity(
                     id = point.id,
@@ -559,6 +850,21 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     updatedAtEpochMillis = now,
                 ),
             )
+        }
+        repositories.floorPlans.save(WalkableRegionEntity(
+            id = "REGION-PILOT", floorId = PILOT_FLOOR_ID, name = "Pilot walkable region",
+            polygonJson = JsonArray(appState.draftWalkablePolygon.map {
+                JsonObject(mapOf("x" to JsonPrimitive(it.x.toDouble()), "y" to JsonPrimitive(it.y.toDouble())))
+            }).toString(), updatedAtEpochMillis = now,
+        ))
+        repositories.floorPlans.observeWalls(PILOT_FLOOR_ID).first().forEach { repositories.floorPlans.delete(it) }
+        appState.draftWalls.forEachIndexed { index, (start, end) ->
+            require(start != end) { "Wall $index has zero length" }
+            repositories.floorPlans.save(WallSegmentEntity(
+                id = "WALL-PILOT-$index", floorId = PILOT_FLOOR_ID,
+                startXMetres = start.x.toDouble(), startYMetres = start.y.toDouble(),
+                endXMetres = end.x.toDouble(), endYMetres = end.y.toDouble(),
+            ))
         }
     }
 
@@ -594,7 +900,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             it.referencePointId.substringBefore("::")
         }.distinct()
         appState.realWifiMatchDistance = match.weightedMatchDistance.takeIf(Double::isFinite)
-        appState.realWifiPosition = match.estimatedPosition?.toUiOffset()
+        if (freshness == CoreWifiFreshness.FRESH) {
+            appState.realWifiPosition = match.estimatedPosition?.takeUnless { match.unlikeDatabase }?.toUiOffset()
+            appState.realWifiFloorId = match.estimatedFloorId.takeUnless { match.unlikeDatabase }
+            appState.realWifiUncertaintyMetres = match.uncertaintyRadiusMetres.takeIf { it.isFinite() }
+        }
         match.estimatedPosition?.let { position ->
             if (freshness == CoreWifiFreshness.FRESH) {
                 appState.realWifiFixes = (appState.realWifiFixes + position.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
@@ -615,6 +925,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
         val prior = particleFilter?.summary()
         if (particleFilter == null || particleFilter?.isLost == true) {
+            if (match.confidence < 0.55 || match.floorAgreement < 0.7) {
+                appState.realLiveStatus = "Wi-Fi fix is ambiguous; waiting for stronger position/floor evidence"
+                return
+            }
             val filter = ParticleFilter(
                 metricMap = currentPilotMap(),
                 config = ParticleFilterConfig(particleCount = appState.particleCount),
@@ -637,19 +951,24 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             val availableSteps = if (
                 sensorSource.state.value.selectedStepSource == TurnSensorType.STEP_DETECTOR
             ) setOf(StepSource.STEP_DETECTOR) else emptySet()
-            rawPdrTracker = PdrTracker(
+            if (rawPdrTracker == null) {
+                rawPdrTracker = PdrTracker(
                 initialPosition = match.estimatedPosition,
                 initialHeadingRadians = 0.0,
                 stepProcessor = StepProcessor(availableSteps),
                 strideModel = StrideModel(appState.strideMetres.toDouble()),
             )
-            liveYawBaselineRadians = latestDeviceYawRadians
-            latestMapHeadingRadians = 0.0
-            appState.realRawPdrPosition = match.estimatedPosition.toUiOffset()
-            appState.realRawPdrTrail = listOf(match.estimatedPosition.toUiOffset())
+                rawPdrFloorId = match.estimatedFloorId
+                liveYawBaselineRadians = latestDeviceYawRadians
+                latestMapHeadingRadians = 0.0
+                appState.realRawPdrPosition = match.estimatedPosition.toUiOffset()
+                appState.realRawPdrTrail = listOf(match.estimatedPosition.toUiOffset())
+            } else {
+                appState.relocalizationCount += 1
+            }
             appState.realLiveInitialized = true
-            appState.lastCorrectionType = "first confident Wi-Fi fix"
-            appState.realLiveStatus = "Initialized from fresh Wi-Fi; current phone direction is map +x"
+            appState.lastCorrectionType = if (appState.relocalizationCount > 0) "globally relocalized" else "first confident Wi-Fi fix"
+            appState.realLiveStatus = "Fresh Wi-Fi initialized the particle filter; original raw PDR is retained"
             activePositioningSession = positioningSession.copy(
                 initialFloorId = match.estimatedFloorId,
                 initializationType = "FRESH_WIFI",
@@ -673,7 +992,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 else -> appState.lastCorrectionType
             }
         }
-        appState.realLastWifiCorrectionEpochMillis = batch.receivedAtEpochMillis
+        if (particleFilter?.summary() != null && appState.lastCorrectionType in listOf(
+                "first confident Wi-Fi fix", "fresh Wi-Fi correction", "globally relocalized")) {
+            appState.realLastWifiCorrectionEpochMillis = batch.receivedAtEpochMillis
+        }
         updateRealParticleUi()
         persistWifiEstimate(
             session = requireNotNull(activePositioningSession),
@@ -731,7 +1053,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     ) {
         val now = System.currentTimeMillis()
         val sequence = liveEstimateSequence++
-        val neighboursJson = neighbourIds.joinToString(prefix = "[\"", separator = "\",\"", postfix = "\"]")
+        val neighboursJson = JsonArray(neighbourIds.map(::JsonPrimitive)).toString()
         repositories.positioning.saveEstimate(
             PositionEstimateEntity(
                 id = "EST-${session.id}-$sequence-WIFI",
@@ -761,7 +1083,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 priorYMetres = prior?.y,
                 correctedXMetres = appState.realLivePosition?.x?.toDouble(),
                 correctedYMetres = appState.realLivePosition?.y?.toDouble(),
-                accepted = true,
+                accepted = particleFilter?.summary() != null && appState.lastCorrectionType in listOf(
+                    "first confident Wi-Fi fix", "fresh Wi-Fi correction", "globally relocalized"),
                 globalRelocalization = appState.lastCorrectionType == "globally relocalized",
                 timestampEpochMillis = now,
             ),
@@ -800,6 +1123,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val endedAt = System.currentTimeMillis()
         activeSensorSession?.let { repositories.positioning.saveSensorSession(it.copy(endedAtEpochMillis = endedAt)) }
         activePositioningSession?.let { repositories.positioning.saveSession(it.copy(endedAtEpochMillis = endedAt)) }
+        activePositioningSession?.let { session ->
+            repositories.evaluation.observeRuns(PILOT_VENUE_ID).first().firstOrNull { it.id == "TEST-${session.id}" }
+                ?.let { repositories.evaluation.saveRun(it.copy(endedAtEpochMillis = endedAt)) }
+        }
         activeSensorSession = null
         activePositioningSession = null
         particleFilter = null
@@ -811,9 +1138,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val summary = filter.summary()
         if (summary == null) {
             appState.realLiveInitialized = false
+            appState.realLivePosition = null
+            appState.realParticleCloud = emptyList()
+            appState.realLiveConfidence = 0.0
+            appState.realLiveFloorConfidence = 0.0
+            appState.realLiveUncertaintyMetres = null
             appState.realLiveStatus = "Filter lost; request a fresh Wi-Fi fix"
             return
         }
+        appState.realLiveInitialized = true
         appState.realLivePosition = summary.position.toUiOffset()
         appState.realLiveFloorId = summary.floorId
         appState.realLiveConfidence = summary.confidence
@@ -882,7 +1215,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 if (previous != null && appState.liveRunning) {
                     val deltaSeconds = (sample.sensorTimestampNanos - previous).coerceAtLeast(0L) / 1_000_000_000.0
                     val z = sample.values.getOrNull(2)?.toDouble() ?: return
-                    latestMapHeadingRadians = normalizeRadians(latestMapHeadingRadians - z * deltaSeconds)
+                    // Right-handed Android +z rotation is counter-clockwise for a face-up phone.
+                    latestMapHeadingRadians = normalizeRadians(latestMapHeadingRadians + z * deltaSeconds)
                 }
             }
             else -> Unit
@@ -891,8 +1225,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private suspend fun processLiveStep(sample: SensorSample) {
+        if (sensorSource.state.value.selectedHeadingSource == null) {
+            appState.realLiveStatus = "No active heading sensor; Wi-Fi fixes available but PDR movement is unavailable"
+            return
+        }
         val tracker = rawPdrTracker ?: return
-        val filter = particleFilter ?: return
+        val filter = particleFilter
         val sensorSession = activeSensorSession ?: return
         val positioningSession = activePositioningSession ?: return
         val event = tracker.processStep(
@@ -920,21 +1258,21 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         )
         if (!event.decision.acceptedForMovement) return
 
-        val prediction = filter.predictStep(event.strideMetres, latestMapHeadingRadians)
+        val prediction = filter?.predictStep(event.strideMetres, latestMapHeadingRadians)
         appState.realLiveStepCount = event.stateAfter.acceptedStepCount.toLong()
         appState.realLiveDistanceMetres = event.stateAfter.estimatedDistanceMetres
         appState.realRawPdrPosition = event.stateAfter.position.toUiOffset()
         appState.realRawPdrTrail = (appState.realRawPdrTrail + event.stateAfter.position.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
-        appState.realLiveMapRejectedCount += prediction.rejectedParticleCount
-        appState.lastCorrectionType = if (prediction.rejectedParticleCount > 0) {
+        appState.realLiveMapRejectedCount += prediction?.rejectedParticleCount ?: 0
+        appState.lastCorrectionType = if ((prediction?.rejectedParticleCount ?: 0) > 0) {
             "map constraint applied"
         } else {
             "PDR prediction"
         }
-        appState.realLiveStatus = if (prediction.accepted) {
+        appState.realLiveStatus = if (prediction?.accepted == true) {
             "Step ${event.stateAfter.acceptedStepCount}: ${appState.lastCorrectionType}"
         } else {
-            "Filter lost because every particle violated the metric map"
+            "Raw PDR continues; fused filter needs a fresh Wi-Fi fix"
         }
         updateRealParticleUi()
 
@@ -945,7 +1283,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 positioningSessionId = positioningSession.id,
                 sequence = sequence,
                 method = "RAW_PDR",
-                floorId = appState.realLiveFloorId,
+                floorId = rawPdrFloorId,
                 xMetres = event.stateAfter.position.x,
                 yMetres = event.stateAfter.position.y,
                 headingRadians = latestMapHeadingRadians,
@@ -956,7 +1294,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 status = "PDR prediction",
             ),
         )
-        prediction.summary?.let { summary ->
+        prediction?.summary?.let { summary ->
             repositories.positioning.saveEstimate(
                 PositionEstimateEntity(
                     id = "EST-${positioningSession.id}-$sequence-FUSED",

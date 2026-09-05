@@ -39,15 +39,9 @@ import com.turn.fieldtest.ui.theme.TurnRed
 import kotlin.math.ceil
 
 @Composable
-fun EvaluateScreen(state: TurnAppState, compact: Boolean) {
+fun EvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (CheckpointInput) -> Unit = {}) {
     if (state.mode == DataMode.REAL_DEVICE) {
-        RealDeviceGuard(
-            eyebrow = "06 · Independent validation",
-            title = "Evaluate positioning",
-            description = "Evaluation is disabled until a physical positioning session has produced real estimates.",
-            nextStep = "Start a real live-location session, obtain a non-simulated estimate, then capture a physically marked checkpoint. TURN will not fabricate an error sample.",
-            compact = compact,
-        )
+        RealEvaluateScreen(state, compact, onCapture)
         return
     }
     val samples = state.evaluationSamples.toList()

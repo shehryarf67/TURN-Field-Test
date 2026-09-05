@@ -8,6 +8,7 @@ import androidx.core.content.ContextCompat
 
 enum class TurnCapability {
     WIFI_SCAN,
+    PDR_MOTION,
     QR_CAMERA,
     BLE_SCAN,
 }
@@ -32,6 +33,10 @@ object TurnPermissionPolicy {
                 add(Manifest.permission.NEARBY_WIFI_DEVICES)
             }
         }
+
+        TurnCapability.PDR_MOTION -> if (sdkInt >= Build.VERSION_CODES.Q) {
+            setOf(Manifest.permission.ACTIVITY_RECOGNITION)
+        } else emptySet()
 
         TurnCapability.QR_CAMERA -> setOf(Manifest.permission.CAMERA)
 
