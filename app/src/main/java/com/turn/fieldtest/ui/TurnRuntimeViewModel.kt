@@ -479,12 +479,18 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun beginRealSurvey(metadata: SurveyCaptureMetadata) {
-        if (activeSurvey != null || appState.surveyRunning) return
+        if (activeSurvey != null || appState.surveyRunning) {
+            appState.surveyRuntimeStatus = "A survey session is already active; pause it before starting another"
+            return
+        }
         if (appState.liveRunning) {
             appState.surveyRuntimeStatus = "Stop Live locate before collecting a training fingerprint"
             return
         }
-        if (!realWifiReady("Survey")) return
+        if (!realWifiReady("Survey")) {
+            appState.surveyRuntimeStatus = "Collection not started: ${appState.realWifiIssue ?: "Wi-Fi is not ready"}"
+            return
+        }
         appState.surveyRunning = true
         appState.surveyRuntimeStatus = "Creating physical survey session…"
         viewModelScope.launch {
@@ -531,7 +537,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 startSurveyScanLoop()
             }.onFailure { failure ->
                 appState.surveyRunning = false
-                appState.surveyRuntimeStatus = "Could not create survey session"
+                appState.surveyRuntimeStatus = "Collection not started: ${failure.message ?: failure::class.java.simpleName}"
                 appState.surveySaveStatus = failure.message ?: failure::class.java.simpleName
             }
         }

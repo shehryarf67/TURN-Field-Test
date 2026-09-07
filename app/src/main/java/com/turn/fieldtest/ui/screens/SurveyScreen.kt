@@ -93,13 +93,16 @@ fun SurveyScreen(
             compact = compact,
             action = {
                 Button(
-                    enabled = simulated || state.surveyRunning || (state.realMapReady && selectedPoint != null),
                     onClick = {
                     if (simulated) {
                         state.toggleSurvey()
                     } else if (state.surveyRunning) {
                         onFinishRealSurvey()
                     } else {
+                        if (!state.realMapReady) {
+                            state.surveyRuntimeStatus = "Map is still loading; open Floor-plan editor and wait for it to become ready"
+                            return@Button
+                        }
                         if (selectedPoint == null) {
                             state.surveyRuntimeStatus = "Add and save at least one survey point in Floor-plan editor"
                             return@Button
