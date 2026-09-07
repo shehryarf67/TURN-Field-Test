@@ -885,8 +885,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 withContext(Dispatchers.IO) {
                     val resolver = getApplication<Application>().contentResolver
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+                    val stream = resolver.openInputStream(uri)
                         ?: error("The selected image could not be opened")
+                    stream.use { BitmapFactory.decodeStream(it, null, options) }
                     require(options.outWidth > 0 && options.outHeight > 0) { "The selected file is not a readable PNG or JPEG" }
                     ImportedFloorPlan(
                         uri = uri.toString(),
