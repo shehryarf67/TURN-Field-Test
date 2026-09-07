@@ -10,12 +10,12 @@ The physical screen shows raw PDR, Wi-Fi-only and map-constrained particle-filte
 
 New team members should begin with [PARTNER_SETUP_AND_FIELD_GUIDE.md](PARTNER_SETUP_AND_FIELD_GUIDE.md), which covers repository access, installation, phone setup, fingerprint surveys, physical Live Locate runs, troubleshooting and the current research-build boundaries.
 
-Read [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for current gaps. Physical survey, tracking, checkpoint capture, pilot-map persistence and JSON/CSV export are connected; full venue/image editing, QR camera workflows, import/restore and multi-floor runtime still need completion and device validation.
+Read [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for current gaps. Physical image import/calibration, map editing, survey, tracking, checkpoint capture, persistence and JSON/CSV export are connected; multi-floor runtime, QR camera workflows and backup restore still need completion and device validation.
 
 ## What is included
 
 - Metric venue and floor-plan data model, including walkable regions, walls, vertical transitions, POIs, QR anchors, reference points and checkpoints.
-- Fixed metric pilot editor with persistent polygon, walls and reference points; full image-based venue editing remains pending.
+- One-active-floor metric editor with PNG/JPEG import, editable dimensions, two-point calibration, blank-map/reset controls and persistent polygon, walls, QR anchors and reference points.
 - Version-aware Android Wi-Fi scanner with fresh/stale result handling.
 - Wi-Fi survey sessions that retain raw readings and aggregate median, mean, standard deviation, range and detection rate.
 - Weighted k-nearest-neighbour Wi-Fi positioning with floor voting, missing-signal handling, normalization and confidence.
@@ -36,7 +36,7 @@ The project contains no native C/C++, Docker, WSL or Unix-only build steps. It i
    - Android SDK Platform 35
    - Android SDK Build-Tools 35.x
    - Android SDK Platform-Tools
-3. Keep Android Studio's bundled JDK selected (JDK 17 compatible).
+3. Select a compatible JDK 17 or 21 for Gradle. Do not use JDK 25 with the current Android Gradle plugin.
 4. Open this repository, allow Gradle sync to finish, and select the `app` run configuration.
 
 `local.properties` is machine-specific and intentionally ignored. Android Studio creates it with the local SDK path.

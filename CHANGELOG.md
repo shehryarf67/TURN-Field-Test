@@ -2,6 +2,10 @@
 
 ## Unreleased — field-readiness fixes
 
+- Add persistent PNG/JPEG floor-plan import, editable dimensions and two-point metric calibration.
+- Add blank-map, undo, finish-polygon, exact reference-point entry and confirmed saved-map deletion workflows.
+- Remove demo geometry leakage into new physical maps and show imported plans in Live Locate.
+- Decouple survey startup from pilot-map mutation and show automatic Wi-Fi throttle waiting/retry status.
 - Add physical-activity permission and verify sensor registration.
 - Connect physical Room JSON/CSV export and independent checkpoint evaluation.
 - Persist pilot geometry/reference points and algorithm settings.

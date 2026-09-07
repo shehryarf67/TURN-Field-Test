@@ -20,6 +20,7 @@ enum class DataMode(val label: String, val detail: String) {
 
 enum class EditorTool(val label: String, val code: String) {
     SELECT("Select", "SE"),
+    CALIBRATION("Scale points", "AB"),
     WALKABLE("Walkable polygon", "WA"),
     WALL("Wall", "WL"),
     DOOR("Door", "DR"),

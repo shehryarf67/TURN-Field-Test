@@ -1,6 +1,8 @@
 package com.turn.fieldtest
 
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -15,6 +17,18 @@ class MainActivity : ComponentActivity() {
     private val runtimeViewModel by viewModels<TurnRuntimeViewModel>()
     private var afterWifiPermission: (() -> Unit)? = null
     private var afterMotionPermission: (() -> Unit)? = null
+    private val floorPlanLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) {
+            runtimeViewModel.onFloorPlanImportCancelled()
+            return@registerForActivityResult
+        }
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runtimeViewModel.importFloorPlan(uri)
+    }
     private val motionPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
@@ -69,6 +83,10 @@ class MainActivity : ComponentActivity() {
                     onRealLiveRelocalizationRequested = runtimeViewModel::relocalizeWithNextWifi,
                     onRealExport = runtimeViewModel::exportRealData,
                     onMapSaved = runtimeViewModel::savePilotMap,
+                    onMapDeleted = runtimeViewModel::deleteSavedMap,
+                    onFloorPlanImportRequested = {
+                        floorPlanLauncher.launch(arrayOf("image/png", "image/jpeg"))
+                    },
                     onCheckpointCaptured = runtimeViewModel::captureCheckpoint,
                 ),
             )

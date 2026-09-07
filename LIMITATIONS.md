@@ -2,7 +2,7 @@
 
 TURN is a research instrument. It must expose uncertainty and failure rather than manufacture a smooth blue dot.
 
-See [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for unfinished implementation, including the fixed pilot map, QR UI, import/restore and multi-floor runtime. Recovery options described below are architecture capabilities; only fresh Wi-Fi recovery is currently connected in the physical screen.
+See [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for unfinished implementation, including multi-floor runtime, QR UI and backup restore. The current physical workflow supports one imported and calibrated active floor. Recovery options described below are architecture capabilities; only fresh Wi-Fi recovery is currently connected in the physical screen.
 
 ## Radio
 
@@ -26,6 +26,8 @@ See [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for unfinished implementa
 
 - A hand-measured plan has coordinate error, and that error contributes to reported positioning error.
 - Incorrect walls/walkable regions can force an otherwise plausible estimate to the wrong place.
+- A schematic drawing may not be uniformly scaled; validate image calibration against more than one physical distance.
+- Physical mode supports one active floor at a time; configured inter-floor transitions are not yet a complete field workflow.
 - Reference points are not independent test points.
 - Emulator replay proves code paths, not Wi-Fi/PDR accuracy.
 - A result from one building or phone does not establish general performance.

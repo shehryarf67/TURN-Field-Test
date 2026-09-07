@@ -60,15 +60,16 @@ fun VenuesScreen(state: TurnAppState, compact: Boolean) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             PageHeader("01 · Setup", "Physical pilot workspace",
-                "This build uses one fixed ground-floor workspace. Verify its metric geometry before surveying.", compact)
-            SectionCard("Computing Block Pilot", "VEN-CS-01 · Ground floor FL-G") {
-                LabelValue("Canvas", "42 × 28 metres · lower-left origin")
+                "Configure the active venue and floor, then verify its metric geometry before surveying.", compact)
+            SectionCard(state.venueName, "VEN-CS-01 · ${state.floorName} FL-G") {
+                LabelValue("Canvas", "%.2f × %.2f metres · lower-left origin".format(state.floorWidthMetres, state.floorHeightMetres))
+                LabelValue("Floor-plan image", if (state.floorPlanContentUri == null) "not imported" else "imported")
                 LabelValue("Reference points loaded", state.referencePoints.size.toString())
                 LabelValue("Wall segments loaded", state.draftWalls.size.toString())
                 Text(state.editorStatus)
                 Button(onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Open metric editor") }
             }
-            Text("Multiple venue/floor creation, image import and calibrated backgrounds are still pending. Demo workspace coverage and readiness figures are examples and do not describe physical data.")
+            Text("TURN currently operates one active physical floor at a time. Import, calibration and geometry are available in the metric editor; demo readiness figures never describe physical data.")
         }
         return
     }

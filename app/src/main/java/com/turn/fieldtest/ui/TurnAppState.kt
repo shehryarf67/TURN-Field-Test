@@ -19,6 +19,7 @@ import com.turn.fieldtest.ui.model.SensorReadingUi
 import com.turn.fieldtest.ui.model.TurnDemoData
 import com.turn.fieldtest.ui.model.TurnDestination
 import com.turn.fieldtest.ui.model.WifiAccessPointUi
+import kotlin.math.hypot
 
 @Stable
 class TurnAppState {
@@ -34,6 +35,17 @@ class TurnAppState {
     var labelsLayerVisible by mutableStateOf(true)
     var editorStatus by mutableStateOf("Metric geometry ready")
     var realMapReady by mutableStateOf(false)
+    var venueName by mutableStateOf("Computing Block Pilot")
+    var floorName by mutableStateOf("Ground floor")
+    var floorLevel by mutableIntStateOf(0)
+    var floorWidthMetres by mutableStateOf(42f)
+    var floorHeightMetres by mutableStateOf(28f)
+    var floorPlanContentUri by mutableStateOf<String?>(null)
+    var floorPlanMimeType by mutableStateOf<String?>(null)
+    var floorPlanPixelWidth by mutableStateOf<Int?>(null)
+    var floorPlanPixelHeight by mutableStateOf<Int?>(null)
+    var floorPlanMetresPerPixel by mutableStateOf<Double?>(null)
+    val calibrationPoints = mutableStateListOf<Offset>()
     val draftWalkablePolygon = mutableStateListOf(
         Offset(4f, 7f), Offset(37f, 7f), Offset(37f, 12f), Offset(17f, 12f),
         Offset(17f, 23f), Offset(9f, 23f), Offset(9f, 12f), Offset(4f, 12f)
@@ -157,6 +169,15 @@ class TurnAppState {
             return
         }
         when (editorTool) {
+            EditorTool.CALIBRATION -> {
+                if (calibrationPoints.size == 2) calibrationPoints.clear()
+                calibrationPoints.add(metricPoint)
+                editorStatus = if (calibrationPoints.size == 1) {
+                    "Calibration point A set · tap point B"
+                } else {
+                    "Points A–B selected · enter their measured distance and apply"
+                }
+            }
             EditorTool.WALKABLE -> {
                 draftWalkablePolygon.add(metricPoint)
                 editorStatus = "Walkable vertex ${draftWalkablePolygon.size} · ${formatPoint(metricPoint)}"
@@ -173,8 +194,9 @@ class TurnAppState {
                 }
             }
             EditorTool.REFERENCE_POINT -> {
-                val id = "RP-G-${java.util.UUID.randomUUID().toString().take(8)}"
-                referencePoints.add(MapPointUi(id, "Ground", metricPoint, id.removePrefix("RP-G-")))
+                val id = nextReferencePointId()
+                referencePoints.add(MapPointUi(id, floorName, metricPoint, id))
+                selectedSurveyReferencePointId = id
                 editorStatus = "$id placed at ${formatPoint(metricPoint)}"
             }
             EditorTool.QR_ANCHOR -> {
@@ -184,6 +206,170 @@ class TurnAppState {
             }
             else -> editorStatus = "${editorTool.label} placed at ${formatPoint(metricPoint)}"
         }
+    }
+
+    fun clearMapDraft() {
+        draftWalkablePolygon.clear()
+        draftWalls.clear()
+        referencePoints.clear()
+        qrAnchors.clear()
+        calibrationPoints.clear()
+        pendingWallStart = null
+        editorTool = EditorTool.SELECT
+        selectedSurveyReferencePointId = ""
+        editorStatus = "Blank map ready · import an image or draw the walkable outline"
+    }
+
+    fun loadDemoMap() {
+        venueName = "Computing Block Pilot"
+        floorName = "Ground floor"
+        floorLevel = 0
+        floorWidthMetres = 42f
+        floorHeightMetres = 28f
+        floorPlanContentUri = null
+        floorPlanMimeType = null
+        floorPlanPixelWidth = null
+        floorPlanPixelHeight = null
+        floorPlanMetresPerPixel = null
+        draftWalkablePolygon.clear()
+        draftWalkablePolygon.addAll(listOf(
+            Offset(4f, 7f), Offset(37f, 7f), Offset(37f, 12f), Offset(17f, 12f),
+            Offset(17f, 23f), Offset(9f, 23f), Offset(9f, 12f), Offset(4f, 12f),
+        ))
+        draftWalls.clear()
+        draftWalls.addAll(listOf(
+            Offset(4f, 7f) to Offset(37f, 7f),
+            Offset(37f, 7f) to Offset(37f, 12f),
+            Offset(17f, 12f) to Offset(17f, 23f),
+        ))
+        referencePoints.clear()
+        referencePoints.addAll(listOf(
+            MapPointUi("RP-G-01", "Ground", Offset(6f, 9.5f), "RP 01"),
+            MapPointUi("RP-G-04", "Ground", Offset(13f, 9.5f), "RP 04"),
+            MapPointUi("RP-G-07", "Ground", Offset(14f, 18f), "RP 07"),
+            MapPointUi("RP-G-10", "Ground", Offset(25f, 9.5f), "RP 10"),
+        ))
+        qrAnchors.clear()
+        qrAnchors.addAll(listOf(
+            MapPointUi("QR-G-ENTRANCE", "Ground", Offset(5f, 9.5f), "Entrance"),
+            MapPointUi("QR-G-STAIRS", "Ground", Offset(16f, 11f), "Stairs"),
+        ))
+        selectedSurveyReferencePointId = "RP-G-07"
+        editorTool = EditorTool.SELECT
+        editorStatus = "Metric demo geometry ready"
+    }
+
+    fun undoCurrentTool() {
+        when (editorTool) {
+            EditorTool.CALIBRATION -> if (calibrationPoints.isNotEmpty()) calibrationPoints.removeAt(calibrationPoints.lastIndex)
+            EditorTool.WALKABLE -> if (draftWalkablePolygon.isNotEmpty()) draftWalkablePolygon.removeAt(draftWalkablePolygon.lastIndex)
+            EditorTool.WALL -> if (pendingWallStart != null) pendingWallStart = null else if (draftWalls.isNotEmpty()) draftWalls.removeAt(draftWalls.lastIndex)
+            EditorTool.REFERENCE_POINT -> if (referencePoints.isNotEmpty()) referencePoints.removeAt(referencePoints.lastIndex)
+            EditorTool.QR_ANCHOR -> if (qrAnchors.isNotEmpty()) qrAnchors.removeAt(qrAnchors.lastIndex)
+            else -> Unit
+        }
+        editorStatus = "Last ${editorTool.label.lowercase()} action undone"
+    }
+
+    fun finishWalkablePolygon() {
+        editorStatus = if (draftWalkablePolygon.size >= 3) {
+            editorTool = EditorTool.SELECT
+            "Walkable polygon closed with ${draftWalkablePolygon.size} vertices"
+        } else {
+            "Add at least three walkable vertices"
+        }
+    }
+
+    fun addReferencePointAt(idInput: String, x: Float, y: Float) {
+        val clean = idInput.trim().uppercase().replace(Regex("[^A-Z0-9_-]"), "-")
+        if (clean.isBlank()) {
+            editorStatus = "Enter a reference-point ID"
+            return
+        }
+        if (x !in 0f..floorWidthMetres || y !in 0f..floorHeightMetres) {
+            editorStatus = "Reference point must be inside the floor dimensions"
+            return
+        }
+        if (referencePoints.any { it.id == clean }) {
+            editorStatus = "$clean already exists"
+            return
+        }
+        referencePoints.add(MapPointUi(clean, floorName, Offset(x, y), clean))
+        selectedSurveyReferencePointId = clean
+        editorStatus = "$clean added at ${formatPoint(Offset(x, y))}"
+    }
+
+    fun removeReferencePoint(id: String) {
+        referencePoints.removeAll { it.id == id }
+        if (selectedSurveyReferencePointId == id) {
+            selectedSurveyReferencePointId = referencePoints.firstOrNull()?.id.orEmpty()
+        }
+        editorStatus = "$id removed from the draft · Save to persist"
+    }
+
+    fun applyCalibration(measuredDistanceMetres: Double): Boolean {
+        if (calibrationPoints.size != 2 || measuredDistanceMetres <= 0.0 || !measuredDistanceMetres.isFinite()) {
+            editorStatus = "Select points A and B, then enter a positive measured distance"
+            return false
+        }
+        val a = calibrationPoints[0]
+        val b = calibrationPoints[1]
+        val draftDistance = hypot((b.x - a.x).toDouble(), (b.y - a.y).toDouble())
+        if (draftDistance <= 0.0) {
+            editorStatus = "Calibration points must be different"
+            return false
+        }
+        val scale = (measuredDistanceMetres / draftDistance).toFloat()
+        resizeFloor(floorWidthMetres * scale, floorHeightMetres * scale)
+        floorPlanMetresPerPixel = floorPlanPixelWidth?.takeIf { it > 0 }?.let { floorWidthMetres.toDouble() / it }
+        editorTool = EditorTool.SELECT
+        editorStatus = "Calibrated · floor is %.2f m × %.2f m".format(floorWidthMetres, floorHeightMetres)
+        return true
+    }
+
+    fun resizeFloor(width: Float, height: Float): Boolean {
+        if (!width.isFinite() || !height.isFinite() || width <= 0f || height <= 0f || width > 1000f || height > 1000f) {
+            editorStatus = "Floor dimensions must be between 0 and 1000 metres"
+            return false
+        }
+        val xScale = width / floorWidthMetres
+        val yScale = height / floorHeightMetres
+        fun scaled(point: Offset) = Offset(point.x * xScale, point.y * yScale)
+        val polygon = draftWalkablePolygon.map(::scaled)
+        val walls = draftWalls.map { scaled(it.first) to scaled(it.second) }
+        val points = referencePoints.map { it.copy(metres = scaled(it.metres), floor = floorName) }
+        val anchors = qrAnchors.map { it.copy(metres = scaled(it.metres), floor = floorName) }
+        val calibration = calibrationPoints.map(::scaled)
+        draftWalkablePolygon.clear(); draftWalkablePolygon.addAll(polygon)
+        draftWalls.clear(); draftWalls.addAll(walls)
+        referencePoints.clear(); referencePoints.addAll(points)
+        qrAnchors.clear(); qrAnchors.addAll(anchors)
+        calibrationPoints.clear(); calibrationPoints.addAll(calibration)
+        pendingWallStart = pendingWallStart?.let(::scaled)
+        floorWidthMetres = width
+        floorHeightMetres = height
+        floorPlanMetresPerPixel = floorPlanPixelWidth?.takeIf { it > 0 }?.let { width.toDouble() / it }
+        return true
+    }
+
+    fun removeFloorPlanImage() {
+        floorPlanContentUri = null
+        floorPlanMimeType = null
+        floorPlanPixelWidth = null
+        floorPlanPixelHeight = null
+        floorPlanMetresPerPixel = null
+        calibrationPoints.clear()
+        editorStatus = "Background image removed from the draft"
+    }
+
+    private fun nextReferencePointId(): String {
+        var number = referencePoints.size + 1
+        var candidate: String
+        do {
+            candidate = "RP-${number.toString().padStart(2, '0')}"
+            number += 1
+        } while (referencePoints.any { it.id == candidate })
+        return candidate
     }
 
     fun toggleSurvey() {

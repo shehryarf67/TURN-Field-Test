@@ -68,6 +68,8 @@ fun SurveyScreen(
     val excluded = remember { mutableStateMapOf<String, Boolean>() }
     val simulated = state.mode == DataMode.DEMO
     val aggregates = if (simulated) TurnDemoData.fingerprintAggregates else state.realSurveyAggregates
+    val selectedPoint = state.referencePoints.firstOrNull { it.id == state.selectedSurveyReferencePointId }
+        ?: state.referencePoints.firstOrNull()
 
     if (simulated && state.surveyRunning) {
         LaunchedEffect(state.surveyRunning, state.surveyAcceptedSnapshots) {
@@ -90,15 +92,21 @@ fun SurveyScreen(
             description = "Collect bounded, distinct scan snapshots at a known point. Raw observations remain traceable to their snapshot.",
             compact = compact,
             action = {
-                Button(onClick = {
+                Button(
+                    enabled = simulated || state.surveyRunning || (state.realMapReady && selectedPoint != null),
+                    onClick = {
                     if (simulated) {
                         state.toggleSurvey()
                     } else if (state.surveyRunning) {
                         onFinishRealSurvey()
                     } else {
+                        if (selectedPoint == null) {
+                            state.surveyRuntimeStatus = "Add and save at least one survey point in Floor-plan editor"
+                            return@Button
+                        }
                         onStartRealSurvey(
                             SurveyCaptureMetadata(
-                                referencePointId = state.selectedSurveyReferencePointId,
+                                referencePointId = selectedPoint.id,
                                 orientationLabel = orientation,
                                 crowdConditionLabel = crowd,
                                 researcherNotes = notes,
@@ -120,15 +128,13 @@ fun SurveyScreen(
             primary = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SectionCard("Survey context", "Required before collection") {
-                        SelectorRow("Venue", "Computing Block Pilot", "VEN-CS-01")
-                        SelectorRow("Floor", "Ground floor", "FL-G")
-                        val selectedPoint = state.referencePoints.firstOrNull {
-                            it.id == state.selectedSurveyReferencePointId
-                        } ?: state.referencePoints.first()
+                        SelectorRow("Venue", state.venueName, "VEN-CS-01")
+                        SelectorRow("Floor", state.floorName, "FL-G")
                         SelectorRow(
                             "Reference point",
-                            selectedPoint.id,
-                            "x %.1f m · y %.1f m".format(selectedPoint.metres.x, selectedPoint.metres.y),
+                            selectedPoint?.id ?: "None saved",
+                            selectedPoint?.let { "x %.1f m · y %.1f m".format(it.metres.x, it.metres.y) }
+                                ?: "Add points in Floor-plan editor",
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -152,6 +158,19 @@ fun SurveyScreen(
                     }
 
                     SectionCard("Conditions", "Optional labels improve stratified analysis") {
+                        Text("Fresh scan target", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(4, 8, 12).forEach { target ->
+                                FilterChip(
+                                    selected = state.surveyTargetSnapshots == target,
+                                    onClick = { state.surveyTargetSnapshots = target },
+                                    enabled = !state.surveyRunning,
+                                    label = { Text(target.toString()) },
+                                )
+                            }
+                        }
+                        Text("Use 4 for a quick trial and 8–12 for the actual fingerprint dataset.", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(9.dp))
                         Text("Orientation", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         ChoiceChips(listOf("North-facing", "East-facing", "South-facing", "West-facing"), orientation) { orientation = it }
                         Spacer(Modifier.height(9.dp))
@@ -212,9 +231,9 @@ fun SurveyScreen(
                     }
 
                     SectionCard("Save readiness", "Wi-Fi fingerprints do not require BLE") {
-                        ValidationLine("Known point selected", true)
-                        ValidationLine("Point inside walkable region", true)
-                        ValidationLine("At least 8 fresh snapshots", state.surveyAcceptedSnapshots >= 8)
+                        ValidationLine("Known point selected", selectedPoint != null)
+                        ValidationLine("Saved map loaded", state.realMapReady)
+                        ValidationLine("Fresh target reached", state.surveyAcceptedSnapshots >= state.surveyTargetSnapshots)
                         ValidationLine("Raw observations retained", true)
                         Spacer(Modifier.height(8.dp))
                         Button(
@@ -236,7 +255,7 @@ fun SurveyScreen(
         )
 
         SectionCard(
-            title = "Live aggregation at RP-G-07",
+            title = "Live aggregation at ${selectedPoint?.id ?: "no point"}",
             subtitle = "Median RSSI is the default matching value; every raw reading remains stored",
             trailing = {
                 StatusPill(

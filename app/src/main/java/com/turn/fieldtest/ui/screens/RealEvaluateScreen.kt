@@ -29,14 +29,14 @@ fun RealEvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (Checkp
     var code by rememberSaveable { mutableStateOf("") }
     var x by rememberSaveable { mutableStateOf("") }
     var y by rememberSaveable { mutableStateOf("") }
-    val parsedX = x.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..42.0 }
-    val parsedY = y.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..28.0 }
+    val parsedX = x.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..state.floorWidthMetres.toDouble() }
+    val parsedY = y.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..state.floorHeightMetres.toDouble() }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         PageHeader("06 · Independent validation", "Evaluate positioning",
             "Stand at a physically marked checkpoint while Live locate is running. Enter its measured coordinates.", compact)
         Text(state.realEvaluationStatus)
-        SectionCard("Independent checkpoint", "Ground floor · FL-G · fixed pilot coordinates") {
+        SectionCard("Independent checkpoint", "${state.floorName} · FL-G · metric coordinates") {
             OutlinedTextField(code, { code = it }, label = { Text("Checkpoint code") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(x, { x = it }, label = { Text("Measured x (metres)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(y, { y = it }, label = { Text("Measured y (metres)") }, modifier = Modifier.fillMaxWidth())

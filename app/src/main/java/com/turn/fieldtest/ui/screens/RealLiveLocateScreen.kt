@@ -55,9 +55,6 @@ import com.turn.fieldtest.ui.theme.TurnMint
 import com.turn.fieldtest.ui.theme.TurnRed
 import kotlin.math.roundToInt
 
-private const val RealMapWidth = 42f
-private const val RealMapHeight = 28f
-
 /**
  * Real-mode surface. Every value here comes from WifiManager, Android sensors, Room, or the
  * deterministic positioning core; TurnDemoData is intentionally not referenced.
@@ -100,7 +97,7 @@ internal fun RealLiveLocateScreen(
         ) {
             StatusPill(if (state.realLiveInitialized) "absolute fix acquired" else "awaiting absolute fix", if (state.realLiveInitialized) EventSeverity.GOOD else EventSeverity.WARNING)
             StatusPill(state.lastCorrectionType, EventSeverity.INFO)
-            StatusPill(state.realLiveFloorId ?: "floor uncertain", if (state.realLiveFloorId == null) EventSeverity.WARNING else EventSeverity.GOOD)
+            StatusPill(if (state.realLiveFloorId == null) "floor uncertain" else state.floorName, if (state.realLiveFloorId == null) EventSeverity.WARNING else EventSeverity.GOOD)
             StatusPill("NO SIMULATED FALLBACK", EventSeverity.GOOD)
         }
 
@@ -112,7 +109,7 @@ internal fun RealLiveLocateScreen(
             secondaryWeight = 1f,
             primary = {
                 SectionCard(
-                    title = "${state.realLiveFloorId ?: "Unresolved floor"} · physical trace",
+                    title = "${if (state.realLiveFloorId == null) "Unresolved floor" else state.floorName} · physical trace",
                     subtitle = "Metric coordinates · lower-left origin · +x initial direction",
                     trailing = {
                         StatusPill(
@@ -239,52 +236,58 @@ private fun RealPositionCanvas(state: TurnAppState, modifier: Modifier = Modifie
     val surface = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
     val outline = MaterialTheme.colorScheme.outlineVariant
     val wallColor = MaterialTheme.colorScheme.onSurface
-    Canvas(
-        modifier = modifier
-            .aspectRatio(RealMapWidth / RealMapHeight)
-            .semantics { contentDescription = "Real physical positioning map in metres" },
-    ) {
-        drawRect(surface)
-        for (x in 0..42 step 7) drawLine(outline, metric(Offset(x.toFloat(), 0f)), metric(Offset(x.toFloat(), RealMapHeight)), 1f)
-        for (y in 0..28 step 7) drawLine(outline, metric(Offset(0f, y.toFloat())), metric(Offset(RealMapWidth, y.toFloat())), 1f)
+    val floorWidth = state.floorWidthMetres.coerceAtLeast(0.1f)
+    val floorHeight = state.floorHeightMetres.coerceAtLeast(0.1f)
+    Box(modifier.aspectRatio(floorWidth / floorHeight)) {
+        state.floorPlanContentUri?.let { FloorPlanImage(it, Modifier.matchParentSize(), alpha = 0.70f) }
+        Canvas(
+            modifier = Modifier.matchParentSize()
+                .semantics { contentDescription = "Real physical positioning map in metres" },
+        ) {
+        drawRect(if (state.floorPlanContentUri == null) surface else surface.copy(alpha = 0.08f))
+        val xStep = (floorWidth / 6f).roundToInt().coerceAtLeast(1)
+        val yStep = (floorHeight / 4f).roundToInt().coerceAtLeast(1)
+        for (x in 0..floorWidth.roundToInt() step xStep) drawLine(outline, metric(Offset(x.toFloat(), 0f), floorWidth, floorHeight), metric(Offset(x.toFloat(), floorHeight), floorWidth, floorHeight), 1f)
+        for (y in 0..floorHeight.roundToInt() step yStep) drawLine(outline, metric(Offset(0f, y.toFloat()), floorWidth, floorHeight), metric(Offset(floorWidth, y.toFloat()), floorWidth, floorHeight), 1f)
 
         val polygon = state.draftWalkablePolygon
         if (polygon.size >= 3) {
             val path = Path().apply {
-                moveTo(metric(polygon.first()).x, metric(polygon.first()).y)
-                polygon.drop(1).forEach { point -> lineTo(metric(point).x, metric(point).y) }
+                moveTo(metric(polygon.first(), floorWidth, floorHeight).x, metric(polygon.first(), floorWidth, floorHeight).y)
+                polygon.drop(1).forEach { point -> lineTo(metric(point, floorWidth, floorHeight).x, metric(point, floorWidth, floorHeight).y) }
                 close()
             }
             drawPath(path, TurnMint.copy(alpha = 0.12f))
             drawPath(path, TurnMint.copy(alpha = 0.65f), style = Stroke(width = 2f))
         }
         state.draftWalls.forEach { (start, end) ->
-            drawLine(wallColor, metric(start), metric(end), strokeWidth = 4f, cap = StrokeCap.Round)
+            drawLine(wallColor, metric(start, floorWidth, floorHeight), metric(end, floorWidth, floorHeight), strokeWidth = 4f, cap = StrokeCap.Round)
         }
-        if (state.showRawPdr) drawTrail(state.realRawPdrTrail, TurnAmber, 3f)
-        drawTrail(state.realFusedTrail, TurnBlue, 5f)
-        if (state.showWifiFixes) state.realWifiFixes.forEach { drawCircle(TurnCyan, 7f, metric(it), style = Stroke(3f)) }
-        if (state.showParticles) state.realParticleCloud.forEach { drawCircle(TurnBlue.copy(alpha = 0.28f), 2.5f, metric(it)) }
+        if (state.showRawPdr) drawTrail(state.realRawPdrTrail, TurnAmber, 3f, floorWidth, floorHeight)
+        drawTrail(state.realFusedTrail, TurnBlue, 5f, floorWidth, floorHeight)
+        if (state.showWifiFixes) state.realWifiFixes.forEach { drawCircle(TurnCyan, 7f, metric(it, floorWidth, floorHeight), style = Stroke(3f)) }
+        if (state.showParticles) state.realParticleCloud.forEach { drawCircle(TurnBlue.copy(alpha = 0.28f), 2.5f, metric(it, floorWidth, floorHeight)) }
         state.realLivePosition?.let { position ->
-            val centre = metric(position)
+            val centre = metric(position, floorWidth, floorHeight)
             state.realLiveUncertaintyMetres?.takeIf { state.showConfidence }?.let { metres ->
-                drawCircle(TurnBlue.copy(alpha = 0.12f), metres.toFloat() * size.width / RealMapWidth, centre)
-                drawCircle(TurnBlue.copy(alpha = 0.55f), metres.toFloat() * size.width / RealMapWidth, centre, style = Stroke(2f))
+                drawCircle(TurnBlue.copy(alpha = 0.12f), metres.toFloat() * size.width / floorWidth, centre)
+                drawCircle(TurnBlue.copy(alpha = 0.55f), metres.toFloat() * size.width / floorWidth, centre, style = Stroke(2f))
             }
             drawCircle(Color.White, 10f, centre)
             drawCircle(TurnBlue, 7f, centre)
         }
+        }
     }
 }
 
-private fun DrawScope.metric(point: Offset) = Offset(
-    x = point.x / RealMapWidth * size.width,
-    y = (1f - point.y / RealMapHeight) * size.height,
+private fun DrawScope.metric(point: Offset, floorWidth: Float, floorHeight: Float) = Offset(
+    x = point.x / floorWidth * size.width,
+    y = (1f - point.y / floorHeight) * size.height,
 )
 
-private fun DrawScope.drawTrail(points: List<Offset>, color: Color, width: Float) {
+private fun DrawScope.drawTrail(points: List<Offset>, color: Color, width: Float, floorWidth: Float, floorHeight: Float) {
     points.zipWithNext().forEach { (from, to) ->
-        drawLine(color, metric(from), metric(to), strokeWidth = width, cap = StrokeCap.Round)
+        drawLine(color, metric(from, floorWidth, floorHeight), metric(to, floorWidth, floorHeight), strokeWidth = width, cap = StrokeCap.Round)
     }
 }
 

@@ -1,6 +1,7 @@
 package com.turn.fieldtest.ui
 
 import android.app.Application
+import android.graphics.BitmapFactory
 import android.hardware.SensorManager
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
@@ -40,6 +41,7 @@ import com.turn.fieldtest.ui.screens.CheckpointInput
 import com.turn.fieldtest.BuildConfig
 import com.turn.fieldtest.TurnApplication
 import com.turn.fieldtest.data.local.FloorEntity
+import com.turn.fieldtest.data.local.FloorPlanAssetEntity
 import com.turn.fieldtest.data.local.CorrectionEventEntity
 import com.turn.fieldtest.data.local.PdrEventEntity
 import com.turn.fieldtest.data.local.PositionEstimateEntity
@@ -134,8 +136,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val session = activePositioningSession ?: return
         if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning || appState.realEvaluationBusy) return
         if (input.code.isBlank() || !input.x.isFinite() || !input.y.isFinite() ||
-            input.x !in 0.0..42.0 || input.y !in 0.0..28.0) {
-            appState.realEvaluationStatus = "Checkpoint code and finite pilot coordinates are required"
+            input.x !in 0.0..appState.floorWidthMetres.toDouble() ||
+            input.y !in 0.0..appState.floorHeightMetres.toDouble()) {
+            appState.realEvaluationStatus = "Checkpoint code and coordinates inside the active floor are required"
             return
         }
         // Freeze estimates at the button press, before any suspend/database work. Truth is never
@@ -295,35 +298,70 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.realMapReady = false
             viewModelScope.launch {
                 try {
+                    val venue = repositories.venues.venue(PILOT_VENUE_ID)
+                    val floor = repositories.floorPlans.floor(PILOT_FLOOR_ID)
+                    val asset = repositories.floorPlans.observeAsset(PILOT_FLOOR_ID).first()
                     val points = repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first()
                     val regions = repositories.floorPlans.observeWalkableRegions(PILOT_FLOOR_ID).first()
                     val walls = repositories.floorPlans.observeWalls(PILOT_FLOOR_ID).first()
+                    val anchors = repositories.floorPlans.observeQrAnchors(PILOT_FLOOR_ID).first()
                     val restoredPolygon = regions.firstOrNull { it.enabled }?.let { region ->
                         Json.parseToJsonElement(region.polygonJson).jsonArray.map { vertex ->
                             Offset(vertex.jsonObject.getValue("x").jsonPrimitive.double.toFloat(),
                                 vertex.jsonObject.getValue("y").jsonPrimitive.double.toFloat())
                         }
                     }
+                    appState.draftWalkablePolygon.clear()
+                    appState.draftWalls.clear()
+                    appState.referencePoints.clear()
+                    appState.qrAnchors.clear()
+                    appState.calibrationPoints.clear()
+                    appState.pendingWallStart = null
+                    appState.venueName = venue?.name ?: "New venue"
+                    appState.floorName = floor?.name ?: "New floor"
+                    appState.floorLevel = floor?.levelNumber ?: 0
+                    appState.floorWidthMetres = floor?.widthMetres?.toFloat() ?: 42f
+                    appState.floorHeightMetres = floor?.heightMetres?.toFloat() ?: 28f
+                    appState.floorPlanContentUri = asset?.contentUri
+                    appState.floorPlanMimeType = asset?.mimeType
+                    appState.floorPlanPixelWidth = asset?.pixelWidth
+                    appState.floorPlanPixelHeight = asset?.pixelHeight
+                    appState.floorPlanMetresPerPixel = asset?.metresPerPixel
+                    if (asset != null && floor != null && asset.pixelWidth != null && asset.pixelHeight != null) {
+                        fun restoredCalibrationPoint(imageX: Double?, imageY: Double?): Offset? {
+                            if (imageX == null || imageY == null) return null
+                            return Offset(
+                                (imageX / asset.pixelWidth * floor.widthMetres).toFloat(),
+                                ((1.0 - imageY / asset.pixelHeight) * floor.heightMetres).toFloat(),
+                            )
+                        }
+                        listOfNotNull(
+                            restoredCalibrationPoint(asset.calibrationImageX1, asset.calibrationImageY1),
+                            restoredCalibrationPoint(asset.calibrationImageX2, asset.calibrationImageY2),
+                        ).let(appState.calibrationPoints::addAll)
+                    }
                     if (points.isNotEmpty()) {
-                        appState.referencePoints.clear()
                         appState.referencePoints.addAll(points.map {
-                            MapPointUi(it.id, "Ground", Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.name)
+                            MapPointUi(it.id, appState.floorName, Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.name)
                         })
                         if (points.none { it.id == appState.selectedSurveyReferencePointId }) {
                             appState.selectedSurveyReferencePointId = points.first().id
                         }
                     }
-                    if (restoredPolygon != null) {
-                        appState.draftWalkablePolygon.clear()
-                        appState.draftWalkablePolygon.addAll(restoredPolygon)
-                        appState.draftWalls.clear()
-                        appState.draftWalls.addAll(walls.filter { it.enabled }.map {
+                    restoredPolygon?.let(appState.draftWalkablePolygon::addAll)
+                    appState.draftWalls.addAll(walls.filter { it.enabled }.map {
                             Offset(it.startXMetres.toFloat(), it.startYMetres.toFloat()) to
                                 Offset(it.endXMetres.toFloat(), it.endYMetres.toFloat())
                         })
-                    }
+                    appState.qrAnchors.addAll(anchors.filter { it.enabled }.map {
+                        MapPointUi(it.anchorId, appState.floorName, Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.anchorId)
+                    })
                     appState.realMapReady = true
-                    appState.editorStatus = "Physical pilot map loaded; Save writes metric geometry to Room"
+                    appState.editorStatus = if (restoredPolygon == null) {
+                        "Blank physical map ready · import a floor-plan image to begin"
+                    } else {
+                        "Saved physical map loaded"
+                    }
                 } catch (error: Exception) {
                     appState.editorStatus = "Could not load physical map: ${error.message}"
                 }
@@ -332,6 +370,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.surveyCachedIgnored = 0
             appState.surveyRawObservationCount = 0
             appState.surveyDistinctBssidCount = 0
+            appState.surveyTargetSnapshots = 8
             appState.realSurveyAggregates = emptyList()
             appState.surveySessionLabel = "No real-device session"
             appState.surveyRuntimeStatus = "Ready to create a bounded local Room session"
@@ -343,6 +382,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             wifiScanner.stop()
             sensorSource.stop()
             appState.surveyRunning = false
+            appState.loadDemoMap()
             appState.surveyAcceptedSnapshots = 8
             appState.surveyCachedIgnored = 2
             appState.wifiPermissionStatus = "Not needed in DEMO mode"
@@ -450,7 +490,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             runCatching {
                 val now = System.currentTimeMillis()
-                ensurePilotContext(now)
+                requireSavedMapContext(metadata.referencePointId)
                 val selectedPoint = repositories.floorPlans.referencePoint(metadata.referencePointId)
                     ?: error("Unknown survey reference point ${metadata.referencePointId}")
                 SurveySessionEntity(
@@ -550,7 +590,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             runCatching {
                 val now = System.currentTimeMillis()
-                ensurePilotContext(now)
+                requireSavedMapContext()
                 val sourceState = sensorSource.state.value
                 val sensorSession = SensorSessionEntity(
                     id = "SNS-${UUID.randomUUID()}",
@@ -660,10 +700,18 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         surveyScanJob?.cancel()
         surveyScanJob = viewModelScope.launch {
             while (isActive && foreground && appState.surveyRunning && activeSurvey != null) {
-                requestRealScan("Survey")
                 val now = System.currentTimeMillis()
                 val next = wifiScanner.state.value.nextPermittedRequestAtEpochMillis
-                val waitMillis = if (next == null) 30_000L else (next - now).coerceAtLeast(1_000L)
+                if (next != null && next > now) {
+                    val seconds = ((next - now + 999L) / 1_000L).coerceAtLeast(1L)
+                    appState.surveyRuntimeStatus = "Waiting ${seconds}s for Android's next permitted Wi-Fi request; collection remains active"
+                    delay(next - now + 250L)
+                    continue
+                }
+                requestRealScan("Survey")
+                val requestedAt = System.currentTimeMillis()
+                val nextAfterRequest = wifiScanner.state.value.nextPermittedRequestAtEpochMillis
+                val waitMillis = if (nextAfterRequest == null) 30_000L else (nextAfterRequest - requestedAt).coerceAtLeast(1_000L)
                 delay(waitMillis + 250L)
             }
         }
@@ -790,13 +838,100 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         viewModelScope.launch {
-            runCatching { ensurePilotContext(System.currentTimeMillis()) }
+            runCatching { persistActiveMap(System.currentTimeMillis()) }
                 .onSuccess { appState.editorStatus = "Metric polygon, walls and reference points saved to Room" }
                 .onFailure { appState.editorStatus = "Map save rejected: ${it.message}" }
         }
     }
 
-    private suspend fun ensurePilotContext(now: Long) = app.database.withTransaction {
+    fun deleteSavedMap() {
+        if (appState.mode != DataMode.REAL_DEVICE || activeSurvey != null || activePositioningSession != null) {
+            appState.editorStatus = "Stop physical sessions before deleting the saved map"
+            return
+        }
+        appState.editorStatus = "Deleting saved map and linked fingerprints…"
+        viewModelScope.launch {
+            runCatching {
+                app.database.withTransaction {
+                    repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first()
+                        .forEach { repositories.floorPlans.delete(it) }
+                    repositories.floorPlans.observeQrAnchors(PILOT_FLOOR_ID).first()
+                        .forEach { repositories.floorPlans.delete(it) }
+                    repositories.floorPlans.observeWalls(PILOT_FLOOR_ID).first()
+                        .forEach { repositories.floorPlans.delete(it) }
+                    repositories.floorPlans.observeWalkableRegions(PILOT_FLOOR_ID).first()
+                        .forEach { repositories.floorPlans.delete(it) }
+                    repositories.floorPlans.deleteAsset(PILOT_FLOOR_ID)
+                }
+            }.onSuccess {
+                appState.clearMapDraft()
+                appState.removeFloorPlanImage()
+                appState.editorStatus = "Saved map and linked fingerprints deleted from this device"
+                appState.surveyRuntimeStatus = "Create and save a map before collecting"
+            }.onFailure { error ->
+                appState.editorStatus = "Delete failed: ${error.message ?: error.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun importFloorPlan(uri: Uri) {
+        if (appState.mode != DataMode.REAL_DEVICE) {
+            appState.editorStatus = "Switch to REAL DEVICE mode before importing a physical map"
+            return
+        }
+        appState.editorStatus = "Reading floor-plan image…"
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val resolver = getApplication<Application>().contentResolver
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+                        ?: error("The selected image could not be opened")
+                    require(options.outWidth > 0 && options.outHeight > 0) { "The selected file is not a readable PNG or JPEG" }
+                    ImportedFloorPlan(
+                        uri = uri.toString(),
+                        mimeType = resolver.getType(uri) ?: "image/*",
+                        pixelWidth = options.outWidth,
+                        pixelHeight = options.outHeight,
+                    )
+                }
+            }.onSuccess { image ->
+                appState.floorPlanContentUri = image.uri
+                appState.floorPlanMimeType = image.mimeType
+                appState.floorPlanPixelWidth = image.pixelWidth
+                appState.floorPlanPixelHeight = image.pixelHeight
+                appState.floorPlanMetresPerPixel = null
+                appState.calibrationPoints.clear()
+                if (appState.draftWalkablePolygon.isEmpty()) {
+                    val height = appState.floorWidthMetres * image.pixelHeight.toFloat() / image.pixelWidth.toFloat()
+                    appState.resizeFloor(appState.floorWidthMetres, height)
+                }
+                appState.editorTool = com.turn.fieldtest.ui.model.EditorTool.CALIBRATION
+                appState.editorStatus = "Image imported · tap scale point A, then point B"
+            }.onFailure { error ->
+                appState.editorStatus = "Import failed: ${error.message ?: error.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun onFloorPlanImportCancelled() {
+        appState.editorStatus = "Image selection cancelled; current map unchanged"
+    }
+
+    private suspend fun requireSavedMapContext(referencePointId: String? = null) {
+        require(repositories.venues.venue(PILOT_VENUE_ID) != null) { "Save the floor map before collecting" }
+        require(repositories.floorPlans.floor(PILOT_FLOOR_ID) != null) { "Save the floor dimensions before collecting" }
+        require(repositories.floorPlans.observeWalkableRegions(PILOT_FLOOR_ID).first().any { it.enabled }) {
+            "Draw and save a walkable polygon before collecting"
+        }
+        if (referencePointId != null) {
+            require(repositories.floorPlans.referencePoint(referencePointId) != null) {
+                "Select a saved reference point before collecting"
+            }
+        }
+    }
+
+    private suspend fun persistActiveMap(now: Long) = app.database.withTransaction {
         val polygon = MetricPolygon(appState.draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) })
         com.turn.fieldtest.core.validateSimpleWalkablePolygon(polygon)
         require(appState.referencePoints.map { it.id }.distinct().size == appState.referencePoints.size) {
@@ -807,36 +942,69 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 "${point.id} is outside walkable space"
             }
         }
-        if (repositories.venues.venue(PILOT_VENUE_ID) == null) {
-            repositories.venues.save(
-                VenueEntity(
-                    id = PILOT_VENUE_ID,
-                    name = "Computing Block Pilot",
-                    notes = "Local TURN pilot context; verify dimensions and coordinates before field collection.",
-                    createdAtEpochMillis = now,
-                    updatedAtEpochMillis = now,
-                ),
-            )
+        require(appState.venueName.isNotBlank()) { "Enter a venue name" }
+        require(appState.floorName.isNotBlank()) { "Enter a floor name" }
+        require(appState.floorWidthMetres > 0f && appState.floorHeightMetres > 0f) { "Enter valid floor dimensions" }
+        val previousVenue = repositories.venues.venue(PILOT_VENUE_ID)
+        repositories.venues.save(VenueEntity(
+            id = PILOT_VENUE_ID,
+            name = appState.venueName.trim(),
+            notes = "Local TURN field-test venue.",
+            createdAtEpochMillis = previousVenue?.createdAtEpochMillis ?: now,
+            updatedAtEpochMillis = now,
+        ))
+        val previousFloor = repositories.floorPlans.floor(PILOT_FLOOR_ID)
+        repositories.floorPlans.save(FloorEntity(
+            id = PILOT_FLOOR_ID,
+            venueId = PILOT_VENUE_ID,
+            name = appState.floorName.trim(),
+            levelNumber = appState.floorLevel,
+            widthMetres = appState.floorWidthMetres.toDouble(),
+            heightMetres = appState.floorHeightMetres.toDouble(),
+            createdAtEpochMillis = previousFloor?.createdAtEpochMillis ?: now,
+            updatedAtEpochMillis = now,
+        ))
+        val imageUri = appState.floorPlanContentUri
+        if (imageUri == null) {
+            repositories.floorPlans.deleteAsset(PILOT_FLOOR_ID)
+        } else {
+            val widthPixels = appState.floorPlanPixelWidth
+            val heightPixels = appState.floorPlanPixelHeight
+            val a = appState.calibrationPoints.getOrNull(0)
+            val b = appState.calibrationPoints.getOrNull(1)
+            repositories.floorPlans.saveAsset(FloorPlanAssetEntity(
+                id = "ASSET-$PILOT_FLOOR_ID",
+                floorId = PILOT_FLOOR_ID,
+                contentUri = imageUri,
+                mimeType = appState.floorPlanMimeType ?: "image/*",
+                pixelWidth = widthPixels,
+                pixelHeight = heightPixels,
+                calibrationImageX1 = a?.let { widthPixels?.times(it.x / appState.floorWidthMetres)?.toDouble() },
+                calibrationImageY1 = a?.let { heightPixels?.times(1f - it.y / appState.floorHeightMetres)?.toDouble() },
+                calibrationImageX2 = b?.let { widthPixels?.times(it.x / appState.floorWidthMetres)?.toDouble() },
+                calibrationImageY2 = b?.let { heightPixels?.times(1f - it.y / appState.floorHeightMetres)?.toDouble() },
+                calibrationDistanceMetres = if (a != null && b != null) MetricPoint(a.x.toDouble(), a.y.toDouble()).distanceTo(MetricPoint(b.x.toDouble(), b.y.toDouble())) else null,
+                metresPerPixel = appState.floorPlanMetresPerPixel,
+                importedAtEpochMillis = now,
+            ))
         }
-        if (repositories.floorPlans.floor(PILOT_FLOOR_ID) == null) {
-            repositories.floorPlans.save(
-                FloorEntity(
-                    id = PILOT_FLOOR_ID,
-                    venueId = PILOT_VENUE_ID,
-                    name = "Ground floor",
-                    levelNumber = 0,
-                    widthMetres = 42.0,
-                    heightMetres = 28.0,
-                    createdAtEpochMillis = now,
-                    updatedAtEpochMillis = now,
-                ),
-            )
+        val draftIds = appState.referencePoints.map { it.id }.toSet()
+        val existingPoints = repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first()
+        val surveySessions = repositories.surveys.observeSessions(PILOT_VENUE_ID).first()
+        val removedPoints = existingPoints.filter { it.id !in draftIds }
+        val protectedIds = removedPoints.map { it.id }.filter { id -> surveySessions.any { it.referencePointId == id } }
+        require(protectedIds.isEmpty()) {
+            "Cannot remove fingerprinted point(s) ${protectedIds.joinToString()}; export first, then use Delete saved map"
         }
+        removedPoints.forEach { repositories.floorPlans.delete(it) }
         appState.referencePoints.forEach { point ->
             val previous = repositories.floorPlans.referencePoint(point.id)
-            require(previous == null ||
-                (previous.xMetres == point.metres.x.toDouble() && previous.yMetres == point.metres.y.toDouble())) {
-                "${point.id} already identifies a saved coordinate; create a new point ID to relocate it"
+            val coordinateChanged = previous != null &&
+                (previous.xMetres != point.metres.x.toDouble() || previous.yMetres != point.metres.y.toDouble())
+            val hasTrainingData = coordinateChanged && repositories.surveys.observeSessions(PILOT_VENUE_ID).first()
+                .any { it.referencePointId == point.id }
+            require(!hasTrainingData) {
+                "${point.id} already has fingerprints; use a new ID instead of moving its training coordinate"
             }
             repositories.floorPlans.save(
                 ReferencePointEntity(
@@ -850,6 +1018,16 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     updatedAtEpochMillis = now,
                 ),
             )
+        }
+        val anchorIds = appState.qrAnchors.map { it.id }.toSet()
+        repositories.floorPlans.observeQrAnchors(PILOT_FLOOR_ID).first()
+            .filter { it.anchorId !in anchorIds }
+            .forEach { repositories.floorPlans.delete(it) }
+        appState.qrAnchors.forEach { point ->
+            repositories.floorPlans.save(com.turn.fieldtest.data.local.QrAnchorEntity(
+                id = "ANCHOR-${point.id}", floorId = PILOT_FLOOR_ID, anchorId = point.id,
+                xMetres = point.metres.x.toDouble(), yMetres = point.metres.y.toDouble(),
+            ))
         }
         repositories.floorPlans.save(WalkableRegionEntity(
             id = "REGION-PILOT", floorId = PILOT_FLOOR_ID, name = "Pilot walkable region",
@@ -1377,3 +1555,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         const val MAX_TRAIL_POINTS = 500
     }
 }
+
+private data class ImportedFloorPlan(
+    val uri: String,
+    val mimeType: String,
+    val pixelWidth: Int,
+    val pixelHeight: Int,
+)

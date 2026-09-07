@@ -70,6 +70,8 @@ import kotlinx.coroutines.delay
 data class TurnAppActions(
     val onRealExport: (android.net.Uri, com.turn.fieldtest.data.export.ResearchDataset) -> Unit = { _, _ -> },
     val onMapSaved: () -> Unit = {},
+    val onMapDeleted: () -> Unit = {},
+    val onFloorPlanImportRequested: () -> Unit = {},
     val onCheckpointCaptured: (com.turn.fieldtest.ui.screens.CheckpointInput) -> Unit = {},
     val onModeChanged: (DataMode) -> Unit = {},
     val onDiagnosticScanRequested: () -> Unit = {},
@@ -249,7 +251,13 @@ private fun AppScaffold(
 private fun TurnScreen(state: TurnAppState, actions: TurnAppActions, compact: Boolean) {
     when (state.destination) {
         TurnDestination.VENUES -> VenuesScreen(state, compact)
-        TurnDestination.FLOOR_EDITOR -> FloorEditorScreen(state, compact, actions.onMapSaved)
+        TurnDestination.FLOOR_EDITOR -> FloorEditorScreen(
+            state,
+            compact,
+            onSave = actions.onMapSaved,
+            onImportImage = actions.onFloorPlanImportRequested,
+            onDeleteSavedMap = actions.onMapDeleted,
+        )
         TurnDestination.RADIO_DIAGNOSTICS -> DiagnosticsScreen(
             state,
             compact,

@@ -1,4 +1,4 @@
-# TURN implementation audit — 2026-09-05
+# TURN implementation audit — 2026-09-07
 
 This is a source review and completion checklist, not a report of physical-phone accuracy. The original acceptance criteria are not all met yet.
 
@@ -14,12 +14,15 @@ This is a source review and completion checklist, not a report of physical-phone
 - Filter loss clears the current fused position/confidence. Explicit recovery preserves the original raw-PDR baseline and records relocalization. First initialization waits for sufficient Wi-Fi confidence and floor agreement.
 - Fingerprint candidates with no shared non-excluded BSSID are rejected, even when all RSSI values are weak and close to the missing-signal default. PDR abstains when no heading sensor is active.
 - Foreground exit stops UI collection flags and hardware; callbacks from permission prompts remain available when the prompt temporarily leaves the activity.
+- Physical mode now starts blank when no saved geometry exists instead of inheriting the demo polygon. Researchers can clear a draft, undo tool actions, finish a polygon, remove points, or explicitly delete a saved map and linked fingerprints.
+- PNG/JPEG import uses Android's document picker with persistent read access. Editable dimensions and two-point scale calibration drive metric coordinates, and the imported background is reused in Live Locate.
+- Survey startup validates the already-saved map instead of silently attempting to recreate the hard-coded pilot. A visible throttle countdown explains delayed Android scans and the real default is eight fresh snapshots.
 
 ## Remaining gaps, in priority order
 
 | Priority | Gap | Practical impact / next acceptance check |
 |---|---|---|
-| High | Complete venue and floor editor | Physical mode is still fixed to one 42 × 28 m ground-floor pilot. Implement create/rename/delete, dimensions, image import, two-point scale calibration, point editing and persistent QR/transition topology. |
+| High | Complete multi-floor venue management | One active physical floor now supports names, arbitrary dimensions, PNG/JPEG import, calibration, geometry reset/undo and persistent QR/reference points. Add multiple floor records, floor switching, richer vertex movement and persistent transition topology. |
 | High | QR camera workflow and manual anchors | Payload codec, generator and analyzer exist, but physical initialization/recovery UI is still absent. Connect registered-anchor validation, camera lifecycle, PNG export and logged corrections. |
 | High | Backup import/restore and multi-phone exchange | JSON/CSV export works, but no safe preview/conflict-resolution/restore UI exists. Complete transactional import validation and test restoring a fresh installation. Image URIs alone are not portable image backups. |
 | High | Physical-device verification | Test permission denial/retry, actual scan throttling, sensor availability, a measured walk, app backgrounding and exported file contents on at least two phones. No phone validation has been performed. |

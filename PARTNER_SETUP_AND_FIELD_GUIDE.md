@@ -10,7 +10,7 @@ You need:
 
 - a Windows Surface Laptop or another Windows computer;
 - access to the public GitHub repository (collaborator access is needed to push changes);
-- Android Studio and a compatible JDK 17 selected for Gradle;
+- Android Studio and a compatible JDK 17 or 21 selected for Gradle;
 - an Android phone running Android 8.0/API 26 or newer;
 - a USB data cable;
 - permission to survey the chosen university area;
@@ -57,7 +57,7 @@ If Git asks for a password, use GitHub's browser sign-in or a personal access to
 7. In Android Studio, open the cloned `TURN-Field-Test` folder—not the `app` subfolder.
 8. Allow Gradle sync and dependency downloads to complete.
 
-Select JDK 17 in **Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK**. Use Android Studio's bundled runtime only if its version is compatible; Studio releases can bundle a different Java version. For PowerShell builds, set `JAVA_HOME` to the same JDK 17 installation. The local verification for this project uses JDK 17.
+Select JDK 17 or 21 in **Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK**. Do not select JDK 25 with the current Android Gradle plugin. For PowerShell builds, set `JAVA_HOME` to the same compatible JDK. The September 2026 local verification uses JetBrains Runtime 21.
 
 The project uses the checked-in Gradle wrapper. Do not install a separate global Gradle version. Android Studio normally creates the machine-specific `local.properties` file automatically. This file must never be committed.
 
@@ -159,19 +159,21 @@ An official architectural plan is not required. A simple measured sketch is enou
 
 4. Measure the main corridor lengths and widths with a real measuring tool.
 5. Draw the corridor outline, junctions, doors, walls, stairs and lifts. Architectural decoration is unnecessary.
-6. Open **Floor-plan editor** and enter or place the walkable polygon, wall segments, reference points and QR anchors in metres.
-7. Keep every reference point inside walkable space.
-8. Place a matching removable physical label at each reference point.
-
-The included version contains a 42 m × 28 m pilot workspace with reference points such as `RP-G-01`, `RP-G-04`, `RP-G-07` and `RP-G-10`. Edit the draft to match the actual measured pilot before treating results as research evidence.
+6. Switch TURN to **Real Device**, open **Floor-plan editor**, and press **New / clear map** to remove an old draft.
+7. Enter the venue and floor names, then import a cropped PNG or JPEG. PDF files must first be exported as one image per floor.
+8. Either enter the measured full width/height and press **Apply dimensions**, or select **Scale points A–B**, tap two identifiable image points and enter their measured physical distance.
+9. Select **Walkable polygon**, tap the corridor boundary in order, and press **Finish shape**. Use **Undo** immediately after a bad tap.
+10. Add walls when they constrain movement. Add survey points by tapping, or use exact ID/x/y fields for measured coordinates.
+11. Press **Save** and wait for confirmation. Only saved points appear as valid survey targets.
+12. Place a matching removable physical label at every saved reference point.
 
 ### Current map-editor boundary
 
-In Real Device mode, press **Save** in the floor editor to persist the pilot polygon, walls and reference points to Room. They reload when you switch to Real Device after restarting the app. Save also validates the polygon and rejects reference points outside walkable space. Stop Survey and Live locate before editing. A saved reference-point ID identifies one coordinate; use a new point ID when relocating a marker.
+TURN currently operates one active physical floor at a time. The imported background, dimensions, polygon, walls, QR-anchor drafts and reference points persist locally and reload after restart. The same image and metric geometry appear in Live Locate. Save validates simple polygon geometry and rejects survey points outside walkable space.
 
-The current editor still uses a fixed 42 × 28 metre, single-ground-floor workspace. Image import, two-point image calibration, editable dimensions, full venue management and vertical-transition editing remain unfinished. Their controls no longer report a successful operation. QR anchor draft edits are not included in the pilot Save operation. Keep a separate measured drawing and coordinate notebook. See [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) before planning a larger campaign.
+**New / clear map** clears only the current draft until Save. **Delete saved map** permanently removes the stored image, geometry, reference points and fingerprints linked to those points; export first. A point ID with existing training data cannot be moved to a different coordinate—create a new ID instead.
 
-Do not claim final building-scale validation until custom venue editing and image import are completed and retested.
+Full multi-floor creation/selection and vertical-transition editing remain unfinished. Keep the original plan and measurement notebook separately. Do not claim building-scale validation until the imported/calibrated map is checked against several independent physical distances.
 
 ## 8. Plan reference points correctly
 
@@ -225,8 +227,9 @@ Repeat the following procedure at every reference point.
 7. Stand exactly on the physical marker and hold the phone in the recorded orientation.
 8. Press **Begin collection**.
 9. Keep TURN visible and remain at the marker.
-10. Wait until the fresh-snapshot target is reached. The default target is 12 independent fresh scans.
+10. Wait until the fresh-snapshot target is reached. Real Device mode defaults to 8 independent fresh scans; choose 4 for a quick functional trial or 8–12 for research collection.
 11. Cached/stale results may increase the `Cached ignored` count but must not advance the fresh target.
+    If Radio diagnostics was just used, TURN may show a countdown before Android permits the next request. Leave collection active; TURN retries automatically.
 12. Review:
 
     - fresh snapshots;
@@ -338,7 +341,7 @@ The app does not yet expose an import/restore workflow. Keep the JSON and the in
 1. Physically mark checkpoints separate from training reference points and measure their x/y coordinates independently.
 2. Start **Live locate**, obtain a fix and walk to a checkpoint.
 3. Keep the live session running and open **Evaluate**.
-4. Enter the checkpoint code and measured x/y. The current physical workflow evaluates ground floor `FL-G` only.
+4. Enter the checkpoint code and measured x/y for the active floor. The current physical workflow evaluates one configured floor at a time.
 5. Press **Capture test sample**. The estimates are frozen at button-press time, then stored with independent truth in evaluation tables. The checkpoint never corrects the live estimate and no test scan is added to the fingerprint database.
 6. Repeat at other checkpoints. Reusing a checkpoint code requires the same coordinate. A checkpoint at a training reference point is rejected.
 7. Review Wi-Fi-only, raw-PDR and fused mean, median, p90, maximum, within-3m/5m, floor correctness and failure rate.
@@ -382,7 +385,7 @@ Versioned QR payload validation, generation and CameraX/ML Kit scanning adapters
 
 ### Java or Gradle version errors
 
-- Select Android Studio's bundled JDK 17.
+- Select a compatible JDK 17 or 21; JDK 25 is not supported by the current build configuration.
 - Use `.\gradlew.bat`; do not use an unrelated globally installed Gradle.
 - Close duplicate Gradle builds if Windows reports locked jars.
 - Retry with a single worker if the laptop is memory constrained:
