@@ -91,6 +91,7 @@ class TurnAppState {
     var realDiagnosticStatus by mutableStateOf("Not started")
 
     var surveyRunning by mutableStateOf(false)
+    var surveyStarting by mutableStateOf(false)
     var surveyAcceptedSnapshots by mutableIntStateOf(8)
     var surveyCachedIgnored by mutableIntStateOf(2)
     var surveyTargetSnapshots by mutableIntStateOf(12)

@@ -270,6 +270,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         foreground = false
         appState.liveRunning = false
         appState.surveyRunning = false
+        appState.surveyStarting = false
         appState.diagnosticWalkRunning = false
         surveyScanJob?.cancel()
         liveScanJob?.cancel()
@@ -293,6 +294,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         appState.mode = mode
         appState.liveRunning = false
+        appState.surveyStarting = false
         appState.diagnosticWalkRunning = false
         if (mode == DataMode.REAL_DEVICE) {
             appState.realMapReady = false
@@ -479,7 +481,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun beginRealSurvey(metadata: SurveyCaptureMetadata) {
-        if (activeSurvey != null || appState.surveyRunning) {
+        if (activeSurvey != null || appState.surveyRunning || appState.surveyStarting) {
             appState.surveyRuntimeStatus = "A survey session is already active; pause it before starting another"
             return
         }
@@ -491,11 +493,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.surveyRuntimeStatus = "Collection not started: ${appState.realWifiIssue ?: "Wi-Fi is not ready"}"
             return
         }
+        appState.surveyStarting = true
         appState.surveyRunning = true
-        appState.surveyRuntimeStatus = "Creating physical survey session…"
+        appState.surveyRuntimeStatus = "Saving the displayed map and creating the physical survey session…"
         viewModelScope.launch {
             runCatching {
                 val now = System.currentTimeMillis()
+                // A newly placed point may be visible in Compose before it has been saved in
+                // Room. Bind collection to the exact validated map shown to the researcher.
+                persistActiveMap(now)
                 requireSavedMapContext(metadata.referencePointId)
                 val selectedPoint = repositories.floorPlans.referencePoint(metadata.referencePointId)
                     ?: error("Unknown survey reference point ${metadata.referencePointId}")
@@ -519,7 +525,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }.onSuccess { session ->
                 if (!foreground || appState.mode != DataMode.REAL_DEVICE || !appState.surveyRunning) {
                     repositories.surveys.save(session.copy(endedAtEpochMillis = System.currentTimeMillis()))
+                    appState.surveyStarting = false
                     appState.surveyRunning = false
+                    appState.surveyRuntimeStatus = "Collection stopped because TURN left the foreground while starting"
                     return@onSuccess
                 }
                 activeSurvey = session
@@ -531,11 +539,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.surveyDistinctBssidCount = 0
                 appState.realSurveyAggregates = emptyList()
                 appState.surveySessionLabel = session.id
+                appState.surveyStarting = false
                 appState.surveyRuntimeStatus = "Collecting physical WifiManager broadcasts"
                 appState.surveySaveStatus = "Room session created; waiting for the first scan result"
                 appState.surveyRunning = true
                 startSurveyScanLoop()
             }.onFailure { failure ->
+                appState.surveyStarting = false
                 appState.surveyRunning = false
                 appState.surveyRuntimeStatus = "Collection not started: ${failure.message ?: failure::class.java.simpleName}"
                 appState.surveySaveStatus = failure.message ?: failure::class.java.simpleName
@@ -544,6 +554,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun finishRealSurvey() {
+        appState.surveyStarting = false
         if (activeSurvey == null) {
             appState.surveyRunning = false
             return
@@ -810,6 +821,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         surveyScanJob?.cancel()
         surveyScanJob = null
         appState.surveyRunning = false
+        appState.surveyStarting = false
         runCatching {
             repositories.surveys.save(session.copy(endedAtEpochMillis = System.currentTimeMillis()))
             captureService.recomputeAggregates(session.id, System.currentTimeMillis())

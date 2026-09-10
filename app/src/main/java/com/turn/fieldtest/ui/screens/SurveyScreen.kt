@@ -93,6 +93,7 @@ fun SurveyScreen(
             compact = compact,
             action = {
                 Button(
+                    enabled = !state.surveyStarting,
                     onClick = {
                     if (simulated) {
                         state.toggleSurvey()
@@ -119,10 +120,43 @@ fun SurveyScreen(
                 }) {
                     Icon(if (state.surveyRunning) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, contentDescription = null)
                     Spacer(Modifier.width(7.dp))
-                    Text(if (state.surveyRunning) "Pause collection" else if (state.surveyAcceptedSnapshots >= state.surveyTargetSnapshots) "Collect again" else "Begin collection")
+                    Text(
+                        when {
+                            state.surveyStarting -> "Starting…"
+                            state.surveyRunning -> "Stop collection"
+                            state.surveyAcceptedSnapshots >= state.surveyTargetSnapshots -> "Collect again"
+                            else -> "Begin collection"
+                        },
+                    )
                 }
             }
         )
+
+        if (!simulated) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
+                ),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        if (state.surveyStarting) "Starting collection" else "Collection feedback",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(state.surveyRuntimeStatus, style = MaterialTheme.typography.bodyMedium)
+                    if (!state.surveyRunning && state.surveySaveStatus.isNotBlank()) {
+                        Text(
+                            state.surveySaveStatus,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
 
         AdaptiveColumns(
             breakpoint = 750.dp,
