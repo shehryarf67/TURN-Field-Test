@@ -23,6 +23,34 @@ import kotlin.math.hypot
 
 @Stable
 class TurnAppState {
+    var startupLoading by mutableStateOf(false)
+    var projectBusy by mutableStateOf(false)
+    var sessionLocked by mutableStateOf(false)
+    var surveyCloseFailed by mutableStateOf(false)
+    var liveCloseFailed by mutableStateOf(false)
+    var liveStarting by mutableStateOf(false)
+    var projectStatus by mutableStateOf("Open or create a project")
+    var activeProject by mutableStateOf<com.turn.fieldtest.data.repository.ProjectContext?>(null)
+    var projects by mutableStateOf<List<com.turn.fieldtest.data.repository.ProjectSummary>>(emptyList())
+    var mapHasMeasurements by mutableStateOf(false)
+    var mapEditorSupported by mutableStateOf(true)
+    val canEditMap get() = mode == DataMode.DEMO ||
+        (realMapReady && !startupLoading && !projectBusy && !sessionLocked && !surveyRunning && !liveRunning && mapEditorSupported)
+    val canChangeScale get() = canEditMap && (mode == DataMode.DEMO || !mapHasMeasurements)
+    private var savedDraft by mutableStateOf<List<Any?>?>(null)
+    private fun draftSnapshot(): List<Any?> = listOf(venueName, floorName, floorLevel,
+        floorWidthMetres, floorHeightMetres, floorPlanContentUri, floorPlanMimeType,
+        floorPlanPixelWidth, floorPlanPixelHeight, floorPlanMetresPerPixel,
+        calibrationPoints.toList(), draftWalkablePolygon.toList(), draftWalls.toList(),
+        referencePoints.toList(), qrAnchors.toList())
+    val hasUnsavedMapChanges get() = mode == DataMode.REAL_DEVICE && realMapReady &&
+        savedDraft != null && savedDraft != draftSnapshot()
+    fun markMapSaved() { savedDraft = draftSnapshot() }
+    private fun requireMapEditing(): Boolean {
+        if (canEditMap) return true
+        editorStatus = "Open a project and finish active operations before editing"
+        return false
+    }
     var destination by mutableStateOf(TurnDestination.VENUES)
     var mode by mutableStateOf(DataMode.DEMO)
     var compactMenuOpen by mutableStateOf(false)
@@ -165,12 +193,10 @@ class TurnAppState {
     }
 
     fun addMapPoint(metricPoint: Offset) {
-        if (mode == DataMode.REAL_DEVICE && (surveyRunning || liveRunning || !realMapReady)) {
-            editorStatus = "Wait for map loading and stop physical sessions before editing"
-            return
-        }
+        if (!requireMapEditing()) return
         when (editorTool) {
             EditorTool.CALIBRATION -> {
+                if (!canChangeScale) { editorStatus = "Scale is locked because this floor has recorded measurements"; return }
                 if (calibrationPoints.size == 2) calibrationPoints.clear()
                 calibrationPoints.add(metricPoint)
                 editorStatus = if (calibrationPoints.size == 1) {
@@ -195,13 +221,14 @@ class TurnAppState {
                 }
             }
             EditorTool.REFERENCE_POINT -> {
-                val id = nextReferencePointId()
-                referencePoints.add(MapPointUi(id, floorName, metricPoint, id))
+                val label = nextReferencePointId()
+                val id = if (mode == DataMode.REAL_DEVICE) "RP-${java.util.UUID.randomUUID()}" else label
+                referencePoints.add(MapPointUi(id, floorName, metricPoint, label))
                 selectedSurveyReferencePointId = id
                 editorStatus = "$id placed at ${formatPoint(metricPoint)}"
             }
             EditorTool.QR_ANCHOR -> {
-                val id = "QR-G-${(qrAnchors.size + 1).toString().padStart(2, '0')}"
+                val id = if (mode == DataMode.REAL_DEVICE) "QR-${java.util.UUID.randomUUID()}" else "QR-G-${qrAnchors.size + 1}"
                 qrAnchors.add(MapPointUi(id, "Ground", metricPoint, "QR ${qrAnchors.size + 1}"))
                 editorStatus = "$id placed at ${formatPoint(metricPoint)}"
             }
@@ -209,7 +236,8 @@ class TurnAppState {
         }
     }
 
-    fun clearMapDraft() {
+    fun clearMapDraft(force: Boolean = false) {
+        if (!force && !requireMapEditing()) return
         draftWalkablePolygon.clear()
         draftWalls.clear()
         referencePoints.clear()
@@ -261,6 +289,7 @@ class TurnAppState {
     }
 
     fun undoCurrentTool() {
+        if (!requireMapEditing()) return
         when (editorTool) {
             EditorTool.CALIBRATION -> if (calibrationPoints.isNotEmpty()) calibrationPoints.removeAt(calibrationPoints.lastIndex)
             EditorTool.WALKABLE -> if (draftWalkablePolygon.isNotEmpty()) draftWalkablePolygon.removeAt(draftWalkablePolygon.lastIndex)
@@ -273,6 +302,7 @@ class TurnAppState {
     }
 
     fun finishWalkablePolygon() {
+        if (!requireMapEditing()) return
         editorStatus = if (draftWalkablePolygon.size >= 3) {
             editorTool = EditorTool.SELECT
             "Walkable polygon closed with ${draftWalkablePolygon.size} vertices"
@@ -282,6 +312,7 @@ class TurnAppState {
     }
 
     fun addReferencePointAt(idInput: String, x: Float, y: Float) {
+        if (!requireMapEditing()) return
         val clean = idInput.trim().uppercase().replace(Regex("[^A-Z0-9_-]"), "-")
         if (clean.isBlank()) {
             editorStatus = "Enter a reference-point ID"
@@ -291,16 +322,18 @@ class TurnAppState {
             editorStatus = "Reference point must be inside the floor dimensions"
             return
         }
-        if (referencePoints.any { it.id == clean }) {
+        if (referencePoints.any { it.id == clean || it.label == clean }) {
             editorStatus = "$clean already exists"
             return
         }
-        referencePoints.add(MapPointUi(clean, floorName, Offset(x, y), clean))
-        selectedSurveyReferencePointId = clean
+        val id = if (mode == DataMode.REAL_DEVICE) "RP-${java.util.UUID.randomUUID()}" else clean
+        referencePoints.add(MapPointUi(id, floorName, Offset(x, y), clean))
+        selectedSurveyReferencePointId = id
         editorStatus = "$clean added at ${formatPoint(Offset(x, y))}"
     }
 
     fun removeReferencePoint(id: String) {
+        if (!requireMapEditing()) return
         referencePoints.removeAll { it.id == id }
         if (selectedSurveyReferencePointId == id) {
             selectedSurveyReferencePointId = referencePoints.firstOrNull()?.id.orEmpty()
@@ -309,6 +342,7 @@ class TurnAppState {
     }
 
     fun applyCalibration(measuredDistanceMetres: Double): Boolean {
+        if (!canChangeScale) { editorStatus = "Scale is locked while recording or after measurements exist"; return false }
         if (calibrationPoints.size != 2 || measuredDistanceMetres <= 0.0 || !measuredDistanceMetres.isFinite()) {
             editorStatus = "Select points A and B, then enter a positive measured distance"
             return false
@@ -321,7 +355,7 @@ class TurnAppState {
             return false
         }
         val scale = (measuredDistanceMetres / draftDistance).toFloat()
-        resizeFloor(floorWidthMetres * scale, floorHeightMetres * scale)
+        if (!resizeFloor(floorWidthMetres * scale, floorHeightMetres * scale)) return false
         floorPlanMetresPerPixel = floorPlanPixelWidth?.takeIf { it > 0 }?.let { floorWidthMetres.toDouble() / it }
         editorTool = EditorTool.SELECT
         editorStatus = "Calibrated · floor is %.2f m × %.2f m".format(floorWidthMetres, floorHeightMetres)
@@ -329,6 +363,7 @@ class TurnAppState {
     }
 
     fun resizeFloor(width: Float, height: Float): Boolean {
+        if (!canChangeScale) { editorStatus = "Scale is locked while recording or after measurements exist"; return false }
         if (!width.isFinite() || !height.isFinite() || width <= 0f || height <= 0f || width > 1000f || height > 1000f) {
             editorStatus = "Floor dimensions must be between 0 and 1000 metres"
             return false
@@ -353,7 +388,8 @@ class TurnAppState {
         return true
     }
 
-    fun removeFloorPlanImage() {
+    fun removeFloorPlanImage(force: Boolean = false) {
+        if (!force && !requireMapEditing()) return
         floorPlanContentUri = null
         floorPlanMimeType = null
         floorPlanPixelWidth = null
@@ -369,7 +405,7 @@ class TurnAppState {
         do {
             candidate = "RP-${number.toString().padStart(2, '0')}"
             number += 1
-        } while (referencePoints.any { it.id == candidate })
+        } while (referencePoints.any { it.id == candidate || it.label == candidate })
         return candidate
     }
 

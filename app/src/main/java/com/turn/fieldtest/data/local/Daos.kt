@@ -24,6 +24,26 @@ interface VenueDao {
 
 @Dao
 interface FloorPlanDao {
+    @Query("""
+        SELECT v.id AS venueId, f.id AS floorId, v.name AS venueName, f.name AS floorName,
+        (SELECT COUNT(*) FROM reference_points r WHERE r.floorId = f.id) AS referencePointCount,
+        (SELECT COUNT(DISTINCT a.referencePointId) FROM aggregated_wifi_fingerprints a
+         JOIN reference_points r ON r.id = a.referencePointId WHERE r.floorId = f.id) AS fingerprintPointCount,
+        (SELECT COUNT(*) FROM survey_sessions s WHERE s.floorId = f.id) AS surveySessionCount,
+        (SELECT COUNT(*) FROM positioning_sessions p WHERE p.venueId = v.id
+         AND (p.initialFloorId = f.id OR p.initialFloorId IS NULL)) AS positioningSessionCount
+        FROM floors f JOIN venues v ON v.id = f.venueId
+        ORDER BY v.name COLLATE NOCASE, f.levelNumber, f.id
+    """)
+    fun observeProjects(): Flow<List<com.turn.fieldtest.data.repository.ProjectSummary>>
+
+    @Query("""
+        SELECT EXISTS(SELECT 1 FROM survey_sessions WHERE floorId = :floorId)
+        OR EXISTS(SELECT 1 FROM positioning_sessions WHERE venueId = :venueId)
+        OR EXISTS(SELECT 1 FROM test_checkpoints WHERE floorId = :floorId)
+    """)
+    suspend fun hasMeasurements(floorId: String, venueId: String): Boolean
+
     @Query("SELECT * FROM floors WHERE venueId = :venueId ORDER BY levelNumber")
     fun observeFloors(venueId: String): Flow<List<FloorEntity>>
 

@@ -97,7 +97,7 @@ fun SurveyScreen(
                     onClick = {
                     if (simulated) {
                         state.toggleSurvey()
-                    } else if (state.surveyRunning) {
+                    } else if (state.surveyRunning || state.surveyCloseFailed) {
                         onFinishRealSurvey()
                     } else {
                         if (!state.realMapReady) {
@@ -123,6 +123,7 @@ fun SurveyScreen(
                     Text(
                         when {
                             state.surveyStarting -> "Starting…"
+                            state.surveyCloseFailed -> "Finish and retry saving"
                             state.surveyRunning -> "Stop collection"
                             state.surveyAcceptedSnapshots >= state.surveyTargetSnapshots -> "Collect again"
                             else -> "Begin collection"
@@ -165,11 +166,11 @@ fun SurveyScreen(
             primary = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SectionCard("Survey context", "Required before collection") {
-                        SelectorRow("Venue", state.venueName, "VEN-CS-01")
-                        SelectorRow("Floor", state.floorName, "FL-G")
+                        SelectorRow("Venue", state.venueName, "Active project")
+                        SelectorRow("Floor", state.floorName, "Saved floor")
                         SelectorRow(
                             "Reference point",
-                            selectedPoint?.id ?: "None saved",
+                            selectedPoint?.label ?: "None saved",
                             selectedPoint?.let { "x %.1f m · y %.1f m".format(it.metres.x, it.metres.y) }
                                 ?: "Add points in Floor-plan editor",
                         )
@@ -182,7 +183,7 @@ fun SurveyScreen(
                                     selected = point.id == state.selectedSurveyReferencePointId,
                                     onClick = { state.selectedSurveyReferencePointId = point.id },
                                     enabled = !state.surveyRunning,
-                                    label = { Text(point.id) },
+                                    label = { Text(point.label) },
                                 )
                             }
                         }
@@ -292,7 +293,7 @@ fun SurveyScreen(
         )
 
         SectionCard(
-            title = "Live aggregation at ${selectedPoint?.id ?: "no point"}",
+            title = "Live aggregation at ${selectedPoint?.label ?: "no point"}",
             subtitle = "Median RSSI is the default matching value; every raw reading remains stored",
             trailing = {
                 StatusPill(

@@ -36,7 +36,7 @@ fun RealEvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (Checkp
         PageHeader("06 · Independent validation", "Evaluate positioning",
             "Stand at a physically marked checkpoint while Live locate is running. Enter its measured coordinates.", compact)
         Text(state.realEvaluationStatus)
-        SectionCard("Independent checkpoint", "${state.floorName} · FL-G · metric coordinates") {
+        SectionCard("Independent checkpoint", "${state.floorName} · metric coordinates") {
             OutlinedTextField(code, { code = it }, label = { Text("Checkpoint code") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(x, { x = it }, label = { Text("Measured x (metres)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(y, { y = it }, label = { Text("Measured y (metres)") }, modifier = Modifier.fillMaxWidth())

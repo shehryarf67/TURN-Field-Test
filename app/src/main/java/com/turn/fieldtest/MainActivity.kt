@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
                 actions = TurnAppActions(
                     onModeChanged = { mode ->
                         runtimeViewModel.setMode(mode)
-                        if (mode == DataMode.REAL_DEVICE) {
+                        if (mode == DataMode.REAL_DEVICE && runtimeViewModel.appState.mode == mode) {
                             withWifiPermissions { runtimeViewModel.refreshWifiPermissionStatus() }
                         }
                     },
@@ -83,6 +83,8 @@ class MainActivity : ComponentActivity() {
                     onRealLiveRelocalizationRequested = runtimeViewModel::relocalizeWithNextWifi,
                     onRealExport = runtimeViewModel::exportRealData,
                     onMapSaved = runtimeViewModel::savePilotMap,
+                    onProjectCreated = runtimeViewModel::createProject,
+                    onProjectOpened = runtimeViewModel::openProject,
                     onMapDeleted = runtimeViewModel::deleteSavedMap,
                     onFloorPlanImportRequested = {
                         floorPlanLauncher.launch(arrayOf("image/png", "image/jpeg"))

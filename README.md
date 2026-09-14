@@ -12,6 +12,8 @@ New team members should begin with [PARTNER_SETUP_AND_FIELD_GUIDE.md](PARTNER_SE
 
 Read [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for current gaps. Physical image import/calibration, map editing, survey, tracking, checkpoint capture, persistence and JSON/CSV export are connected; multi-floor runtime, QR camera workflows and backup restore still need completion and device validation.
 
+The university-floor revamp is being implemented incrementally. [Phase 1](docs/PHASE_1_PROJECT_CONTEXT.md) adds persistent project selection and protects existing records. Navigation graph editing, destinations, A* routing and the redesigned live map are subsequent phases.
+
 ## What is included
 
 - Metric venue and floor-plan data model, including walkable regions, walls, vertical transitions, POIs, QR anchors, reference points and checkpoints.
@@ -78,7 +80,7 @@ TURN has two explicit sources:
 - **Demo mode:** deterministic simulated venue, Wi-Fi and sensor events. Every screen is labelled `SIMULATED DATA`.
 - **Real device mode:** Android Wi-Fi and sensor APIs only. It never silently falls back to simulation.
 
-Start in Demo mode to learn the workflow. Switch to Real device mode only on a physical phone and grant the requested permissions.
+New installations open in Real Device mode. TURN restores the last saved mode and physical project on later launches. Use Demo explicitly for the labelled replay. In Real Device, open an existing project or create a venue and floor before map setup; grant hardware permissions when requested.
 
 ## Real field workflow
 
@@ -88,7 +90,7 @@ Start in Demo mode to learn the workflow. Switch to Real device mode only on a p
 4. Add physical reference points every 2-3 m and place matching removable labels on site.
 5. Use **Radio diagnostics** to verify fresh Wi-Fi scans and sensor availability.
 6. At each reference point, use **Survey** to collect multiple independent scan snapshots. Repeat with different phones/orientations/times.
-7. Use **Live locate**: initialize from QR/manual/Wi-Fi, then walk. PDR updates between scans; fresh Wi-Fi observations correct drift.
+7. Save the map, then use **Live locate**: the current physical runtime initializes from a confident fresh Wi-Fi fix. Face map +x when starting. PDR updates between scans; fresh Wi-Fi observations correct drift. QR/manual initialization UI remains pending.
 8. At separate checkpoints that were not training points, use **Evaluate** to capture error and floor correctness.
 9. Export the anonymized results for analysis.
 

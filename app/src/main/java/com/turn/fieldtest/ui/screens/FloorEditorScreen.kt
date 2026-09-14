@@ -147,7 +147,7 @@ fun FloorEditorScreen(
                         Spacer(Modifier.width(6.dp))
                         Text("JSON")
                     }
-                    Button(onClick = onSave, enabled = !state.surveyRunning && !state.liveRunning) {
+                    Button(onClick = onSave, enabled = state.canEditMap) {
                         Icon(Icons.Outlined.Save, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("Save")
@@ -156,6 +156,8 @@ fun FloorEditorScreen(
             }
         )
 
+        if (state.hasUnsavedMapChanges) Text("Unsaved map changes", color = MaterialTheme.colorScheme.primary)
+        if (state.mapHasMeasurements && state.mode == DataMode.REAL_DEVICE) Text("Scale locked: this floor has recorded measurements.", style = MaterialTheme.typography.bodySmall)
         ToolPicker(state.editorTool, state.mode) {
             state.editorTool = it
             state.pendingWallStart = null
@@ -165,21 +167,21 @@ fun FloorEditorScreen(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(onClick = state::undoCurrentTool) {
+            OutlinedButton(onClick = state::undoCurrentTool, enabled = state.canEditMap) {
                 Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text("Undo")
             }
             FilledTonalButton(
                 onClick = state::finishWalkablePolygon,
-                enabled = state.editorTool == EditorTool.WALKABLE,
+                enabled = state.canEditMap && state.editorTool == EditorTool.WALKABLE,
             ) { Text("Finish shape") }
-            OutlinedButton(onClick = { confirmClear = true }, enabled = !state.surveyRunning && !state.liveRunning) {
+            OutlinedButton(onClick = { confirmClear = true }, enabled = state.canEditMap) {
                 Icon(Icons.Outlined.DeleteOutline, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text("New / clear map")
             }
-            OutlinedButton(onClick = { confirmDeleteSaved = true }, enabled = state.mode == DataMode.REAL_DEVICE && !state.surveyRunning && !state.liveRunning) {
+            OutlinedButton(onClick = { confirmDeleteSaved = true }, enabled = state.mode == DataMode.REAL_DEVICE && state.canEditMap) {
                 Text("Delete saved map")
             }
         }
@@ -190,7 +192,7 @@ fun FloorEditorScreen(
             secondaryWeight = 0.9f,
             primary = {
                 SectionCard(
-                    title = "${state.floorName} · FL-G",
+                    title = state.floorName,
                     subtitle = "%.2f m × %.2f m · origin lower-left".format(state.floorWidthMetres, state.floorHeightMetres),
                     trailing = { StatusPill(if (state.floorPlanContentUri == null) "Drawing only" else "Imported image", EventSeverity.INFO) }
                 ) {
@@ -233,23 +235,26 @@ fun FloorEditorScreen(
                     SectionCard("Floor setup", "Import, size and calibrate before drawing") {
                         OutlinedTextField(
                             value = state.venueName,
-                            onValueChange = { state.venueName = it },
+                            enabled = state.canEditMap,
+                            onValueChange = { if (state.canEditMap) state.venueName = it },
                             label = { Text("Venue / building name") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
                             value = state.floorName,
-                            onValueChange = { state.floorName = it },
+                            enabled = state.canEditMap,
+                            onValueChange = { if (state.canEditMap) state.floorName = it },
                             label = { Text("Floor name") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
                             value = levelInput,
+                            enabled = state.canEditMap,
                             onValueChange = {
                                 levelInput = it.filterIndexed { index, c -> c.isDigit() || (c == '-' && index == 0) }
-                                levelInput.toIntOrNull()?.let { level -> state.floorLevel = level }
+                                levelInput.toIntOrNull()?.let { level -> if (state.canEditMap) state.floorLevel = level }
                             },
                             label = { Text("Floor level (basement = negative)") },
                             singleLine = true,
@@ -258,7 +263,7 @@ fun FloorEditorScreen(
                         )
                         OutlinedButton(
                             onClick = onImportImage,
-                            enabled = state.mode == DataMode.REAL_DEVICE && !state.surveyRunning && !state.liveRunning,
+                            enabled = state.mode == DataMode.REAL_DEVICE && state.canEditMap,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Outlined.Image, contentDescription = null)
@@ -269,6 +274,7 @@ fun FloorEditorScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = widthInput,
+                                enabled = state.canChangeScale,
                                 onValueChange = { widthInput = it.filter { c -> c.isDigit() || c == '.' } },
                                 label = { Text("Floor width (m)") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -276,6 +282,7 @@ fun FloorEditorScreen(
                             )
                             OutlinedTextField(
                                 value = heightInput,
+                                enabled = state.canChangeScale,
                                 onValueChange = { heightInput = it.filter { c -> c.isDigit() || c == '.' } },
                                 label = { Text("Floor height (m)") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -283,7 +290,9 @@ fun FloorEditorScreen(
                             )
                         }
                         FilledTonalButton(
+                            enabled = state.canChangeScale,
                             onClick = {
+                                if (!state.canChangeScale) return@FilledTonalButton
                                 val width = widthInput.toFloatOrNull()
                                 val height = heightInput.toFloatOrNull()
                                 if (width != null && height != null && state.resizeFloor(width, height)) {
@@ -295,11 +304,11 @@ fun FloorEditorScreen(
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(
                             onClick = {
-                                state.calibrationPoints.clear()
+                                if (state.canChangeScale) state.calibrationPoints.clear()
                                 state.editorTool = EditorTool.CALIBRATION
                                 state.editorStatus = "Tap known point A, then point B on the image"
                             },
-                            enabled = state.floorPlanContentUri != null,
+                            enabled = state.canChangeScale && state.floorPlanContentUri != null,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("Select scale points A–B") }
                         OutlinedTextField(
@@ -316,7 +325,7 @@ fun FloorEditorScreen(
                         LabelValue("Coordinate origin", "lower-left")
                         FilledTonalButton(
                             onClick = { state.applyCalibration(calibrationDistance.toDoubleOrNull() ?: Double.NaN) },
-                            enabled = state.calibrationPoints.size == 2,
+                            enabled = state.canChangeScale && state.calibrationPoints.size == 2,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Outlined.CenterFocusStrong, contentDescription = null)
@@ -324,7 +333,7 @@ fun FloorEditorScreen(
                             Text("Apply calibration")
                         }
                         if (state.floorPlanContentUri != null) {
-                            OutlinedButton(onClick = state::removeFloorPlanImage, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { state.removeFloorPlanImage() }, enabled = state.canEditMap, modifier = Modifier.fillMaxWidth()) {
                                 Text("Remove background image")
                             }
                         }
@@ -370,9 +379,9 @@ fun FloorEditorScreen(
                             horizontalArrangement = Arrangement.spacedBy(9.dp)
                         ) {
                             Box(Modifier.size(10.dp).background(TurnCyan, RoundedCornerShape(50)))
-                            Text(point.id, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text(point.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             Text("x %.1f m  ·  y %.1f m".format(point.metres.x, point.metres.y), style = MaterialTheme.typography.bodySmall)
-                            OutlinedButton(onClick = { state.removeReferencePoint(point.id) }) { Text("Remove") }
+                            OutlinedButton(onClick = { state.removeReferencePoint(point.id) }, enabled = state.canEditMap) { Text("Remove") }
                         }
                     }
                 }
@@ -484,7 +493,7 @@ private fun MetricFloorCanvas(
                     .semantics {
                         contentDescription = "Interactive metric floor canvas, $floorWidth metres wide by $floorHeight metres high. ${state.referencePoints.size} survey points and ${state.qrAnchors.size} QR anchors."
                     }
-                    .pointerInput(state.editorTool, state.draftWalkablePolygon.size, state.draftWalls.size) {
+                    .pointerInput(state.activeProject, state.floorWidthMetres, state.floorHeightMetres, state.canEditMap, state.editorTool, state.draftWalkablePolygon.size, state.draftWalls.size) {
                         detectTapGestures { pixel ->
                             if (size.width == 0 || size.height == 0) return@detectTapGestures
                             val metric = Offset(
@@ -510,10 +519,10 @@ private fun MetricFloorCanvas(
                         drawTransition(metricToCanvas(Offset(34f, 10f), floorWidth, floorHeight), "LF", TurnMint)
                     }
                     state.referencePoints.forEach { point ->
-                        drawReferencePoint(metricToCanvas(point.metres, floorWidth, floorHeight), point.id, labelColor, state.labelsLayerVisible)
+                        drawReferencePoint(metricToCanvas(point.metres, floorWidth, floorHeight), point.label, labelColor, state.labelsLayerVisible)
                     }
                     state.qrAnchors.forEach { point ->
-                        drawQr(metricToCanvas(point.metres, floorWidth, floorHeight), point.id, labelColor, state.labelsLayerVisible)
+                        drawQr(metricToCanvas(point.metres, floorWidth, floorHeight), point.label, labelColor, state.labelsLayerVisible)
                     }
                     pending?.let { start ->
                         drawCircle(TurnRed, radius = 8f, center = metricToCanvas(start, floorWidth, floorHeight))

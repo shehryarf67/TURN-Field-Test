@@ -56,23 +56,6 @@ import com.turn.fieldtest.ui.model.VenueSummary
 
 @Composable
 fun VenuesScreen(state: TurnAppState, compact: Boolean) {
-    if (state.mode == com.turn.fieldtest.ui.model.DataMode.REAL_DEVICE) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PageHeader("01 · Setup", "Physical pilot workspace",
-                "Configure the active venue and floor, then verify its metric geometry before surveying.", compact)
-            SectionCard(state.venueName, "VEN-CS-01 · ${state.floorName} FL-G") {
-                LabelValue("Canvas", "%.2f × %.2f metres · lower-left origin".format(state.floorWidthMetres, state.floorHeightMetres))
-                LabelValue("Floor-plan image", if (state.floorPlanContentUri == null) "not imported" else "imported")
-                LabelValue("Reference points loaded", state.referencePoints.size.toString())
-                LabelValue("Wall segments loaded", state.draftWalls.size.toString())
-                Text(state.editorStatus)
-                Button(onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Open metric editor") }
-            }
-            Text("TURN currently operates one active physical floor at a time. Import, calibration and geometry are available in the metric editor; demo readiness figures never describe physical data.")
-        }
-        return
-    }
     var addVenueDialog by remember { mutableStateOf(false) }
     var addFloorDialog by remember { mutableStateOf(false) }
     var setupMessage by remember { mutableStateOf("Venue definition stored locally · schema v1") }

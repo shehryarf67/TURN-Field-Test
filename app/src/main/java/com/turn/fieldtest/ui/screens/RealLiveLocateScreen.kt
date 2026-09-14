@@ -80,13 +80,13 @@ internal fun RealLiveLocateScreen(
             description = "Fresh Wi-Fi supplies absolute fixes; step and relative-heading sensors propagate the particle cloud between scans.",
             compact = compact,
             action = {
-                Button(onClick = onToggle) {
+                Button(onClick = onToggle, enabled = !state.liveStarting && !state.projectBusy) {
                     Icon(
                         if (state.liveRunning) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
                         contentDescription = null,
                     )
                     Spacer(Modifier.width(7.dp))
-                    Text(if (state.liveRunning) "Stop" else "Start physical session")
+                    Text(if (state.liveStarting) "Starting…" else if (state.liveCloseFailed) "Retry saving session" else if (state.liveRunning) "Stop" else "Start physical session")
                 }
             },
         )

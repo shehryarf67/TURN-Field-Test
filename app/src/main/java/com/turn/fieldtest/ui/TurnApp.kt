@@ -68,6 +68,8 @@ import com.turn.fieldtest.ui.theme.TurnTheme
 import kotlinx.coroutines.delay
 
 data class TurnAppActions(
+    val onProjectCreated: (com.turn.fieldtest.data.repository.ProjectInput) -> Unit = {},
+    val onProjectOpened: (com.turn.fieldtest.data.repository.ProjectContext, Boolean) -> Unit = { _, _ -> },
     val onRealExport: (android.net.Uri, com.turn.fieldtest.data.export.ResearchDataset) -> Unit = { _, _ -> },
     val onMapSaved: () -> Unit = {},
     val onMapDeleted: () -> Unit = {},
@@ -90,6 +92,15 @@ fun TurnApp(
     actions: TurnAppActions = TurnAppActions(),
 ) {
     TurnTheme(darkTheme = state.darkTheme) {
+        if (state.startupLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                    Text("Opening TURN…")
+                }
+            }
+            return@TurnTheme
+        }
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val expanded = maxWidth >= 760.dp
             if (expanded) {
@@ -249,8 +260,13 @@ private fun AppScaffold(
 
 @Composable
 private fun TurnScreen(state: TurnAppState, actions: TurnAppActions, compact: Boolean) {
+    if (state.mode == DataMode.REAL_DEVICE && !state.realMapReady && state.destination in listOf(
+        TurnDestination.FLOOR_EDITOR, TurnDestination.SURVEY, TurnDestination.LIVE_LOCATE, TurnDestination.EVALUATE)) {
+        com.turn.fieldtest.ui.screens.ProjectsScreen(state, actions)
+        return
+    }
     when (state.destination) {
-        TurnDestination.VENUES -> VenuesScreen(state, compact)
+        TurnDestination.VENUES -> if (state.mode == DataMode.REAL_DEVICE) com.turn.fieldtest.ui.screens.ProjectsScreen(state, actions) else VenuesScreen(state, compact)
         TurnDestination.FLOOR_EDITOR -> FloorEditorScreen(
             state,
             compact,

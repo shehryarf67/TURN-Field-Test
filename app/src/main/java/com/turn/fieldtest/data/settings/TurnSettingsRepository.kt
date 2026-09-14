@@ -17,7 +17,9 @@ import kotlinx.coroutines.flow.map
 enum class TurnDataMode { DEMO, REAL_DEVICE }
 
 data class TurnSettings(
-    val dataMode: TurnDataMode = TurnDataMode.DEMO,
+    val dataMode: TurnDataMode = TurnDataMode.REAL_DEVICE,
+    val activeVenueId: String? = null,
+    val activeFloorId: String? = null,
     val wifiK: Int = 4,
     val missingRssiDbm: Int = -100,
     val normalizeDeviceOffset: Boolean = false,
@@ -70,7 +72,9 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
     private fun fromPreferences(preferences: Preferences): TurnSettings = TurnSettings(
         dataMode = preferences[Keys.DATA_MODE]
             ?.let { stored -> TurnDataMode.entries.firstOrNull { it.name == stored } }
-            ?: TurnDataMode.DEMO,
+            ?: TurnDataMode.REAL_DEVICE,
+        activeVenueId = preferences[Keys.ACTIVE_VENUE],
+        activeFloorId = preferences[Keys.ACTIVE_FLOOR],
         wifiK = preferences[Keys.WIFI_K] ?: 4,
         missingRssiDbm = preferences[Keys.MISSING_RSSI_DBM] ?: -100,
         normalizeDeviceOffset = preferences[Keys.NORMALIZE_DEVICE_OFFSET] ?: false,
@@ -84,6 +88,8 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
 
     private fun write(preferences: androidx.datastore.preferences.core.MutablePreferences, value: TurnSettings) {
         preferences[Keys.DATA_MODE] = value.dataMode.name
+        value.activeVenueId?.let { preferences[Keys.ACTIVE_VENUE] = it } ?: preferences.remove(Keys.ACTIVE_VENUE)
+        value.activeFloorId?.let { preferences[Keys.ACTIVE_FLOOR] = it } ?: preferences.remove(Keys.ACTIVE_FLOOR)
         preferences[Keys.WIFI_K] = value.wifiK
         preferences[Keys.MISSING_RSSI_DBM] = value.missingRssiDbm
         preferences[Keys.NORMALIZE_DEVICE_OFFSET] = value.normalizeDeviceOffset
@@ -97,6 +103,8 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
 
     private object Keys {
         val DATA_MODE = stringPreferencesKey("data_mode")
+        val ACTIVE_VENUE = stringPreferencesKey("active_venue_id")
+        val ACTIVE_FLOOR = stringPreferencesKey("active_floor_id")
         val WIFI_K = intPreferencesKey("wifi_k")
         val MISSING_RSSI_DBM = intPreferencesKey("missing_rssi_dbm")
         val NORMALIZE_DEVICE_OFFSET = booleanPreferencesKey("normalize_device_offset")

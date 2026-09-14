@@ -14,11 +14,16 @@ import com.turn.fieldtest.data.export.TurnDatabaseExport
 import com.turn.fieldtest.platform.storage.KotlinxJsonTransferCodec
 import com.turn.fieldtest.platform.storage.CsvTableCodec
 import com.turn.fieldtest.platform.storage.TransferResult
+import com.turn.fieldtest.data.repository.*
+import com.turn.fieldtest.data.settings.TurnDataMode
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.turn.fieldtest.data.settings.TurnSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.catch
 import androidx.room.withTransaction
 import com.turn.fieldtest.data.local.WalkableRegionEntity
 import com.turn.fieldtest.data.local.WallSegmentEntity
@@ -105,12 +110,16 @@ data class SurveyCaptureMetadata(
  * only through this class; demo replay remains entirely inside the explicit DEMO branch.
  */
 class TurnRuntimeViewModel(application: Application) : AndroidViewModel(application) {
-    val appState = TurnAppState()
+    val appState = TurnAppState().apply { mode = DataMode.REAL_DEVICE; startupLoading = true }
 
     private val app = application as TurnApplication
     private val wifiScanner = app.wifiScanner
     private val sensorSource = app.sensorSource
     private val repositories = app.repositories
+    private val projects = ProjectRepository(app.database)
+    private val eventMutex = Mutex()
+    private var sessionMap: MetricMap? = null
+    private val activeContext get() = requireNotNull(appState.activeProject) { "Open a saved project first" }
     private val captureService = WifiSurveyCaptureService(repositories.surveys)
 
     private var foreground = false
@@ -133,6 +142,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var rawPdrFloorId: String? = null
 
     fun captureCheckpoint(input: CheckpointInput) {
+        val context = appState.activeProject ?: return
         val session = activePositioningSession ?: return
         if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning || appState.realEvaluationBusy) return
         if (input.code.isBlank() || !input.x.isFinite() || !input.y.isFinite() ||
@@ -151,15 +161,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val fused = if (particleFilter?.isLost == false) snapshot(appState.realLivePosition,
             appState.realLiveFloorId, appState.realLiveUncertaintyMetres) else null
         val truth = MetricPoint(input.x, input.y)
-        val wifiError = evaluateAtCheckpoint(truth, PILOT_FLOOR_ID, wifi)
-        val rawError = evaluateAtCheckpoint(truth, PILOT_FLOOR_ID, raw)
-        val fusedError = evaluateAtCheckpoint(truth, PILOT_FLOOR_ID, fused)
+        val wifiError = evaluateAtCheckpoint(truth, context.floorId, wifi)
+        val rawError = evaluateAtCheckpoint(truth, context.floorId, raw)
+        val fusedError = evaluateAtCheckpoint(truth, context.floorId, fused)
         fun encoded(value: EvaluationEstimate?) = value?.let { Json.encodeToString(EvaluationEstimate.serializer(), it) }
-        val checkpointId = "CP-$PILOT_VENUE_ID-${input.code}"
+        val checkpointId = "CP-${context.floorId}-${input.code}"
         val runId = "TEST-${session.id}"
         val sample = TestSampleEntity(
             id = "SAMPLE-${UUID.randomUUID()}", testRunId = runId, checkpointId = checkpointId,
-            trueFloorId = PILOT_FLOOR_ID, trueXMetres = input.x, trueYMetres = input.y,
+            trueFloorId = context.floorId, trueXMetres = input.x, trueYMetres = input.y,
             wifiOnlyEstimateJson = encoded(wifi), rawPdrEstimateJson = encoded(raw), fusedEstimateJson = encoded(fused),
             wifiOnlyHorizontalErrorMetres = wifiError.horizontalMetres,
             rawPdrHorizontalErrorMetres = rawError.horizontalMetres, fusedHorizontalErrorMetres = fusedError.horizontalMetres,
@@ -179,23 +189,23 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             try {
                 app.database.withTransaction {
-                    val existing = repositories.evaluation.observeCheckpoints(PILOT_VENUE_ID).first().firstOrNull { it.id == checkpointId }
-                    require(existing == null || (existing.floorId == PILOT_FLOOR_ID && existing.xMetres == input.x && existing.yMetres == input.y)) {
+                    val existing = repositories.evaluation.observeCheckpoints(context.venueId).first().firstOrNull { it.checkpointCode == input.code }
+                    require(existing == null || (existing.floorId == context.floorId && existing.xMetres == input.x && existing.yMetres == input.y)) {
                         "Checkpoint code already belongs to a different coordinate"
                     }
-                    require(repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first().none {
+                    require(repositories.floorPlans.observeReferencePoints(context.floorId).first().none {
                         MetricPoint(it.xMetres, it.yMetres).distanceTo(truth) < 0.05
                     }) { "Choose an independent checkpoint, separate from a training reference point" }
-                    val run = repositories.evaluation.observeRuns(PILOT_VENUE_ID).first().firstOrNull { it.id == runId }
+                    val run = repositories.evaluation.observeRuns(context.venueId).first().firstOrNull { it.id == runId }
                     if (run == null) repositories.evaluation.saveRun(TestRunEntity(
-                        id = runId, venueId = PILOT_VENUE_ID, positioningSessionId = session.id,
+                        id = runId, venueId = context.venueId, positioningSessionId = session.id,
                         anonymousDeviceId = "DEVICE-${UUID.randomUUID()}", deviceManufacturer = Build.MANUFACTURER,
                         deviceModel = Build.MODEL, androidVersion = Build.VERSION.RELEASE,
                         appVersion = BuildConfig.VERSION_NAME, startedAtEpochMillis = now,
                     ))
                     if (existing == null) repositories.evaluation.saveCheckpoint(TestCheckpointEntity(
-                        checkpointId, PILOT_VENUE_ID, PILOT_FLOOR_ID, input.code, input.x, input.y))
-                    repositories.evaluation.saveSample(sample)
+                        checkpointId, context.venueId, context.floorId, input.code, input.x, input.y))
+                    repositories.evaluation.saveSample(sample.copy(checkpointId = existing?.id ?: checkpointId))
                 }
                 appState.realTestSamples.add(sample)
                 appState.realEvaluationStatus = "Saved ${input.code}: ${appState.realTestSamples.size} independent capture(s) this session"
@@ -209,6 +219,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     init {
         viewModelScope.launch {
+            projects.observeProjects().catch { error ->
+                appState.projectStatus = "Could not read saved projects: ${error.message}"
+            }.collect { appState.projects = it }
+        }
+        viewModelScope.launch {
             val saved = app.settings.settings.first()
             appState.knnK = saved.wifiK
             appState.missingRssi = saved.missingRssiDbm
@@ -216,8 +231,18 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.strideMetres = saved.defaultStrideMetres.toFloat()
             appState.particleCount = saved.particleCount
             appState.darkTheme = saved.darkTheme
+            appState.mode = DataMode.valueOf(saved.dataMode.name)
+            try {
+                if (appState.mode == DataMode.REAL_DEVICE) restoreSelectedProject() else appState.loadDemoMap()
+            } catch (error: Exception) { appState.projectStatus = "Could not restore project: ${error.message}" }
+            finally { appState.startupLoading = false }
+            refreshWifiPermissionStatus()
+            if (foreground && appState.mode == DataMode.REAL_DEVICE) startRealSources()
             snapshotFlow {
-                TurnSettings(
+                saved.copy(
+                    dataMode = TurnDataMode.valueOf(appState.mode.name),
+                    activeVenueId = appState.activeProject?.venueId ?: saved.activeVenueId,
+                    activeFloorId = appState.activeProject?.floorId ?: saved.activeFloorId,
                     wifiK = appState.knnK,
                     missingRssiDbm = appState.missingRssi,
                     normalizeDeviceOffset = appState.deviceOffsetNormalization,
@@ -225,7 +250,17 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     particleCount = appState.particleCount,
                     darkTheme = appState.darkTheme,
                 )
-            }.distinctUntilChanged().collect { settings -> app.settings.update { settings } }
+            }.distinctUntilChanged().collect { settings ->
+                try {
+                    app.settings.update { previous -> previous.copy(
+                        dataMode = settings.dataMode, activeVenueId = settings.activeVenueId, activeFloorId = settings.activeFloorId,
+                        wifiK = settings.wifiK, missingRssiDbm = settings.missingRssiDbm,
+                        normalizeDeviceOffset = settings.normalizeDeviceOffset, defaultStrideMetres = settings.defaultStrideMetres,
+                        particleCount = settings.particleCount, darkTheme = settings.darkTheme,
+                    ) }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { appState.projectStatus = "Could not save preferences: ${error.message}" }
+            }
         }
         viewModelScope.launch {
             wifiScanner.state.collectLatest { scannerState ->
@@ -241,7 +276,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
         viewModelScope.launch {
-            wifiScanner.batches.collect { batch -> handleWifiBatch(batch) }
+            wifiScanner.batches.collect { batch -> eventMutex.withLock { handleWifiBatch(batch) } }
         }
         viewModelScope.launch {
             sensorSource.state.collectLatest { sourceState ->
@@ -256,14 +291,14 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
         viewModelScope.launch {
-            sensorSource.samples.collect { sample -> handleSensorSample(sample) }
+            sensorSource.samples.collect { sample -> eventMutex.withLock { handleSensorSample(sample) } }
         }
     }
 
     fun onForeground() {
         foreground = true
         refreshWifiPermissionStatus()
-        if (appState.mode == DataMode.REAL_DEVICE) startRealSources()
+        if (!appState.startupLoading && appState.mode == DataMode.REAL_DEVICE) startRealSources()
     }
 
     fun onBackground() {
@@ -275,120 +310,198 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         surveyScanJob?.cancel()
         liveScanJob?.cancel()
         if (activeSurvey != null) {
-            viewModelScope.launch { finishActiveSurvey("Paused when TURN left the foreground") }
+            viewModelScope.launch { eventMutex.withLock { finishActiveSurvey("Paused when TURN left the foreground") } }
         }
         if (activePositioningSession != null) {
-            viewModelScope.launch { finishActiveLive("Paused when TURN left the foreground") }
+            viewModelScope.launch { eventMutex.withLock { finishActiveLive("Paused when TURN left the foreground") } }
         }
         wifiScanner.stop()
         sensorSource.stop()
     }
 
+    private fun projectChangeAllowed(): Boolean {
+        if (appState.startupLoading || appState.projectBusy || appState.sessionLocked ||
+            activeSurvey != null || activePositioningSession != null || appState.realEvaluationBusy) {
+            appState.projectStatus = "Finish the active operation before changing project or mode"
+            appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.VENUES)
+            return false
+        }
+        if (appState.hasUnsavedMapChanges) {
+            appState.projectStatus = "Save your map changes or reload the saved map before switching"
+            appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.VENUES)
+            return false
+        }
+        return true
+    }
+
     fun setMode(mode: DataMode) {
-        if (appState.mode == mode) return
-        if (activeSurvey != null) {
-            viewModelScope.launch { finishActiveSurvey("Session closed when data mode changed") }
-        }
-        if (activePositioningSession != null) {
-            viewModelScope.launch { finishActiveLive("Session closed when data mode changed") }
-        }
+        if (appState.mode == mode || !projectChangeAllowed()) return
         appState.mode = mode
         appState.liveRunning = false
-        appState.surveyStarting = false
+        appState.surveyRunning = false
         appState.diagnosticWalkRunning = false
-        if (mode == DataMode.REAL_DEVICE) {
-            appState.realMapReady = false
-            viewModelScope.launch {
-                try {
-                    val venue = repositories.venues.venue(PILOT_VENUE_ID)
-                    val floor = repositories.floorPlans.floor(PILOT_FLOOR_ID)
-                    val asset = repositories.floorPlans.observeAsset(PILOT_FLOOR_ID).first()
-                    val points = repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first()
-                    val regions = repositories.floorPlans.observeWalkableRegions(PILOT_FLOOR_ID).first()
-                    val walls = repositories.floorPlans.observeWalls(PILOT_FLOOR_ID).first()
-                    val anchors = repositories.floorPlans.observeQrAnchors(PILOT_FLOOR_ID).first()
-                    val restoredPolygon = regions.firstOrNull { it.enabled }?.let { region ->
-                        Json.parseToJsonElement(region.polygonJson).jsonArray.map { vertex ->
-                            Offset(vertex.jsonObject.getValue("x").jsonPrimitive.double.toFloat(),
-                                vertex.jsonObject.getValue("y").jsonPrimitive.double.toFloat())
-                        }
-                    }
-                    appState.draftWalkablePolygon.clear()
-                    appState.draftWalls.clear()
-                    appState.referencePoints.clear()
-                    appState.qrAnchors.clear()
-                    appState.calibrationPoints.clear()
-                    appState.pendingWallStart = null
-                    appState.venueName = venue?.name ?: "New venue"
-                    appState.floorName = floor?.name ?: "New floor"
-                    appState.floorLevel = floor?.levelNumber ?: 0
-                    appState.floorWidthMetres = floor?.widthMetres?.toFloat() ?: 42f
-                    appState.floorHeightMetres = floor?.heightMetres?.toFloat() ?: 28f
-                    appState.floorPlanContentUri = asset?.contentUri
-                    appState.floorPlanMimeType = asset?.mimeType
-                    appState.floorPlanPixelWidth = asset?.pixelWidth
-                    appState.floorPlanPixelHeight = asset?.pixelHeight
-                    appState.floorPlanMetresPerPixel = asset?.metresPerPixel
-                    if (asset != null && floor != null && asset.pixelWidth != null && asset.pixelHeight != null) {
-                        fun restoredCalibrationPoint(imageX: Double?, imageY: Double?): Offset? {
-                            if (imageX == null || imageY == null) return null
-                            return Offset(
-                                (imageX / asset.pixelWidth * floor.widthMetres).toFloat(),
-                                ((1.0 - imageY / asset.pixelHeight) * floor.heightMetres).toFloat(),
-                            )
-                        }
-                        listOfNotNull(
-                            restoredCalibrationPoint(asset.calibrationImageX1, asset.calibrationImageY1),
-                            restoredCalibrationPoint(asset.calibrationImageX2, asset.calibrationImageY2),
-                        ).let(appState.calibrationPoints::addAll)
-                    }
-                    if (points.isNotEmpty()) {
-                        appState.referencePoints.addAll(points.map {
-                            MapPointUi(it.id, appState.floorName, Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.name)
-                        })
-                        if (points.none { it.id == appState.selectedSurveyReferencePointId }) {
-                            appState.selectedSurveyReferencePointId = points.first().id
-                        }
-                    }
-                    restoredPolygon?.let(appState.draftWalkablePolygon::addAll)
-                    appState.draftWalls.addAll(walls.filter { it.enabled }.map {
-                            Offset(it.startXMetres.toFloat(), it.startYMetres.toFloat()) to
-                                Offset(it.endXMetres.toFloat(), it.endYMetres.toFloat())
-                        })
-                    appState.qrAnchors.addAll(anchors.filter { it.enabled }.map {
-                        MapPointUi(it.anchorId, appState.floorName, Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.anchorId)
-                    })
-                    appState.realMapReady = true
-                    appState.editorStatus = if (restoredPolygon == null) {
-                        "Blank physical map ready · import a floor-plan image to begin"
-                    } else {
-                        "Saved physical map loaded"
-                    }
-                } catch (error: Exception) {
-                    appState.editorStatus = "Could not load physical map: ${error.message}"
-                }
-            }
-            appState.surveyAcceptedSnapshots = 0
-            appState.surveyCachedIgnored = 0
-            appState.surveyRawObservationCount = 0
-            appState.surveyDistinctBssidCount = 0
-            appState.surveyTargetSnapshots = 8
-            appState.realSurveyAggregates = emptyList()
-            appState.surveySessionLabel = "No real-device session"
-            appState.surveyRuntimeStatus = "Ready to create a bounded local Room session"
-            appState.surveySaveStatus = "Nothing from REAL DEVICE has been stored yet"
-            refreshWifiPermissionStatus()
-            if (foreground) startRealSources()
-        } else {
-            surveyScanJob?.cancel()
+        appState.realMapReady = false
+        if (mode == DataMode.DEMO) {
             wifiScanner.stop()
             sensorSource.stop()
-            appState.surveyRunning = false
             appState.loadDemoMap()
             appState.surveyAcceptedSnapshots = 8
             appState.surveyCachedIgnored = 2
-            appState.wifiPermissionStatus = "Not needed in DEMO mode"
+        } else {
+            appState.clearMapDraft(force = true)
+            appState.removeFloorPlanImage(force = true)
+            appState.projectBusy = true
+            viewModelScope.launch {
+                try { restoreSelectedProject() }
+                catch (error: Exception) { appState.projectStatus = "Could not load project: ${error.message}" }
+                finally { appState.projectBusy = false }
+            }
+            if (foreground) startRealSources()
         }
+        refreshWifiPermissionStatus()
+    }
+
+    fun createProject(input: ProjectInput) {
+        if (appState.mode != DataMode.REAL_DEVICE || !projectChangeAllowed()) return
+        appState.projectBusy = true
+        viewModelScope.launch {
+            try {
+                val context = projects.create(input, System.currentTimeMillis())
+                loadProject(context)
+                appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.FLOOR_EDITOR)
+            } catch (error: Exception) { appState.projectStatus = "Could not create project: ${error.message}" }
+            finally { appState.projectBusy = false }
+        }
+    }
+
+    fun openProject(context: ProjectContext, discardDraft: Boolean = false) {
+        if (appState.mode != DataMode.REAL_DEVICE) return
+        if (discardDraft) {
+            if (appState.projectBusy || appState.sessionLocked || appState.startupLoading || appState.realEvaluationBusy) return
+        } else if (!projectChangeAllowed()) return
+        appState.projectBusy = true
+        viewModelScope.launch {
+            try { loadProject(context) }
+            catch (error: Exception) { appState.projectStatus = "Could not open project: ${error.message}" }
+            finally { appState.projectBusy = false }
+        }
+    }
+
+    private suspend fun restoreSelectedProject() {
+        val saved = app.settings.settings.first()
+        val available = projects.observeProjects().first()
+        appState.projects = available
+        val context = appState.activeProject ?: resolveSavedProject(available, saved.activeVenueId, saved.activeFloorId)
+        if (context != null) loadProject(context)
+        else {
+            appState.clearMapDraft(force = true)
+            appState.removeFloorPlanImage(force = true)
+            appState.realMapReady = false
+            appState.projectStatus = if (saved.activeFloorId != null) "Saved project is unavailable. Choose a project below." else "Open or create a project to begin"
+        }
+    }
+
+    private suspend fun loadProject(context: ProjectContext) {
+        val savedMap = projects.load(context)
+        val venue = savedMap.venue
+        val floor = savedMap.floor
+        val asset = savedMap.asset
+        val points = savedMap.points
+        val regions = savedMap.regions
+        val walls = savedMap.walls
+        val anchors = savedMap.anchors
+        val restoredPolygon = regions.firstOrNull { it.enabled }?.let { region ->
+            Json.parseToJsonElement(region.polygonJson).jsonArray.map { vertex ->
+                Offset(vertex.jsonObject.getValue("x").jsonPrimitive.double.toFloat(),
+                    vertex.jsonObject.getValue("y").jsonPrimitive.double.toFloat())
+            }
+        }
+        app.settings.update { it.copy(activeVenueId = context.venueId, activeFloorId = context.floorId) }
+        appState.draftWalkablePolygon.clear()
+        appState.draftWalls.clear()
+        appState.referencePoints.clear()
+        appState.selectedSurveyReferencePointId = ""
+        appState.qrAnchors.clear()
+        appState.calibrationPoints.clear()
+        appState.pendingWallStart = null
+        appState.venueName = venue.name
+        appState.floorName = floor.name
+        appState.floorLevel = floor.levelNumber
+        appState.floorWidthMetres = floor.widthMetres.toFloat()
+        appState.floorHeightMetres = floor.heightMetres.toFloat()
+        appState.floorPlanContentUri = asset?.contentUri
+        appState.floorPlanMimeType = asset?.mimeType
+        appState.floorPlanPixelWidth = asset?.pixelWidth
+        appState.floorPlanPixelHeight = asset?.pixelHeight
+        appState.floorPlanMetresPerPixel = asset?.metresPerPixel
+        if (asset != null && asset.pixelWidth != null && asset.pixelHeight != null) {
+            fun restoredCalibrationPoint(imageX: Double?, imageY: Double?): Offset? {
+                if (imageX == null || imageY == null) return null
+                return Offset(
+                    (imageX / asset.pixelWidth * floor.widthMetres).toFloat(),
+                    ((1.0 - imageY / asset.pixelHeight) * floor.heightMetres).toFloat(),
+                )
+            }
+            listOfNotNull(
+                restoredCalibrationPoint(asset.calibrationImageX1, asset.calibrationImageY1),
+                restoredCalibrationPoint(asset.calibrationImageX2, asset.calibrationImageY2),
+            ).let(appState.calibrationPoints::addAll)
+        }
+        if (points.isNotEmpty()) {
+            appState.referencePoints.addAll(points.map {
+                MapPointUi(it.id, appState.floorName, Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.name)
+            })
+            if (points.none { it.id == appState.selectedSurveyReferencePointId }) {
+                appState.selectedSurveyReferencePointId = points.first().id
+            }
+        }
+        restoredPolygon?.let(appState.draftWalkablePolygon::addAll)
+        appState.draftWalls.addAll(walls.filter { it.enabled }.map {
+                Offset(it.startXMetres.toFloat(), it.startYMetres.toFloat()) to
+                    Offset(it.endXMetres.toFloat(), it.endYMetres.toFloat())
+            })
+        appState.qrAnchors.addAll(anchors.filter { it.enabled }.map {
+            MapPointUi(it.anchorId, appState.floorName, Offset(it.xMetres.toFloat(), it.yMetres.toFloat()), it.anchorId)
+        })
+        appState.realMapReady = true
+        appState.editorStatus = if (restoredPolygon == null) {
+            "Blank physical map ready · import a floor-plan image to begin"
+        } else {
+            "Saved physical map loaded"
+        }
+
+        appState.activeProject = context
+        appState.mapHasMeasurements = savedMap.hasMeasurements
+        appState.mapEditorSupported = regions.count { it.enabled } <= 1 && floor.originXMetres == 0.0 && floor.originYMetres == 0.0
+        appState.markMapSaved()
+        appState.surveyAcceptedSnapshots = 0
+        appState.surveyCachedIgnored = 0
+        appState.surveyRawObservationCount = 0
+        appState.surveyDistinctBssidCount = 0
+        appState.realSurveyAggregates = emptyList()
+        appState.surveySessionLabel = "No active survey"
+        appState.surveySaveStatus = "Saved fingerprints remain available for matching and export"
+        appState.surveyRuntimeStatus = "Select a reference point to collect fresh Wi-Fi snapshots"
+        appState.realLivePosition = null
+        appState.realRawPdrPosition = null
+        appState.realWifiPosition = null
+        appState.realFusedTrail = emptyList()
+        appState.realRawPdrTrail = emptyList()
+        appState.realWifiFixes = emptyList()
+        appState.realParticleCloud = emptyList()
+        appState.realLiveInitialized = false
+        appState.realLiveFloorId = null
+        appState.realWifiFloorId = null
+        appState.realLiveConfidence = 0.0
+        appState.realLiveFloorConfidence = 0.0
+        appState.realLiveUncertaintyMetres = null
+        appState.realLiveStepCount = 0L
+        appState.realLiveDistanceMetres = 0.0
+        appState.realNearestFingerprintIds = emptyList()
+        appState.realTestSamples.clear()
+        appState.realLiveStatus = "Ready to start a physical session on ${floor.name}"
+        appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
+        if (!appState.mapEditorSupported) appState.editorStatus = "Map preserved. Editing multiple walkable regions or a custom origin is not supported yet."
     }
 
     fun missingWifiPermissions(): Array<String> = app.permissionChecker
@@ -481,11 +594,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun beginRealSurvey(metadata: SurveyCaptureMetadata) {
-        if (activeSurvey != null || appState.surveyRunning || appState.surveyStarting) {
+        if (appState.activeProject == null || appState.projectBusy || appState.startupLoading) return
+        val context = activeContext
+        if (appState.sessionLocked || activeSurvey != null || appState.surveyRunning || appState.surveyStarting) {
             appState.surveyRuntimeStatus = "A survey session is already active; pause it before starting another"
             return
         }
-        if (appState.liveRunning) {
+        if (appState.liveRunning || activePositioningSession != null) {
             appState.surveyRuntimeStatus = "Stop Live locate before collecting a training fingerprint"
             return
         }
@@ -493,6 +608,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.surveyRuntimeStatus = "Collection not started: ${appState.realWifiIssue ?: "Wi-Fi is not ready"}"
             return
         }
+        appState.sessionLocked = true
         appState.surveyStarting = true
         appState.surveyRunning = true
         appState.surveyRuntimeStatus = "Saving the displayed map and creating the physical survey session…"
@@ -502,13 +618,14 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 // A newly placed point may be visible in Compose before it has been saved in
                 // Room. Bind collection to the exact validated map shown to the researcher.
                 persistActiveMap(now)
+                appState.markMapSaved()
                 requireSavedMapContext(metadata.referencePointId)
                 val selectedPoint = repositories.floorPlans.referencePoint(metadata.referencePointId)
                     ?: error("Unknown survey reference point ${metadata.referencePointId}")
                 SurveySessionEntity(
                     id = "SUR-${UUID.randomUUID()}",
-                    venueId = PILOT_VENUE_ID,
-                    floorId = PILOT_FLOOR_ID,
+                    venueId = context.venueId,
+                    floorId = context.floorId,
                     referencePointId = selectedPoint.id,
                     knownXMetres = selectedPoint.xMetres,
                     knownYMetres = selectedPoint.yMetres,
@@ -523,14 +640,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     startedAtEpochMillis = now,
                 ).also { repositories.surveys.save(it) }
             }.onSuccess { session ->
+                activeSurvey = session
+                appState.mapHasMeasurements = true
                 if (!foreground || appState.mode != DataMode.REAL_DEVICE || !appState.surveyRunning) {
-                    repositories.surveys.save(session.copy(endedAtEpochMillis = System.currentTimeMillis()))
-                    appState.surveyStarting = false
-                    appState.surveyRunning = false
-                    appState.surveyRuntimeStatus = "Collection stopped because TURN left the foreground while starting"
+                    eventMutex.withLock { finishActiveSurvey("Collection stopped because TURN left the foreground while starting") }
                     return@onSuccess
                 }
-                activeSurvey = session
                 surveyScanSequence = 0L
                 surveyBssids.clear()
                 appState.surveyAcceptedSnapshots = 0
@@ -547,6 +662,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }.onFailure { failure ->
                 appState.surveyStarting = false
                 appState.surveyRunning = false
+                appState.sessionLocked = false
                 appState.surveyRuntimeStatus = "Collection not started: ${failure.message ?: failure::class.java.simpleName}"
                 appState.surveySaveStatus = failure.message ?: failure::class.java.simpleName
             }
@@ -559,13 +675,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.surveyRunning = false
             return
         }
-        viewModelScope.launch { finishActiveSurvey("Researcher finished the bounded collection") }
+        viewModelScope.launch { eventMutex.withLock { finishActiveSurvey("Researcher finished the bounded collection") } }
     }
 
     fun toggleRealLive() {
-        if (appState.mode != DataMode.REAL_DEVICE) return
-        if (appState.liveRunning) {
-            viewModelScope.launch { finishActiveLive("Researcher stopped the physical session") }
+        if (appState.mode != DataMode.REAL_DEVICE || appState.liveStarting) return
+        if (appState.liveRunning || activePositioningSession != null) {
+            viewModelScope.launch { eventMutex.withLock { finishActiveLive("Researcher stopped the physical session") } }
         } else {
             beginRealLive()
         }
@@ -577,19 +693,25 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun relocalizeWithNextWifi() {
-        if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) return
-        particleFilter = null
-        appState.realLiveInitialized = false
-        appState.realLivePosition = null
-        appState.realParticleCloud = emptyList()
-        appState.realLiveConfidence = 0.0
-        appState.realLiveFloorConfidence = 0.0
-        appState.realLiveStatus = "Global relocalization armed; waiting for a fresh Wi-Fi fix"
-        requestLiveScan()
+        viewModelScope.launch {
+            eventMutex.withLock {
+                if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) return@withLock
+                particleFilter = null
+                appState.realLiveInitialized = false
+                appState.realLivePosition = null
+                appState.realParticleCloud = emptyList()
+                appState.realLiveConfidence = 0.0
+                appState.realLiveFloorConfidence = 0.0
+                appState.realLiveStatus = "Global relocalization armed; waiting for a fresh Wi-Fi fix"
+                requestLiveScan()
+            }
+        }
     }
 
     private fun beginRealLive() {
-        if (activePositioningSession != null) {
+        if (appState.activeProject == null || appState.projectBusy || appState.startupLoading) return
+        val context = activeContext
+        if (appState.sessionLocked || activePositioningSession != null) {
             appState.realLiveStatus = "Previous session is still closing; try again after it stops"
             return
         }
@@ -602,12 +724,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         if (!realWifiReady("Live locate")) return
+        appState.sessionLocked = true
+        appState.liveStarting = true
         appState.liveRunning = true
         appState.realLiveStatus = "Creating physical positioning session…"
         viewModelScope.launch {
             runCatching {
                 val now = System.currentTimeMillis()
-                requireSavedMapContext()
+                require(!appState.hasUnsavedMapChanges) { "Save or reload map changes before starting Live locate" }
+                sessionMap = projects.load(context).metricMap()
                 val sourceState = sensorSource.state.value
                 val sensorSession = SensorSessionEntity(
                     id = "SNS-${UUID.randomUUID()}",
@@ -619,26 +744,28 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 )
                 val positioningSession = PositioningSessionEntity(
                     id = "POS-${UUID.randomUUID()}",
-                    venueId = PILOT_VENUE_ID,
+                    venueId = context.venueId,
                     sensorSessionId = sensorSession.id,
+                    initialFloorId = context.floorId,
                     initializationType = "WAITING_FOR_FRESH_WIFI",
                     dataMode = DataMode.REAL_DEVICE.name,
                     particleCount = appState.particleCount,
                     startedAtEpochMillis = now,
                 )
-                repositories.positioning.saveSensorSession(sensorSession)
-                repositories.positioning.saveSession(positioningSession)
+                app.database.withTransaction {
+                    repositories.positioning.saveSensorSession(sensorSession)
+                    repositories.positioning.saveSession(positioningSession)
+                }
                 sensorSession to positioningSession
             }.onSuccess { (sensorSession, positioningSession) ->
-                if (!foreground || appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) {
-                    val endedAt = System.currentTimeMillis()
-                    repositories.positioning.saveSensorSession(sensorSession.copy(endedAtEpochMillis = endedAt))
-                    repositories.positioning.saveSession(positioningSession.copy(endedAtEpochMillis = endedAt))
-                    appState.liveRunning = false
-                    return@onSuccess
-                }
+                appState.liveStarting = false
                 activeSensorSession = sensorSession
                 activePositioningSession = positioningSession
+                appState.mapHasMeasurements = true
+                if (!foreground || appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) {
+                    eventMutex.withLock { finishActiveLive("Stopped because TURN left the foreground while starting") }
+                    return@onSuccess
+                }
                 particleFilter = null
                 rawPdrTracker = null
                 liveEstimateSequence = 0L
@@ -671,6 +798,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 startLiveScanLoop()
             }.onFailure { failure ->
                 appState.liveRunning = false
+                appState.liveStarting = false
+                appState.sessionLocked = false
                 appState.realLiveStatus = "Could not create physical session: ${failure.message ?: failure::class.java.simpleName}"
             }
         }
@@ -817,7 +946,6 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun finishActiveSurvey(reason: String) {
         val session = activeSurvey ?: return
-        activeSurvey = null
         surveyScanJob?.cancel()
         surveyScanJob = null
         appState.surveyRunning = false
@@ -840,63 +968,73 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
             appState.surveyRuntimeStatus = reason
             appState.surveySaveStatus = "Closed ${session.id}; ${aggregates.size} aggregate fingerprint row(s) stored"
+            appState.surveyCloseFailed = false
+            activeSurvey = null
+            appState.sessionLocked = false
         }.onFailure { failure ->
-            appState.surveyRuntimeStatus = "$reason; final aggregate write failed"
+            appState.surveyRuntimeStatus = "$reason; saving failed. Press Finish to retry."
+            appState.surveyCloseFailed = true
             appState.surveySaveStatus = failure.message ?: failure::class.java.simpleName
         }
     }
 
     fun savePilotMap() {
-        if (appState.mode != DataMode.REAL_DEVICE) {
-            appState.editorStatus = "Demo draft kept in memory; switch to Real Device to save a physical map"
-            return
-        }
-        if (!appState.realMapReady || activeSurvey != null || activePositioningSession != null) {
-            appState.editorStatus = "Wait for map loading and stop physical sessions before saving"
-            return
-        }
+        if (appState.mode != DataMode.REAL_DEVICE || !appState.canEditMap) return
+        appState.projectBusy = true
         viewModelScope.launch {
-            runCatching { persistActiveMap(System.currentTimeMillis()) }
-                .onSuccess { appState.editorStatus = "Metric polygon, walls and reference points saved to Room" }
-                .onFailure { appState.editorStatus = "Map save rejected: ${it.message}" }
+            try {
+                persistActiveMap(System.currentTimeMillis())
+                appState.markMapSaved()
+                appState.editorStatus = "Map saved on this device"
+                appState.projectStatus = "Map saved · ready to reopen"
+            } catch (error: Exception) { appState.editorStatus = "Map save rejected: ${error.message}" }
+            finally { appState.projectBusy = false }
         }
     }
 
     fun deleteSavedMap() {
-        if (appState.mode != DataMode.REAL_DEVICE || activeSurvey != null || activePositioningSession != null) {
+        if (appState.activeProject == null || appState.projectBusy || appState.startupLoading) return
+        val context = activeContext
+        if (appState.mode != DataMode.REAL_DEVICE || !appState.canEditMap || activeSurvey != null || activePositioningSession != null) {
             appState.editorStatus = "Stop physical sessions before deleting the saved map"
             return
         }
+        appState.projectBusy = true
         appState.editorStatus = "Deleting saved map and linked fingerprints…"
         viewModelScope.launch {
             runCatching {
                 app.database.withTransaction {
-                    repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first()
+                    repositories.floorPlans.observeReferencePoints(context.floorId).first()
                         .forEach { repositories.floorPlans.delete(it) }
-                    repositories.floorPlans.observeQrAnchors(PILOT_FLOOR_ID).first()
+                    repositories.floorPlans.observeQrAnchors(context.floorId).first()
                         .forEach { repositories.floorPlans.delete(it) }
-                    repositories.floorPlans.observeWalls(PILOT_FLOOR_ID).first()
+                    repositories.floorPlans.observeWalls(context.floorId).first()
                         .forEach { repositories.floorPlans.delete(it) }
-                    repositories.floorPlans.observeWalkableRegions(PILOT_FLOOR_ID).first()
+                    repositories.floorPlans.observeWalkableRegions(context.floorId).first()
                         .forEach { repositories.floorPlans.delete(it) }
-                    repositories.floorPlans.deleteAsset(PILOT_FLOOR_ID)
+                    repositories.floorPlans.deleteAsset(context.floorId)
                 }
             }.onSuccess {
-                appState.clearMapDraft()
-                appState.removeFloorPlanImage()
+                appState.clearMapDraft(force = true)
+                appState.removeFloorPlanImage(force = true)
+                appState.mapHasMeasurements = projects.load(context).hasMeasurements
+                appState.markMapSaved()
                 appState.editorStatus = "Saved map and linked fingerprints deleted from this device"
                 appState.surveyRuntimeStatus = "Create and save a map before collecting"
             }.onFailure { error ->
                 appState.editorStatus = "Delete failed: ${error.message ?: error.javaClass.simpleName}"
             }
+            appState.projectBusy = false
         }
     }
 
     fun importFloorPlan(uri: Uri) {
+        if (!appState.canEditMap) return
         if (appState.mode != DataMode.REAL_DEVICE) {
             appState.editorStatus = "Switch to REAL DEVICE mode before importing a physical map"
             return
         }
+        appState.projectBusy = true
         appState.editorStatus = "Reading floor-plan image…"
         viewModelScope.launch {
             runCatching {
@@ -915,6 +1053,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     )
                 }
             }.onSuccess { image ->
+                appState.projectBusy = false
                 appState.floorPlanContentUri = image.uri
                 appState.floorPlanMimeType = image.mimeType
                 appState.floorPlanPixelWidth = image.pixelWidth
@@ -930,6 +1069,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }.onFailure { error ->
                 appState.editorStatus = "Import failed: ${error.message ?: error.javaClass.simpleName}"
             }
+            appState.projectBusy = false
         }
     }
 
@@ -938,62 +1078,61 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private suspend fun requireSavedMapContext(referencePointId: String? = null) {
-        require(repositories.venues.venue(PILOT_VENUE_ID) != null) { "Save the floor map before collecting" }
-        require(repositories.floorPlans.floor(PILOT_FLOOR_ID) != null) { "Save the floor dimensions before collecting" }
-        require(repositories.floorPlans.observeWalkableRegions(PILOT_FLOOR_ID).first().any { it.enabled }) {
+        val context = activeContext
+        require(repositories.venues.venue(context.venueId) != null) { "Save the floor map before collecting" }
+        require(repositories.floorPlans.floor(context.floorId) != null) { "Save the floor dimensions before collecting" }
+        require(repositories.floorPlans.observeWalkableRegions(context.floorId).first().any { it.enabled }) {
             "Draw and save a walkable polygon before collecting"
         }
         if (referencePointId != null) {
-            require(repositories.floorPlans.referencePoint(referencePointId) != null) {
+            require(repositories.floorPlans.referencePoint(referencePointId)?.floorId == context.floorId) {
                 "Select a saved reference point before collecting"
             }
         }
     }
 
     private suspend fun persistActiveMap(now: Long) = app.database.withTransaction {
-        val polygon = MetricPolygon(appState.draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) })
-        com.turn.fieldtest.core.validateSimpleWalkablePolygon(polygon)
+        val context = activeContext
+        val polygon = appState.draftWalkablePolygon.takeIf { it.isNotEmpty() }?.let { vertices -> MetricPolygon(vertices.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) }) }
+        require(appState.mapEditorSupported) { "This saved map uses geometry the editor cannot safely modify" }
+        polygon?.let { com.turn.fieldtest.core.validateSimpleWalkablePolygon(it) }
         require(appState.referencePoints.map { it.id }.distinct().size == appState.referencePoints.size) {
             "Duplicate reference-point IDs"
         }
         appState.referencePoints.forEach { point ->
-            require(polygon.contains(MetricPoint(point.metres.x.toDouble(), point.metres.y.toDouble()))) {
+            require(polygon?.contains(MetricPoint(point.metres.x.toDouble(), point.metres.y.toDouble())) == true) {
                 "${point.id} is outside walkable space"
             }
         }
         require(appState.venueName.isNotBlank()) { "Enter a venue name" }
         require(appState.floorName.isNotBlank()) { "Enter a floor name" }
         require(appState.floorWidthMetres > 0f && appState.floorHeightMetres > 0f) { "Enter valid floor dimensions" }
-        val previousVenue = repositories.venues.venue(PILOT_VENUE_ID)
-        repositories.venues.save(VenueEntity(
-            id = PILOT_VENUE_ID,
-            name = appState.venueName.trim(),
-            notes = "Local TURN field-test venue.",
-            createdAtEpochMillis = previousVenue?.createdAtEpochMillis ?: now,
-            updatedAtEpochMillis = now,
-        ))
-        val previousFloor = repositories.floorPlans.floor(PILOT_FLOOR_ID)
-        repositories.floorPlans.save(FloorEntity(
-            id = PILOT_FLOOR_ID,
-            venueId = PILOT_VENUE_ID,
-            name = appState.floorName.trim(),
-            levelNumber = appState.floorLevel,
-            widthMetres = appState.floorWidthMetres.toDouble(),
-            heightMetres = appState.floorHeightMetres.toDouble(),
-            createdAtEpochMillis = previousFloor?.createdAtEpochMillis ?: now,
+        val previousVenue = requireNotNull(repositories.venues.venue(context.venueId))
+        val previousFloor = requireNotNull(repositories.floorPlans.floor(context.floorId))
+        require(previousFloor.venueId == context.venueId)
+        if (app.database.floorPlanDao().hasMeasurements(context.floorId, context.venueId)) {
+            require(previousFloor.widthMetres.toFloat() == appState.floorWidthMetres &&
+                previousFloor.heightMetres.toFloat() == appState.floorHeightMetres) { "Cannot rescale a floor with recorded measurements" }
+        }
+        repositories.venues.save(previousVenue.copy(name = appState.venueName.trim(), updatedAtEpochMillis = now))
+        repositories.floorPlans.save(previousFloor.copy(
+            name = appState.floorName.trim(), levelNumber = appState.floorLevel,
+            widthMetres = if (previousFloor.widthMetres.toFloat() == appState.floorWidthMetres) previousFloor.widthMetres else appState.floorWidthMetres.toDouble(),
+            heightMetres = if (previousFloor.heightMetres.toFloat() == appState.floorHeightMetres) previousFloor.heightMetres else appState.floorHeightMetres.toDouble(),
             updatedAtEpochMillis = now,
         ))
         val imageUri = appState.floorPlanContentUri
         if (imageUri == null) {
-            repositories.floorPlans.deleteAsset(PILOT_FLOOR_ID)
+            repositories.floorPlans.deleteAsset(context.floorId)
         } else {
             val widthPixels = appState.floorPlanPixelWidth
             val heightPixels = appState.floorPlanPixelHeight
+            val previousAsset = repositories.floorPlans.observeAsset(context.floorId).first()
             val a = appState.calibrationPoints.getOrNull(0)
             val b = appState.calibrationPoints.getOrNull(1)
             repositories.floorPlans.saveAsset(FloorPlanAssetEntity(
-                id = "ASSET-$PILOT_FLOOR_ID",
-                floorId = PILOT_FLOOR_ID,
+                id = previousAsset?.id ?: "ASSET-${context.floorId}",
+                floorId = context.floorId,
                 contentUri = imageUri,
                 mimeType = appState.floorPlanMimeType ?: "image/*",
                 pixelWidth = widthPixels,
@@ -1004,12 +1143,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 calibrationImageY2 = b?.let { heightPixels?.times(1f - it.y / appState.floorHeightMetres)?.toDouble() },
                 calibrationDistanceMetres = if (a != null && b != null) MetricPoint(a.x.toDouble(), a.y.toDouble()).distanceTo(MetricPoint(b.x.toDouble(), b.y.toDouble())) else null,
                 metresPerPixel = appState.floorPlanMetresPerPixel,
-                importedAtEpochMillis = now,
+                importedAtEpochMillis = previousAsset?.takeIf { it.contentUri == imageUri }?.importedAtEpochMillis ?: now,
             ))
         }
         val draftIds = appState.referencePoints.map { it.id }.toSet()
-        val existingPoints = repositories.floorPlans.observeReferencePoints(PILOT_FLOOR_ID).first()
-        val surveySessions = repositories.surveys.observeSessions(PILOT_VENUE_ID).first()
+        val existingPoints = repositories.floorPlans.observeReferencePoints(context.floorId).first()
+        val surveySessions = repositories.surveys.observeSessions(context.venueId).first()
         val removedPoints = existingPoints.filter { it.id !in draftIds }
         val protectedIds = removedPoints.map { it.id }.filter { id -> surveySessions.any { it.referencePointId == id } }
         require(protectedIds.isEmpty()) {
@@ -1018,9 +1157,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         removedPoints.forEach { repositories.floorPlans.delete(it) }
         appState.referencePoints.forEach { point ->
             val previous = repositories.floorPlans.referencePoint(point.id)
+            require(previous == null || previous.floorId == context.floorId) { "Reference point belongs to another floor" }
             val coordinateChanged = previous != null &&
-                (previous.xMetres != point.metres.x.toDouble() || previous.yMetres != point.metres.y.toDouble())
-            val hasTrainingData = coordinateChanged && repositories.surveys.observeSessions(PILOT_VENUE_ID).first()
+                (previous.xMetres.toFloat() != point.metres.x || previous.yMetres.toFloat() != point.metres.y)
+            val hasTrainingData = coordinateChanged && repositories.surveys.observeSessions(context.venueId).first()
                 .any { it.referencePointId == point.id }
             require(!hasTrainingData) {
                 "${point.id} already has fingerprints; use a new ID instead of moving its training coordinate"
@@ -1028,41 +1168,56 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             repositories.floorPlans.save(
                 ReferencePointEntity(
                     id = point.id,
-                    floorId = PILOT_FLOOR_ID,
+                    floorId = context.floorId,
                     name = point.label,
-                    xMetres = point.metres.x.toDouble(),
-                    yMetres = point.metres.y.toDouble(),
+                    xMetres = previous?.takeUnless { coordinateChanged }?.xMetres ?: point.metres.x.toDouble(),
+                    yMetres = previous?.takeUnless { coordinateChanged }?.yMetres ?: point.metres.y.toDouble(),
                     isInsideWalkableSpace = true,
-                    notes = "TURN pilot point; confirm the physical marker and metric coordinate before collection.",
+                    notes = previous?.notes,
                     updatedAtEpochMillis = now,
                 ),
             )
         }
         val anchorIds = appState.qrAnchors.map { it.id }.toSet()
-        repositories.floorPlans.observeQrAnchors(PILOT_FLOOR_ID).first()
-            .filter { it.anchorId !in anchorIds }
-            .forEach { repositories.floorPlans.delete(it) }
+        val savedAnchors = repositories.floorPlans.observeQrAnchors(context.floorId).first()
+        savedAnchors.filter { it.enabled && it.anchorId !in anchorIds }.forEach { repositories.floorPlans.delete(it) }
         appState.qrAnchors.forEach { point ->
-            repositories.floorPlans.save(com.turn.fieldtest.data.local.QrAnchorEntity(
-                id = "ANCHOR-${point.id}", floorId = PILOT_FLOOR_ID, anchorId = point.id,
-                xMetres = point.metres.x.toDouble(), yMetres = point.metres.y.toDouble(),
-            ))
+            val previous = savedAnchors.firstOrNull { it.anchorId == point.id }
+            val anchor = previous ?: com.turn.fieldtest.data.local.QrAnchorEntity(
+                id = "ANCHOR-${point.id}", floorId = context.floorId, anchorId = point.id,
+                xMetres = point.metres.x.toDouble(), yMetres = point.metres.y.toDouble())
+            repositories.floorPlans.save(anchor.copy(
+                xMetres = if (anchor.xMetres.toFloat() == point.metres.x) anchor.xMetres else point.metres.x.toDouble(),
+                yMetres = if (anchor.yMetres.toFloat() == point.metres.y) anchor.yMetres else point.metres.y.toDouble()))
         }
-        repositories.floorPlans.save(WalkableRegionEntity(
-            id = "REGION-PILOT", floorId = PILOT_FLOOR_ID, name = "Pilot walkable region",
-            polygonJson = JsonArray(appState.draftWalkablePolygon.map {
+        val regions = repositories.floorPlans.observeWalkableRegions(context.floorId).first().filter { it.enabled }
+        require(regions.size <= 1) { "Multiple saved walkable regions must be preserved" }
+        if (appState.draftWalkablePolygon.isEmpty()) regions.forEach { repositories.floorPlans.delete(it) }
+        else repositories.floorPlans.save(WalkableRegionEntity(
+            id = regions.firstOrNull()?.id ?: "REGION-${context.floorId}", floorId = context.floorId,
+            name = regions.firstOrNull()?.name ?: "Walkable area",
+            polygonJson = regions.firstOrNull()?.takeIf { previous ->
+                decodePolygon(previous.polygonJson).vertices.map { Offset(it.x.toFloat(), it.y.toFloat()) } == appState.draftWalkablePolygon.toList()
+            }?.polygonJson ?: JsonArray(appState.draftWalkablePolygon.map {
                 JsonObject(mapOf("x" to JsonPrimitive(it.x.toDouble()), "y" to JsonPrimitive(it.y.toDouble())))
             }).toString(), updatedAtEpochMillis = now,
         ))
-        repositories.floorPlans.observeWalls(PILOT_FLOOR_ID).first().forEach { repositories.floorPlans.delete(it) }
+        val savedWalls = repositories.floorPlans.observeWalls(context.floorId).first().filter { it.enabled }
+        val retained = mutableSetOf<String>()
         appState.draftWalls.forEachIndexed { index, (start, end) ->
             require(start != end) { "Wall $index has zero length" }
-            repositories.floorPlans.save(WallSegmentEntity(
-                id = "WALL-PILOT-$index", floorId = PILOT_FLOOR_ID,
+            val previous = savedWalls.firstOrNull {
+                it.id !in retained && it.startXMetres.toFloat() == start.x && it.startYMetres.toFloat() == start.y &&
+                    it.endXMetres.toFloat() == end.x && it.endYMetres.toFloat() == end.y
+            }
+            val wall = previous ?: WallSegmentEntity(
+                id = "WALL-${UUID.randomUUID()}", floorId = context.floorId,
                 startXMetres = start.x.toDouble(), startYMetres = start.y.toDouble(),
-                endXMetres = end.x.toDouble(), endYMetres = end.y.toDouble(),
-            ))
+                endXMetres = end.x.toDouble(), endYMetres = end.y.toDouble())
+            retained += wall.id
+            repositories.floorPlans.save(wall)
         }
+        savedWalls.filter { it.id !in retained }.forEach { repositories.floorPlans.delete(it) }
     }
 
     private suspend fun processLiveWifiBatch(batch: WifiScanBatch) {
@@ -1208,9 +1363,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private suspend fun loadPilotFingerprints(): List<WifiFingerprint> {
-        val rows = repositories.surveys.matchingFingerprints(PILOT_VENUE_ID)
+        val context = activeContext
+        val rows = repositories.surveys.matchingFingerprints(context.venueId)
         return rows.groupBy { it.referencePointId }.mapNotNull { (referencePointId, pointRows) ->
-            val point = repositories.floorPlans.referencePoint(referencePointId) ?: return@mapNotNull null
+            val point = repositories.floorPlans.referencePoint(referencePointId)?.takeIf { it.floorId == context.floorId } ?: return@mapNotNull null
             val vector = pointRows.groupBy { it.bssid.lowercase() }.mapValues { (_, bssidRows) ->
                 bssidRows.map { it.medianRssiDbm }.sorted().let(::median)
             }
@@ -1223,19 +1379,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private fun currentPilotMap(): MetricMap {
-        val walkable = MetricPolygon(
-            appState.draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) },
-        )
-        val walls = appState.draftWalls.mapIndexedNotNull { index, (start, end) ->
-            if (start == end) null else WallSegment(
-                id = "W-$index",
-                start = MetricPoint(start.x.toDouble(), start.y.toDouble()),
-                end = MetricPoint(end.x.toDouble(), end.y.toDouble()),
-            )
-        }
-        return MetricMap(mapOf(PILOT_FLOOR_ID to MapFloor(PILOT_FLOOR_ID, listOf(walkable), walls)))
-    }
+    private fun currentPilotMap(): MetricMap = requireNotNull(sessionMap) { "No saved session map" }
 
     private suspend fun persistWifiEstimate(
         session: PositioningSessionEntity,
@@ -1313,19 +1457,31 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private suspend fun finishActiveLive(reason: String) {
+        if (activePositioningSession == null) return
         liveScanJob?.cancel()
         liveScanJob = null
         appState.liveRunning = false
         appState.realLiveStatus = reason
         val endedAt = System.currentTimeMillis()
-        activeSensorSession?.let { repositories.positioning.saveSensorSession(it.copy(endedAtEpochMillis = endedAt)) }
-        activePositioningSession?.let { repositories.positioning.saveSession(it.copy(endedAtEpochMillis = endedAt)) }
-        activePositioningSession?.let { session ->
-            repositories.evaluation.observeRuns(PILOT_VENUE_ID).first().firstOrNull { it.id == "TEST-${session.id}" }
-                ?.let { repositories.evaluation.saveRun(it.copy(endedAtEpochMillis = endedAt)) }
+        try {
+            app.database.withTransaction {
+                activeSensorSession?.let { repositories.positioning.saveSensorSession(it.copy(endedAtEpochMillis = endedAt)) }
+                activePositioningSession?.let { repositories.positioning.saveSession(it.copy(endedAtEpochMillis = endedAt)) }
+                activePositioningSession?.let { session ->
+                    repositories.evaluation.observeRuns(session.venueId).first().firstOrNull { it.id == "TEST-${session.id}" }
+                        ?.let { repositories.evaluation.saveRun(it.copy(endedAtEpochMillis = endedAt)) }
+                }
+            }
+        } catch (error: Exception) {
+            appState.liveCloseFailed = true
+            appState.realLiveStatus = "Could not save session end: ${error.message}. Retry saving before switching projects."
+            return
         }
+        appState.liveCloseFailed = false
         activeSensorSession = null
         activePositioningSession = null
+        sessionMap = null
+        appState.sessionLocked = false
         particleFilter = null
         rawPdrTracker = null
     }
@@ -1566,11 +1722,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     companion object {
-        const val PILOT_VENUE_ID = "VEN-CS-01"
-        const val PILOT_FLOOR_ID = "FL-G"
-        const val PILOT_REFERENCE_POINT_ID = "RP-G-07"
-        const val PILOT_X_METRES = 14.0
-        const val PILOT_Y_METRES = 18.0
+
         const val MAX_TRAIL_POINTS = 500
     }
 }

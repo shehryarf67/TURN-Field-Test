@@ -43,6 +43,12 @@ android {
         unitTests.isReturnDefaultValues = true
         unitTests.all { it.useJUnitPlatform() }
     }
+
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -85,5 +91,6 @@ dependencies {
 
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.room:room-testing:2.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }

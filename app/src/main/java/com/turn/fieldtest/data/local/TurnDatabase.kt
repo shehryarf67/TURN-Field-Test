@@ -36,7 +36,7 @@ import com.turn.fieldtest.data.export.BackupDao
         AggregatedBleFingerprintEntity::class,
     ],
     version = TurnDatabase.SCHEMA_VERSION,
-    exportSchema = false,
+    exportSchema = true,
 )
 @TypeConverters(RoomConverters::class)
 abstract class TurnDatabase : RoomDatabase() {
