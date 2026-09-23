@@ -193,7 +193,9 @@ interface SurveyDao {
         SELECT aggregated_wifi_fingerprints.* FROM aggregated_wifi_fingerprints
         INNER JOIN reference_points ON reference_points.id = aggregated_wifi_fingerprints.referencePointId
         INNER JOIN floors ON floors.id = reference_points.floorId
-        WHERE floors.venueId = :venueId AND aggregated_wifi_fingerprints.excludedFromMatching = 0
+        INNER JOIN survey_sessions ON survey_sessions.id = aggregated_wifi_fingerprints.surveySessionId
+        WHERE survey_sessions.dataMode = 'REAL_DEVICE' AND survey_sessions.completionStatus IN ('COMPLETED', 'LEGACY')
+          AND floors.venueId = :venueId AND aggregated_wifi_fingerprints.excludedFromMatching = 0
         """,
     )
     suspend fun matchingFingerprintsForVenue(venueId: String): List<AggregatedWifiFingerprintEntity>

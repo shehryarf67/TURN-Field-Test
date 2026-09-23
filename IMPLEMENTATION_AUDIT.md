@@ -1,5 +1,7 @@
 # TURN implementation audit — 2026-09-07
 
+Historical audit. The subsequent one-floor revamp adds graph/POI editing, A* navigation, known-start initialization and redesigned map/survey/navigation screens. See [the current prototype guide](docs/UNIVERSITY_FLOOR_PROTOTYPE.md) for implemented behavior and remaining physical validation.
+
 This is a source review and completion checklist, not a report of physical-phone accuracy. The original acceptance criteria are not all met yet.
 
 ## Fixed during this review

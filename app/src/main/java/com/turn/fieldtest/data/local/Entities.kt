@@ -53,7 +53,7 @@ data class FloorEntity(
 data class FloorPlanAssetEntity(
     @PrimaryKey val id: String,
     val floorId: String,
-    /** Persisted Storage Access Framework URI; image bytes are not duplicated in Room. */
+    /** App-owned file URI for new imports, or a legacy persisted document URI. Image bytes stay outside Room. */
     val contentUri: String,
     val mimeType: String,
     val pixelWidth: Int? = null,
@@ -200,6 +200,9 @@ data class SurveySessionEntity(
     val dataMode: String,
     val startedAtEpochMillis: Long,
     val endedAtEpochMillis: Long? = null,
+    val targetSnapshotCount: Int? = null,
+    @androidx.room.ColumnInfo(defaultValue = "'LEGACY'") val completionStatus: String = "LEGACY",
+
 )
 
 @Entity(

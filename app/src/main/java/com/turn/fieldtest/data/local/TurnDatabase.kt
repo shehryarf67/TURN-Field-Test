@@ -10,6 +10,8 @@ import com.turn.fieldtest.data.export.BackupDao
 
 @Database(
     entities = [
+        NavigationNodeEntity::class,
+        NavigationEdgeEntity::class,
         VenueEntity::class,
         FloorEntity::class,
         FloorPlanAssetEntity::class,
@@ -40,6 +42,7 @@ import com.turn.fieldtest.data.export.BackupDao
 )
 @TypeConverters(RoomConverters::class)
 abstract class TurnDatabase : RoomDatabase() {
+    abstract fun navigationDao(): NavigationDao
     abstract fun venueDao(): VenueDao
     abstract fun floorPlanDao(): FloorPlanDao
     abstract fun surveyDao(): SurveyDao
@@ -49,7 +52,7 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun backupDao(): BackupDao
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val DATABASE_NAME = "turn-field-test.db"
 
         fun build(context: Context, databaseName: String = DATABASE_NAME): TurnDatabase =
@@ -64,5 +67,18 @@ abstract class TurnDatabase : RoomDatabase() {
  * fallback is intentionally not enabled because survey and independent test data are irreplaceable.
  */
 object TurnDatabaseMigrations {
-    val ALL: Array<Migration> = emptyArray()
+    val FROM_1_TO_2 = object : Migration(1, 2) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS navigation_nodes (id TEXT NOT NULL, floorId TEXT NOT NULL, xMetres REAL NOT NULL, yMetres REAL NOT NULL, poiId TEXT, PRIMARY KEY(id), FOREIGN KEY(floorId) REFERENCES floors(id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(poiId) REFERENCES points_of_interest(id) ON UPDATE NO ACTION ON DELETE SET NULL)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_navigation_nodes_floorId ON navigation_nodes(floorId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_navigation_nodes_poiId ON navigation_nodes(poiId)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS navigation_edges (id TEXT NOT NULL, floorId TEXT NOT NULL, fromNodeId TEXT NOT NULL, toNodeId TEXT NOT NULL, distanceMetres REAL NOT NULL, walkable INTEGER NOT NULL, bidirectional INTEGER NOT NULL, accessible INTEGER NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(id), FOREIGN KEY(floorId) REFERENCES floors(id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(fromNodeId) REFERENCES navigation_nodes(id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(toNodeId) REFERENCES navigation_nodes(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_navigation_edges_floorId ON navigation_edges(floorId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_navigation_edges_fromNodeId ON navigation_edges(fromNodeId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_navigation_edges_toNodeId ON navigation_edges(toNodeId)")
+            db.execSQL("ALTER TABLE survey_sessions ADD COLUMN targetSnapshotCount INTEGER")
+            db.execSQL("ALTER TABLE survey_sessions ADD COLUMN completionStatus TEXT NOT NULL DEFAULT 'LEGACY'")
+        }
+    }
+    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2)
 }

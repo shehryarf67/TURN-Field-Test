@@ -59,6 +59,9 @@ data class SavedFloorMap(
     val points: List<ReferencePointEntity>,
     val anchors: List<QrAnchorEntity>,
     val hasMeasurements: Boolean,
+    val nodes: List<NavigationNodeEntity> = emptyList(),
+    val edges: List<NavigationEdgeEntity> = emptyList(),
+    val destinations: List<PointOfInterestEntity> = emptyList(),
 ) {
     val context get() = ProjectContext(venue.id, floor.id)
 
@@ -101,6 +104,8 @@ class ProjectRepository(private val database: TurnDatabase) {
             repositories.floorPlans.observeWalls(floor.id).first(),
             repositories.floorPlans.observeReferencePoints(floor.id).first(),
             repositories.floorPlans.observeQrAnchors(floor.id).first(),
-            database.floorPlanDao().hasMeasurements(floor.id, venue.id))
+            database.floorPlanDao().hasMeasurements(floor.id, venue.id),
+            database.navigationDao().nodes(floor.id), database.navigationDao().edges(floor.id),
+            database.navigationDao().destinations(floor.id))
     }
 }

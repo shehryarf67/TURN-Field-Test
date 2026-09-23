@@ -3,6 +3,9 @@ package com.turn.fieldtest.ui.screens
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +28,7 @@ internal fun FloorPlanImage(
 ) {
     val resolver = LocalContext.current.contentResolver
     var bitmap by remember(contentUri) { mutableStateOf<ImageBitmap?>(null) }
+    var loading by remember(contentUri) { mutableStateOf(true) }
     LaunchedEffect(contentUri) {
         bitmap = withContext(Dispatchers.IO) {
             runCatching {
@@ -38,6 +42,7 @@ internal fun FloorPlanImage(
                     ?.asImageBitmap()
             }.getOrNull()
         }
+        loading = false
     }
     bitmap?.let {
         Image(
@@ -47,5 +52,8 @@ internal fun FloorPlanImage(
             contentScale = ContentScale.FillBounds,
             alpha = alpha,
         )
+    }
+    if (!loading && bitmap == null) Box(modifier, contentAlignment = Alignment.Center) {
+        Text("Floor-plan image unavailable. Reimport it in Map setup.")
     }
 }

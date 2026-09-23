@@ -15,6 +15,8 @@ data class TurnDatabaseExport(
     val wallSegments: List<WallSegmentEntity> = emptyList(),
     val verticalTransitions: List<VerticalTransitionEntity> = emptyList(),
     val pointsOfInterest: List<PointOfInterestEntity> = emptyList(),
+    val navigationNodes: List<NavigationNodeEntity> = emptyList(),
+    val navigationEdges: List<NavigationEdgeEntity> = emptyList(),
     val referencePoints: List<ReferencePointEntity> = emptyList(),
     val qrAnchors: List<QrAnchorEntity> = emptyList(),
     val surveySessions: List<SurveySessionEntity> = emptyList(),
@@ -35,7 +37,7 @@ data class TurnDatabaseExport(
 ) {
     /** Validate identity and ownership before any repository writes occur. */
     fun validationErrors(): List<String> = buildList {
-        if (schemaVersion != CURRENT_EXPORT_SCHEMA) add("Unsupported export schema $schemaVersion")
+        if (schemaVersion !in 1..CURRENT_EXPORT_SCHEMA) add("Unsupported export schema $schemaVersion")
         checkUnique("venue", venues.map(VenueEntity::id))
         checkUnique("floor", floors.map(FloorEntity::id))
         checkUnique("reference point", referencePoints.map(ReferencePointEntity::id))
@@ -46,6 +48,15 @@ data class TurnDatabaseExport(
 
         val venueIds = venues.mapTo(hashSetOf(), VenueEntity::id)
         val floorIds = floors.mapTo(hashSetOf(), FloorEntity::id)
+        checkUnique("navigation node", navigationNodes.map { it.id })
+        checkUnique("navigation edge", navigationEdges.map { it.id })
+        val graphNodes = navigationNodes.associateBy { it.id }
+        navigationNodes.filter { it.floorId !in floorIds || !it.xMetres.isFinite() || !it.yMetres.isFinite() ||
+            (it.poiId != null && pointsOfInterest.none { poi -> poi.id == it.poiId && poi.floorId == it.floorId }) }
+            .forEach { add("Navigation node ${it.id} has invalid ownership or coordinates") }
+        navigationEdges.filter { it.floorId !in floorIds || graphNodes[it.fromNodeId]?.floorId != it.floorId ||
+            graphNodes[it.toNodeId]?.floorId != it.floorId || it.fromNodeId == it.toNodeId || !it.distanceMetres.isFinite() || it.distanceMetres <= 0 }
+            .forEach { add("Navigation edge ${it.id} has invalid endpoints or distance") }
         val referenceIds = referencePoints.mapTo(hashSetOf(), ReferencePointEntity::id)
         val surveyIds = surveySessions.mapTo(hashSetOf(), SurveySessionEntity::id)
         val snapshotIds = wifiScanSnapshots.mapTo(hashSetOf(), WifiScanSnapshotEntity::id)
@@ -94,7 +105,7 @@ data class TurnDatabaseExport(
     }
 
     companion object {
-        const val CURRENT_EXPORT_SCHEMA = 1
+        const val CURRENT_EXPORT_SCHEMA = 2
     }
 }
 
@@ -109,6 +120,8 @@ data class VenueDefinitionExport(
     val wallSegments: List<WallSegmentEntity> = emptyList(),
     val verticalTransitions: List<VerticalTransitionEntity> = emptyList(),
     val pointsOfInterest: List<PointOfInterestEntity> = emptyList(),
+    val navigationNodes: List<NavigationNodeEntity> = emptyList(),
+    val navigationEdges: List<NavigationEdgeEntity> = emptyList(),
     val referencePoints: List<ReferencePointEntity> = emptyList(),
     val qrAnchors: List<QrAnchorEntity> = emptyList(),
     val testCheckpoints: List<TestCheckpointEntity> = emptyList(),

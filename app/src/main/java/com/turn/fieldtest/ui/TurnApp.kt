@@ -68,6 +68,7 @@ import com.turn.fieldtest.ui.theme.TurnTheme
 import kotlinx.coroutines.delay
 
 data class TurnAppActions(
+    val onDestinationSelected: (String?) -> Unit = {},
     val onProjectCreated: (com.turn.fieldtest.data.repository.ProjectInput) -> Unit = {},
     val onProjectOpened: (com.turn.fieldtest.data.repository.ProjectContext, Boolean) -> Unit = { _, _ -> },
     val onRealExport: (android.net.Uri, com.turn.fieldtest.data.export.ResearchDataset) -> Unit = { _, _ -> },
@@ -124,7 +125,7 @@ fun TurnApp(
     if (state.compactMenuOpen) {
         ModalBottomSheet(onDismissRequest = { state.compactMenuOpen = false }) {
             Text(
-                text = "All research tools",
+                text = "Tools & settings",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
@@ -157,9 +158,9 @@ private fun AppScaffold(
 ) {
     val primaryDestinations = listOf(
         TurnDestination.VENUES,
+        TurnDestination.FLOOR_EDITOR,
         TurnDestination.SURVEY,
-        TurnDestination.LIVE_LOCATE,
-        TurnDestination.EVALUATE
+        TurnDestination.LIVE_LOCATE
     )
 
     if (state.mode == DataMode.DEMO && state.liveRunning) {
@@ -192,7 +193,7 @@ private fun AppScaffold(
                 title = {
                     Column {
                         Text(
-                            "TURN RESEARCH PROTOTYPE",
+                            "TURN",
                             fontWeight = FontWeight.Black,
                             letterSpacing = 0.6.sp,
                             maxLines = 1,
@@ -267,7 +268,7 @@ private fun TurnScreen(state: TurnAppState, actions: TurnAppActions, compact: Bo
     }
     when (state.destination) {
         TurnDestination.VENUES -> if (state.mode == DataMode.REAL_DEVICE) com.turn.fieldtest.ui.screens.ProjectsScreen(state, actions) else VenuesScreen(state, compact)
-        TurnDestination.FLOOR_EDITOR -> FloorEditorScreen(
+        TurnDestination.FLOOR_EDITOR -> if (state.mode == DataMode.REAL_DEVICE) com.turn.fieldtest.ui.screens.MapSetupScreen(state, actions) else FloorEditorScreen(
             state,
             compact,
             onSave = actions.onMapSaved,
@@ -280,13 +281,13 @@ private fun TurnScreen(state: TurnAppState, actions: TurnAppActions, compact: Bo
             onRequestScan = actions.onDiagnosticScanRequested,
             onToggleDiagnosticWalk = actions.onDiagnosticWalkToggled,
         )
-        TurnDestination.SURVEY -> SurveyScreen(
+        TurnDestination.SURVEY -> if (state.mode == DataMode.REAL_DEVICE) com.turn.fieldtest.ui.screens.FieldSurveyScreen(state, actions) else SurveyScreen(
             state,
             compact,
             onStartRealSurvey = actions.onRealSurveyStarted,
             onFinishRealSurvey = actions.onRealSurveyFinished,
         )
-        TurnDestination.LIVE_LOCATE -> LiveLocateScreen(
+        TurnDestination.LIVE_LOCATE -> if (state.mode == DataMode.REAL_DEVICE) com.turn.fieldtest.ui.screens.NavigationScreen(state, actions) else LiveLocateScreen(
             state,
             compact,
             onRealLiveToggle = actions.onRealLiveToggled,

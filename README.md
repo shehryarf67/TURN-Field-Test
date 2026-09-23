@@ -1,18 +1,18 @@
 # TURN Field Test
 
-TURN Field Test is an offline-first Android research application for collecting real Wi-Fi fingerprints and testing an uncertainty-aware indoor-positioning pipeline:
+TURN is an offline-first Android indoor-navigation prototype for one real building floor, with retained research tools for Wi-Fi fingerprinting and uncertainty-aware positioning:
 
 `QR/manual/Wi-Fi fix -> PDR prediction -> map constraint -> Wi-Fi correction -> fused blue dot`
 
-The physical screen shows raw PDR, Wi-Fi-only and map-constrained particle-filter estimates. A separate stabilized output remains pending. Ground truth is stored only in independent evaluation records and is never available to the estimator.
+Navigate shows the fused blue dot, uncertainty and route. Raw PDR, Wi-Fi fixes and particles are optional debug overlays. A separate stabilized research output remains pending. Evaluation ground truth remains separate from the estimator; a user-declared known start is an explicit initialization anchor.
 
 > **Research prototype:** Demo mode uses deterministic prerecorded data. Build and unit-test verification do not establish emulator UI behavior or physical-device accuracy.
 
-New team members should begin with [PARTNER_SETUP_AND_FIELD_GUIDE.md](PARTNER_SETUP_AND_FIELD_GUIDE.md), which covers repository access, installation, phone setup, fingerprint surveys, physical Live Locate runs, troubleshooting and the current research-build boundaries.
+Begin with the [university-floor prototype guide](docs/UNIVERSITY_FLOOR_PROTOTYPE.md) for the current Projects → Map setup → Survey → Navigate workflow. The earlier [partner setup guide](PARTNER_SETUP_AND_FIELD_GUIDE.md) remains useful for toolchain and phone setup; its screen/feature descriptions predate this revamp.
 
-Read [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) for current gaps. Physical image import/calibration, map editing, survey, tracking, checkpoint capture, persistence and JSON/CSV export are connected; multi-floor runtime, QR camera workflows and backup restore still need completion and device validation.
+The [original implementation audit](IMPLEMENTATION_AUDIT.md) is historical. Image import/calibration, map and graph/destination editing, surveys, known-start or Wi-Fi initialization, tracking, A* routing, checkpoints, persistence and JSON/CSV export are connected. Physical-phone accuracy still requires testing on the selected university floor. Multi-floor runtime, QR camera workflows and backup restore are outside this prototype slice.
 
-The university-floor revamp is being implemented incrementally. [Phase 1](docs/PHASE_1_PROJECT_CONTEXT.md) adds persistent project selection and protects existing records. Navigation graph editing, destinations, A* routing and the redesigned live map are subsequent phases.
+The revamp retains [Phase 1's persistent project selection](docs/PHASE_1_PROJECT_CONTEXT.md) and adds a shared zoomable map, saved navigation graph/POIs, wall-safe A* routing, durable survey completion, and a clean live blue-dot view with optional research overlays. Room's additive 1 → 2 migration preserves existing records.
 
 ## What is included
 
@@ -26,6 +26,8 @@ The university-floor revamp is being implemented incrementally. [Phase 1](docs/P
 - Wi-Fi-only, PDR-only and fused evaluation records.
 - Optional BLE architecture and parsers, disabled until beacon hardware is configured.
 - Room persistence, JSON/CSV exchange, deterministic demo/replay data and JVM tests.
+- Persistent manual path/destination editing and A* routes with live remaining distance.
+- Declared known-location or fresh Wi-Fi initialization, relative map-heading alignment, blue dot and uncertainty overlays.
 
 ## Surface Laptop setup
 
@@ -90,7 +92,7 @@ New installations open in Real Device mode. TURN restores the last saved mode an
 4. Add physical reference points every 2-3 m and place matching removable labels on site.
 5. Use **Radio diagnostics** to verify fresh Wi-Fi scans and sensor availability.
 6. At each reference point, use **Survey** to collect multiple independent scan snapshots. Repeat with different phones/orientations/times.
-7. Save the map, then use **Live locate**: the current physical runtime initializes from a confident fresh Wi-Fi fix. Face map +x when starting. PDR updates between scans; fresh Wi-Fi observations correct drift. QR/manual initialization UI remains pending.
+7. Save the map and connected paths/destinations, then use **Navigate**. Choose your known start or wait for a confident fresh Wi-Fi fix. Enter the map direction you are facing before starting. Select a destination to see its A* route. PDR updates between scans; fresh Wi-Fi observations correct drift.
 8. At separate checkpoints that were not training points, use **Evaluate** to capture error and floor correctness.
 9. Export the anonymized results for analysis.
 

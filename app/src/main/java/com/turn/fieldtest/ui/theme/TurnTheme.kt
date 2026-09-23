@@ -33,6 +33,11 @@ private val DarkColors = darkColorScheme(
     surface = Color(0xFF0B1C29),
     onSurface = Color(0xFFE3EDF3),
     surfaceVariant = TurnNavyRaised,
+    surfaceContainerLowest = Color(0xFF06121C),
+    surfaceContainerLow = Color(0xFF0D202F),
+    surfaceContainer = Color(0xFF122A3B),
+    surfaceContainerHigh = Color(0xFF193548),
+    surfaceContainerHighest = Color(0xFF223C4D),
     onSurfaceVariant = Color(0xFFB8CAD5),
     error = TurnRed
 )

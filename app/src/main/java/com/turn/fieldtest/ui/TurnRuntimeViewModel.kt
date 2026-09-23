@@ -56,6 +56,7 @@ import com.turn.fieldtest.data.local.SensorSessionEntity
 import com.turn.fieldtest.data.local.SurveySessionEntity
 import com.turn.fieldtest.data.local.VenueEntity
 import com.turn.fieldtest.data.survey.WifiSurveyCaptureService
+import com.turn.fieldtest.core.NavigationGraph
 import com.turn.fieldtest.core.AbsoluteFix
 import com.turn.fieldtest.core.AbsoluteFixSource
 import com.turn.fieldtest.core.MapFloor
@@ -119,6 +120,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private val projects = ProjectRepository(app.database)
     private val eventMutex = Mutex()
     private var sessionMap: MetricMap? = null
+    private var sessionGraph: NavigationGraph? = null
+    private var sessionInitialHeadingRadians = 0.0
+    private var savedNavigationGraph: NavigationGraph? = null
+    private val lastLiveApTimestamps = mutableMapOf<String, Long>()
     private val activeContext get() = requireNotNull(appState.activeProject) { "Open a saved project first" }
     private val captureService = WifiSurveyCaptureService(repositories.surveys)
 
@@ -471,6 +476,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         appState.activeProject = context
+        appState.navigationNodes.clear(); appState.navigationNodes.addAll(savedMap.nodes)
+        appState.navigationEdges.clear(); appState.navigationEdges.addAll(savedMap.edges)
+        appState.destinations.clear(); appState.destinations.addAll(savedMap.destinations)
+        appState.selectedNodeId = null; appState.selectedDestinationId = null
+        appState.manualStartPoint = null; appState.pickingStart = false
+        appState.clearRoute(); appState.liveEstimateEpochMillis = null
+        savedNavigationGraph = runCatching { NavigationGraph(savedMap.metricMap().floors.getValue(context.floorId), savedMap.nodes.map { it.core() }, savedMap.edges.map { it.core() }) }.getOrNull()
         appState.mapHasMeasurements = savedMap.hasMeasurements
         appState.mapEditorSupported = regions.count { it.enabled } <= 1 && floor.originXMetres == 0.0 && floor.originYMetres == 0.0
         appState.markMapSaved()
@@ -500,6 +512,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realNearestFingerprintIds = emptyList()
         appState.realTestSamples.clear()
         appState.realLiveStatus = "Ready to start a physical session on ${floor.name}"
+        refreshSurveyProgress(context)
         appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
         if (!appState.mapEditorSupported) appState.editorStatus = "Map preserved. Editing multiple walkable regions or a custom origin is not supported yet."
     }
@@ -627,6 +640,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     venueId = context.venueId,
                     floorId = context.floorId,
                     referencePointId = selectedPoint.id,
+                    targetSnapshotCount = appState.surveyTargetSnapshots.coerceIn(1, 50),
+                    completionStatus = "COLLECTING",
                     knownXMetres = selectedPoint.xMetres,
                     knownYMetres = selectedPoint.yMetres,
                     deviceManufacturer = Build.MANUFACTURER,
@@ -702,6 +717,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realParticleCloud = emptyList()
                 appState.realLiveConfidence = 0.0
                 appState.realLiveFloorConfidence = 0.0
+                appState.clearRoute()
+                appState.routeStatus = "Waiting for a fresh position before routing"
                 appState.realLiveStatus = "Global relocalization armed; waiting for a fresh Wi-Fi fix"
                 requestLiveScan()
             }
@@ -724,6 +741,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         if (!realWifiReady("Live locate")) return
+        if (sensorSource.state.value.selectedStepSource == null || sensorSource.state.value.selectedHeadingSource == null) {
+            appState.realLiveStatus = "Step or heading sensor unavailable. Check Diagnostics and permissions before walking."
+            return
+        }
+        if (!appState.initialHeadingDegrees.isFinite()) { appState.realLiveStatus = "Enter a valid map heading"; return }
+        sessionInitialHeadingRadians = normalizeRadians(Math.toRadians(appState.initialHeadingDegrees))
+        val chosenStart = appState.manualStartPoint?.let { MetricPoint(it.x.toDouble(), it.y.toDouble()) }
         appState.sessionLocked = true
         appState.liveStarting = true
         appState.liveRunning = true
@@ -732,7 +756,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             runCatching {
                 val now = System.currentTimeMillis()
                 require(!appState.hasUnsavedMapChanges) { "Save or reload map changes before starting Live locate" }
-                sessionMap = projects.load(context).metricMap()
+                val saved = projects.load(context)
+                sessionMap = saved.metricMap()
+                if (chosenStart != null) require(sessionMap!!.floors.getValue(context.floorId).isWalkable(chosenStart)) { "Known start must be inside saved walkable space" }
+                sessionGraph = NavigationGraph(sessionMap!!.floors.getValue(context.floorId), saved.nodes.map { it.core() }, saved.edges.map { it.core() })
+                lastLiveApTimestamps.clear()
                 val sourceState = sensorSource.state.value
                 val sensorSession = SensorSessionEntity(
                     id = "SNS-${UUID.randomUUID()}",
@@ -740,6 +768,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     selectedStepSource = sourceState.selectedStepSource?.name ?: "UNAVAILABLE",
                     selectedHeadingSource = sourceState.selectedHeadingSource?.name ?: "UNAVAILABLE",
                     initialStrideMetres = appState.strideMetres.toDouble(),
+                    headingOffsetDegrees = appState.initialHeadingDegrees,
                     startedAtEpochMillis = now,
                 )
                 val positioningSession = PositioningSessionEntity(
@@ -747,7 +776,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     venueId = context.venueId,
                     sensorSessionId = sensorSession.id,
                     initialFloorId = context.floorId,
-                    initializationType = "WAITING_FOR_FRESH_WIFI",
+                    initializationType = if (chosenStart == null) "WAITING_FOR_FRESH_WIFI" else "MANUAL",
                     dataMode = DataMode.REAL_DEVICE.name,
                     particleCount = appState.particleCount,
                     startedAtEpochMillis = now,
@@ -771,7 +800,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 liveEstimateSequence = 0L
                 livePdrSequence = 0L
                 liveYawBaselineRadians = latestDeviceYawRadians
-                latestMapHeadingRadians = 0.0
+                latestMapHeadingRadians = sessionInitialHeadingRadians
                 previousGyroscopeTimestampNanos = null
                 appState.liveRunning = true
                 appState.realLiveInitialized = false
@@ -794,7 +823,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLiveMapRejectedCount = 0
                 appState.realLiveSessionLabel = positioningSession.id
                 appState.realLiveHeadingSource = sensorSource.state.value.selectedHeadingSource?.name ?: "unavailable"
-                appState.realLiveStatus = "Waiting for a fresh Wi-Fi fix; hold the phone facing map +x"
+                appState.realLiveStatus = "Waiting for a fresh Wi-Fi fix. Heading aligned to %.0f° on the map.".format(appState.initialHeadingDegrees)
+                if (chosenStart != null) {
+                    try { initializeManual(chosenStart, context.floorId) }
+                    catch (error: Exception) { appState.realLiveStatus = "Known start could not initialize tracking: ${error.message}. Stop and choose another point." }
+                }
                 startLiveScanLoop()
             }.onFailure { failure ->
                 appState.liveRunning = false
@@ -935,7 +968,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 "Cached/stale snapshot stored for lineage and excluded from aggregation"
             }
             appState.surveySaveStatus = "Room contains ${surveyScanSequence} snapshot record(s) for this session"
-            if (appState.surveyAcceptedSnapshots >= appState.surveyTargetSnapshots) {
+            if (appState.surveyAcceptedSnapshots >= (session.targetSnapshotCount ?: appState.surveyTargetSnapshots)) {
                 finishActiveSurvey("Target reached; bounded survey completed automatically")
             }
         }.onFailure { failure ->
@@ -951,8 +984,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.surveyRunning = false
         appState.surveyStarting = false
         runCatching {
-            repositories.surveys.save(session.copy(endedAtEpochMillis = System.currentTimeMillis()))
-            captureService.recomputeAggregates(session.id, System.currentTimeMillis())
+            app.database.withTransaction {
+                val freshCount = repositories.surveys.snapshotsForAggregation(session.id).count { it.isFresh && it.resultsUpdated }
+                repositories.surveys.save(session.copy(endedAtEpochMillis = System.currentTimeMillis(),
+                    completionStatus = if (session.targetSnapshotCount != null && freshCount >= session.targetSnapshotCount) "COMPLETED" else "PARTIAL"))
+                captureService.recomputeAggregates(session.id, System.currentTimeMillis())
+            }
         }.onSuccess { aggregates ->
             appState.realSurveyAggregates = aggregates.map { aggregate ->
                 FingerprintAggregateUi(
@@ -971,6 +1008,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.surveyCloseFailed = false
             activeSurvey = null
             appState.sessionLocked = false
+            refreshSurveyProgress(ProjectContext(session.venueId, session.floorId))
         }.onFailure { failure ->
             appState.surveyRuntimeStatus = "$reason; saving failed. Press Finish to retry."
             appState.surveyCloseFailed = true
@@ -985,6 +1023,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             try {
                 persistActiveMap(System.currentTimeMillis())
                 appState.markMapSaved()
+                savedNavigationGraph = runCatching { appState.draftNavigationGraph() }.getOrNull()
                 appState.editorStatus = "Map saved on this device"
                 appState.projectStatus = "Map saved · ready to reopen"
             } catch (error: Exception) { appState.editorStatus = "Map save rejected: ${error.message}" }
@@ -1013,12 +1052,16 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     repositories.floorPlans.observeWalkableRegions(context.floorId).first()
                         .forEach { repositories.floorPlans.delete(it) }
                     repositories.floorPlans.deleteAsset(context.floorId)
+                    app.database.navigationDao().clearEdges(context.floorId)
+                    app.database.navigationDao().removeNodes(context.floorId, emptyList())
+                    app.database.navigationDao().removeDestinations(context.floorId, emptyList())
                 }
             }.onSuccess {
                 appState.clearMapDraft(force = true)
                 appState.removeFloorPlanImage(force = true)
                 appState.mapHasMeasurements = projects.load(context).hasMeasurements
                 appState.markMapSaved()
+                savedNavigationGraph = runCatching { appState.draftNavigationGraph() }.getOrNull()
                 appState.editorStatus = "Saved map and linked fingerprints deleted from this device"
                 appState.surveyRuntimeStatus = "Create and save a map before collecting"
             }.onFailure { error ->
@@ -1045,8 +1088,17 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         ?: error("The selected image could not be opened")
                     stream.use { BitmapFactory.decodeStream(it, null, options) }
                     require(options.outWidth > 0 && options.outHeight > 0) { "The selected file is not a readable PNG or JPEG" }
+                    val directory = java.io.File(getApplication<Application>().filesDir, "floor-plans").apply { mkdirs() }
+                    val localImage = java.io.File(directory, "${UUID.randomUUID()}.image")
+                    try {
+                        resolver.openInputStream(uri)?.use { source -> localImage.outputStream().use { source.copyTo(it) } }
+                            ?: error("The selected image could not be copied")
+                    } catch (error: Exception) {
+                        localImage.delete()
+                        throw error
+                    }
                     ImportedFloorPlan(
-                        uri = uri.toString(),
+                        uri = Uri.fromFile(localImage).toString(),
                         mimeType = resolver.getType(uri) ?: "image/*",
                         pixelWidth = options.outWidth,
                         pixelHeight = options.outHeight,
@@ -1107,6 +1159,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         require(appState.venueName.isNotBlank()) { "Enter a venue name" }
         require(appState.floorName.isNotBlank()) { "Enter a floor name" }
         require(appState.floorWidthMetres > 0f && appState.floorHeightMetres > 0f) { "Enter valid floor dimensions" }
+        if (appState.navigationNodes.isNotEmpty() || appState.navigationEdges.isNotEmpty()) {
+            requireNotNull(polygon) { "Draw a walkable area before saving navigation nodes" }
+            val errors = appState.draftNavigationGraph().validationErrors()
+            require(errors.isEmpty()) { errors.joinToString("; ") }
+        }
+        require(appState.navigationNodes.all { it.floorId == context.floorId } && appState.navigationEdges.all { it.floorId == context.floorId } && appState.destinations.all { it.floorId == context.floorId }) { "Navigation data belongs to a different floor" }
+        require(appState.navigationNodes.all { node -> node.poiId == null || appState.destinations.any { it.id == node.poiId && it.xMetres == node.xMetres && it.yMetres == node.yMetres } }) { "Each destination must match its navigation node" }
         val previousVenue = requireNotNull(repositories.venues.venue(context.venueId))
         val previousFloor = requireNotNull(repositories.floorPlans.floor(context.floorId))
         require(previousFloor.venueId == context.venueId)
@@ -1218,6 +1277,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             repositories.floorPlans.save(wall)
         }
         savedWalls.filter { it.id !in retained }.forEach { repositories.floorPlans.delete(it) }
+        val navigation = app.database.navigationDao()
+        navigation.clearEdges(context.floorId)
+        navigation.removeNodes(context.floorId, appState.navigationNodes.map { it.id })
+        navigation.removeDestinations(context.floorId, appState.destinations.map { it.id })
+        navigation.saveDestinations(appState.destinations.toList())
+        navigation.saveNodes(appState.navigationNodes.toList())
+        navigation.saveEdges(appState.navigationEdges.toList())
     }
 
     private suspend fun processLiveWifiBatch(batch: WifiScanBatch) {
@@ -1243,8 +1309,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             ),
         )
         val matchStarted = System.currentTimeMillis()
+        val eligibleAps = batch.accessPoints.filter { ap -> ap.ageMillisAtReceipt in 0L..15_000L &&
+            ap.scanTimestampMicros > (lastLiveApTimestamps[ap.bssid.lowercase()] ?: 0L) }
+        if (freshness == CoreWifiFreshness.FRESH && eligibleAps.isEmpty()) {
+            appState.realLiveStatus = "No new individual AP measurements; waiting for a fresh scan"
+            return
+        }
+        if (freshness == CoreWifiFreshness.FRESH) eligibleAps.forEach { lastLiveApTimestamps[it.bssid.lowercase()] = it.scanTimestampMicros }
         val match = matcher.match(
-            liveRssiByBssid = batch.accessPoints.associate { it.bssid to it.rssiDbm.toDouble() },
+            liveRssiByBssid = eligibleAps.associate { it.bssid.lowercase() to it.rssiDbm.toDouble() },
             fingerprints = fingerprints,
             freshness = freshness,
         )
@@ -1306,13 +1379,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             if (rawPdrTracker == null) {
                 rawPdrTracker = PdrTracker(
                 initialPosition = match.estimatedPosition,
-                initialHeadingRadians = 0.0,
+                initialHeadingRadians = latestMapHeadingRadians,
                 stepProcessor = StepProcessor(availableSteps),
                 strideModel = StrideModel(appState.strideMetres.toDouble()),
             )
                 rawPdrFloorId = match.estimatedFloorId
-                liveYawBaselineRadians = latestDeviceYawRadians
-                latestMapHeadingRadians = 0.0
                 appState.realRawPdrPosition = match.estimatedPosition.toUiOffset()
                 appState.realRawPdrTrail = listOf(match.estimatedPosition.toUiOffset())
             } else {
@@ -1478,6 +1549,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         appState.liveCloseFailed = false
+        appState.clearRoute(); appState.routeStatus = "Navigation stopped"
+        appState.realLiveInitialized = false; appState.realLivePosition = null
         activeSensorSession = null
         activePositioningSession = null
         sessionMap = null
@@ -1496,11 +1569,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.realLiveConfidence = 0.0
             appState.realLiveFloorConfidence = 0.0
             appState.realLiveUncertaintyMetres = null
+            appState.clearRoute(); appState.routeStatus = "Position lost · request a fresh fix"
             appState.realLiveStatus = "Filter lost; request a fresh Wi-Fi fix"
             return
         }
         appState.realLiveInitialized = true
         appState.realLivePosition = summary.position.toUiOffset()
+        appState.liveEstimateEpochMillis = System.currentTimeMillis()
         appState.realLiveFloorId = summary.floorId
         appState.realLiveConfidence = summary.confidence
         appState.realLiveFloorConfidence = summary.floorConfidence
@@ -1510,6 +1585,70 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             .filterIndexed { index, _ -> index % (filter.particles.size / 100).coerceAtLeast(1) == 0 }
             .take(100)
             .map { it.position.toUiOffset() }
+        updateRoute()
+    }
+
+    fun selectNavigationDestination(id: String?) {
+        appState.selectedDestinationId = id
+        appState.clearRoute()
+        updateRoute()
+    }
+
+    private fun updateRoute() {
+        val destination = appState.selectedDestinationId ?: return
+        val position = appState.realLivePosition
+        if (!appState.liveRunning || !appState.realLiveInitialized || position == null) {
+            appState.clearRoute(); appState.routeStatus = "Initialize a position to calculate a route"; return
+        }
+        val graph = sessionGraph ?: savedNavigationGraph
+        val node = graph?.nodes?.firstOrNull { it.poiId == destination }
+        if (graph == null || node == null) {
+            appState.clearRoute(); appState.routeStatus = "Connect this destination to the saved path graph"; return
+        }
+        val route = graph.route(MetricPoint(position.x.toDouble(), position.y.toDouble()), node.id)
+        if (route == null) {
+            appState.clearRoute(); appState.routeStatus = "No walkable route from this position. Check paths or relocalize."; return
+        }
+        appState.routePoints = route.points.map { it.toUiOffset() }
+        appState.remainingDistanceMetres = route.distanceMetres
+        appState.destinationReached = route.distanceMetres <= 1.5 && appState.realLiveConfidence >= 0.35 &&
+            (appState.realLiveUncertaintyMetres ?: Double.POSITIVE_INFINITY) <= 3.0
+        appState.routeStatus = if (appState.destinationReached) "Destination reached" else if (appState.realLiveConfidence < 0.35)
+            "Route available · position uncertain" else "Follow the blue route"
+    }
+
+    private suspend fun initializeManual(point: MetricPoint, floorId: String) {
+        val session = requireNotNull(activePositioningSession)
+        val filter = ParticleFilter(currentPilotMap(), ParticleFilterConfig(particleCount = appState.particleCount), session.startedAtEpochMillis)
+        filter.initialize(AbsoluteFix(point, floorId, AbsoluteFixSource.MANUAL), positionStdMetres = 0.5)
+        particleFilter = filter
+        val sources = if (sensorSource.state.value.selectedStepSource == TurnSensorType.STEP_DETECTOR) setOf(StepSource.STEP_DETECTOR) else emptySet()
+        rawPdrTracker = PdrTracker(point, latestMapHeadingRadians, StepProcessor(sources), StrideModel(appState.strideMetres.toDouble()))
+        rawPdrFloorId = floorId
+        appState.realRawPdrPosition = point.toUiOffset(); appState.realRawPdrTrail = listOf(point.toUiOffset())
+        appState.lastCorrectionType = "manual known-location anchor"
+        appState.realLiveStatus = "Tracking from your known start · Wi-Fi will correct drift when available"
+        updateRealParticleUi()
+        val summary = requireNotNull(filter.summary())
+        repositories.positioning.saveEstimate(PositionEstimateEntity(
+            id = "EST-${session.id}-MANUAL", positioningSessionId = session.id, sequence = liveEstimateSequence++,
+            method = "FUSED", floorId = floorId, xMetres = summary.position.x, yMetres = summary.position.y,
+            headingRadians = latestMapHeadingRadians, confidenceRadiusMetres = summary.uncertaintyRadiusMetres,
+            confidenceScore = summary.confidence, floorConfidence = summary.floorConfidence, stepCount = 0,
+            timestampEpochMillis = System.currentTimeMillis(), status = "MANUAL_INITIALIZATION"))
+    }
+
+    private suspend fun refreshSurveyProgress(context: ProjectContext) {
+        val sessions = repositories.surveys.observeSessions(context.venueId).first().filter { it.floorId == context.floorId }
+        val values = sessions.groupBy { it.referencePointId }.mapValues { (_, rows) ->
+            val session = rows.filter { it.completionStatus == "COMPLETED" }.maxByOrNull { it.startedAtEpochMillis }
+                ?: rows.maxBy { it.startedAtEpochMillis }
+            val count = repositories.surveys.snapshotsForAggregation(session.id).count { it.isFresh && it.resultsUpdated }
+            val aps = repositories.surveys.aggregatesForSession(session.id).size
+            SurveyPointProgress(if (session.completionStatus == "COLLECTING") "PARTIAL" else session.completionStatus,
+                count, session.targetSnapshotCount, aps)
+        }
+        if (appState.activeProject == context) appState.surveyPointProgress = values
     }
 
     private fun MetricPoint.toUiOffset() = androidx.compose.ui.geometry.Offset(x.toFloat(), y.toFloat())
@@ -1557,7 +1696,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     if (appState.liveRunning) {
                         val baseline = liveYawBaselineRadians ?: yaw.also { liveYawBaselineRadians = it }
                         // Android yaw grows clockwise; TURN's metric convention grows counter-clockwise.
-                        latestMapHeadingRadians = normalizeRadians(-(yaw - baseline))
+                        latestMapHeadingRadians = normalizeRadians(sessionInitialHeadingRadians - (yaw - baseline))
                     }
                 }
             }

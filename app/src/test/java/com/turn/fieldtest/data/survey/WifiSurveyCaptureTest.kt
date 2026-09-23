@@ -46,8 +46,8 @@ class WifiSurveyCaptureTest {
         assertEquals(-60.0, aggregate.medianRssiDbm)
         assertEquals(-60.0, aggregate.meanRssiDbm)
         assertEquals(2, aggregate.observationCount)
-        assertEquals(3, aggregate.totalFreshSnapshotCount)
-        assertEquals(2.0 / 3.0, aggregate.detectionRate, 1e-9)
+        assertEquals(2, aggregate.totalFreshSnapshotCount)
+        assertEquals(1.0, aggregate.detectionRate, 1e-9)
     }
 
     private fun session() = SurveySessionEntity(

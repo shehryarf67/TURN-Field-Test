@@ -8,6 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
+import androidx.compose.runtime.SideEffect
 import com.turn.fieldtest.ui.TurnApp
 import com.turn.fieldtest.ui.TurnAppActions
 import com.turn.fieldtest.ui.TurnRuntimeViewModel
@@ -53,6 +55,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val dark = runtimeViewModel.appState.darkTheme
+            SideEffect {
+                val barStyle = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+            }
             TurnApp(
                 state = runtimeViewModel.appState,
                 actions = TurnAppActions(
@@ -83,6 +91,7 @@ class MainActivity : ComponentActivity() {
                     onRealLiveRelocalizationRequested = runtimeViewModel::relocalizeWithNextWifi,
                     onRealExport = runtimeViewModel::exportRealData,
                     onMapSaved = runtimeViewModel::savePilotMap,
+                    onDestinationSelected = runtimeViewModel::selectNavigationDestination,
                     onProjectCreated = runtimeViewModel::createProject,
                     onProjectOpened = runtimeViewModel::openProject,
                     onMapDeleted = runtimeViewModel::deleteSavedMap,

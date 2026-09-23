@@ -27,10 +27,17 @@ class WifiSurveyCaptureFactory(
         scanSequence: Long,
         batch: WifiScanBatch,
         requestedAtEpochMillis: Long = batch.receivedAtEpochMillis,
+        previousTimestamps: Map<String, Long> = emptyMap(),
     ): WifiCaptureEntities {
         require(scanSequence >= 0L) { "Scan sequence cannot be negative" }
         val snapshotId = idGenerator.nextId()
-        val independentlyFresh = batch.isIndependentFreshScan
+        fun eligible(ap: com.turn.fieldtest.platform.wifi.WifiAccessPoint): Boolean =
+            ap.ageMillisAtReceipt in 0L..15_000L && ap.scanTimestampMicros > (previousTimestamps[ap.bssid.lowercase()] ?: 0L) &&
+                batch.receivedAtEpochMillis - ap.ageMillisAtReceipt >= session.startedAtEpochMillis
+        val uniqueAccessPoints = batch.accessPoints.groupBy { it.bssid.lowercase() }.values.map { rows ->
+            rows.maxWith(compareBy<com.turn.fieldtest.platform.wifi.WifiAccessPoint> { it.scanTimestampMicros }.thenBy { it.rssiDbm })
+        }
+        val independentlyFresh = batch.isIndependentFreshScan && uniqueAccessPoints.any(::eligible)
         val snapshot = WifiScanSnapshotEntity(
             id = snapshotId,
             surveySessionId = session.id,
@@ -50,15 +57,7 @@ class WifiSurveyCaptureFactory(
             nextPermittedRequestAtEpochMillis = batch.nextPermittedRequestAtEpochMillis,
             failureCode = batch.issue?.name,
         )
-        val observations = batch.accessPoints
-            .groupBy { it.bssid.lowercase() }
-            .values
-            .map { duplicateRows ->
-                duplicateRows.maxWith(
-                    compareBy<com.turn.fieldtest.platform.wifi.WifiAccessPoint> { it.rssiDbm }
-                        .thenBy { it.scanTimestampMicros },
-                )
-            }
+        val observations = uniqueAccessPoints
             .map { accessPoint ->
                 WifiObservationEntity(
                     id = idGenerator.nextId(),
@@ -72,7 +71,7 @@ class WifiSurveyCaptureFactory(
                     channel = accessPoint.channel,
                     scanTimestampMicros = accessPoint.scanTimestampMicros,
                     observedAtEpochMillis = batch.receivedAtEpochMillis,
-                    isFresh = independentlyFresh,
+                    isFresh = independentlyFresh && eligible(accessPoint),
                 )
             }
         return WifiCaptureEntities(snapshot, observations)
@@ -163,8 +162,13 @@ class WifiSurveyCaptureService(
         scanSequence: Long,
         batch: WifiScanBatch,
         requestedAtEpochMillis: Long = batch.receivedAtEpochMillis,
-    ): WifiCaptureEntities = factory.create(session, scanSequence, batch, requestedAtEpochMillis).also {
-        repository.storeSnapshot(it.snapshot, it.observations)
+    ): WifiCaptureEntities {
+        require(!batch.simulated && session.dataMode == "REAL_DEVICE") { "Only physical scans can be stored by the real survey service" }
+        val previous = repository.freshObservationsForAggregation(session.id).groupBy { it.bssid.lowercase() }
+            .mapValues { (_, rows) -> rows.maxOf { it.scanTimestampMicros } }
+        val captured = factory.create(session, scanSequence, batch, requestedAtEpochMillis, previous)
+        repository.storeSnapshot(captured.snapshot, captured.observations)
+        return captured
     }
 
     suspend fun recomputeAggregates(

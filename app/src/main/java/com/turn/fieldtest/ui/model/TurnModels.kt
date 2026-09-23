@@ -3,11 +3,11 @@ package com.turn.fieldtest.ui.model
 import androidx.compose.ui.geometry.Offset
 
 enum class TurnDestination(val title: String, val shortLabel: String, val description: String) {
-    VENUES("Venues", "VE", "Venue and floor setup"),
-    FLOOR_EDITOR("Floor-plan editor", "FP", "Metric floor geometry editor"),
+    VENUES("Projects", "PR", "Venue and floor setup"),
+    FLOOR_EDITOR("Map setup", "MP", "Metric floor geometry editor"),
     RADIO_DIAGNOSTICS("Radio diagnostics", "RD", "Wi-Fi and motion sensor health"),
     SURVEY("Survey", "SV", "Wi-Fi fingerprint collection"),
-    LIVE_LOCATE("Live locate", "LL", "Fused Wi-Fi and PDR positioning"),
+    LIVE_LOCATE("Navigate", "NV", "Fused Wi-Fi and PDR positioning"),
     EVALUATE("Evaluate", "EV", "Independent checkpoint testing"),
     DATA_EXPORT("Data / export", "DX", "Import, export and backups"),
     SETTINGS("Settings", "ST", "Modes, algorithms and hardware")

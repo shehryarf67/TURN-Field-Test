@@ -20,9 +20,90 @@ import com.turn.fieldtest.ui.model.TurnDemoData
 import com.turn.fieldtest.ui.model.TurnDestination
 import com.turn.fieldtest.ui.model.WifiAccessPointUi
 import kotlin.math.hypot
+import com.turn.fieldtest.data.local.*
+import com.turn.fieldtest.core.*
 
 @Stable
 class TurnAppState {
+    val navigationNodes = mutableStateListOf<NavigationNodeEntity>()
+    val navigationEdges = mutableStateListOf<NavigationEdgeEntity>()
+    val destinations = mutableStateListOf<PointOfInterestEntity>()
+    var graphTool by mutableStateOf("Inspect")
+    var selectedNodeId by mutableStateOf<String?>(null)
+    var selectedDestinationId by mutableStateOf<String?>(null)
+    var routePoints by mutableStateOf<List<Offset>>(emptyList())
+    var remainingDistanceMetres by mutableStateOf<Double?>(null)
+    var routeStatus by mutableStateOf("Choose a destination after initializing your position")
+    var destinationReached by mutableStateOf(false)
+    var debugOverlays by mutableStateOf(false)
+    var manualStartPoint by mutableStateOf<Offset?>(null)
+    var pickingStart by mutableStateOf(false)
+    var initialHeadingDegrees by mutableStateOf(0.0)
+    var liveEstimateEpochMillis by mutableStateOf<Long?>(null)
+    var surveyPointProgress by mutableStateOf<Map<String, SurveyPointProgress>>(emptyMap())
+
+    fun draftNavigationGraph(): NavigationGraph {
+        val context = requireNotNull(activeProject)
+        val polygon = MetricPolygon(draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) })
+        validateSimpleWalkablePolygon(polygon)
+        val floor = MapFloor(context.floorId, listOf(polygon), draftWalls.mapIndexed { index, pair ->
+            WallSegment("draft-$index", MetricPoint(pair.first.x.toDouble(), pair.first.y.toDouble()), MetricPoint(pair.second.x.toDouble(), pair.second.y.toDouble()))
+        })
+        return NavigationGraph(floor, navigationNodes.map { it.core() }, navigationEdges.map { it.core() })
+    }
+
+    fun graphTap(point: Offset, hitRadiusMetres: Float = 1f) {
+        if (!canEditMap) return
+        val context = activeProject ?: return
+        val nearest = navigationNodes.minByOrNull { (Offset(it.xMetres.toFloat(), it.yMetres.toFloat()) - point).getDistance() }
+            ?.takeIf { (Offset(it.xMetres.toFloat(), it.yMetres.toFloat()) - point).getDistance() <= hitRadiusMetres }
+        when (graphTool) {
+            "Node" -> {
+                val metric = MetricPoint(point.x.toDouble(), point.y.toDouble())
+                if (runCatching { draftNavigationGraph().floor.isWalkable(metric) }.getOrDefault(false)) {
+                    val node = NavigationNodeEntity("NODE-${java.util.UUID.randomUUID()}", context.floorId, metric.x, metric.y)
+                    navigationNodes.add(node); selectedNodeId = node.id; editorStatus = "Node placed. Connect it to the corridor path."
+                } else editorStatus = "Place nodes inside a valid walkable area"
+            }
+            "Connect" -> {
+                if (nearest == null) { editorStatus = "Tap an existing node"; return }
+                val from = navigationNodes.firstOrNull { it.id == selectedNodeId }
+                if (from == null || from.id == nearest.id) { selectedNodeId = nearest.id; editorStatus = "Now tap the other node"; return }
+                val edge = NavigationEdgeEntity("EDGE-${java.util.UUID.randomUUID()}", context.floorId, from.id, nearest.id,
+                    from.core().point.distanceTo(nearest.core().point))
+                if (navigationEdges.any { (it.fromNodeId == from.id && it.toNodeId == nearest.id) || (it.bidirectional && it.toNodeId == from.id && it.fromNodeId == nearest.id) }) {
+                    editorStatus = "These nodes are already connected"; return
+                }
+                navigationEdges.add(edge)
+                val errors = runCatching { draftNavigationGraph().validationErrors() }.getOrElse { listOf(it.message.orEmpty()) }
+                if (errors.isNotEmpty()) { navigationEdges.remove(edge); editorStatus = "Connection crosses a wall or leaves walkable space" }
+                else { selectedNodeId = nearest.id; editorStatus = "Path connected · %.1f m".format(edge.distanceMetres) }
+            }
+            else -> { selectedNodeId = nearest?.id; editorStatus = if (nearest == null) "Tap a node to select it" else "Node selected" }
+        }
+    }
+    fun nameSelectedDestination(name: String) {
+        if (!canEditMap || name.isBlank()) return
+        val node = navigationNodes.firstOrNull { it.id == selectedNodeId } ?: run { editorStatus = "Select a path node first"; return }
+        val existing = destinations.firstOrNull { it.id == node.poiId }
+        val poi = PointOfInterestEntity(existing?.id ?: "POI-${java.util.UUID.randomUUID()}", node.floorId,
+            name.trim().take(80), existing?.kind ?: "DESTINATION", node.xMetres, node.yMetres, existing?.notes)
+        destinations.removeAll { it.id == poi.id }; destinations.add(poi)
+        navigationNodes[navigationNodes.indexOf(node)] = node.copy(poiId = poi.id)
+        editorStatus = "Destination ${poi.name} added · Save map to keep it"
+    }
+    fun removeSelectedNode() {
+        if (!canEditMap) return
+        val node = navigationNodes.firstOrNull { it.id == selectedNodeId } ?: return
+        navigationEdges.removeAll { it.fromNodeId == node.id || it.toNodeId == node.id }
+        navigationNodes.remove(node)
+        if (node.poiId != null) destinations.removeAll { it.id == node.poiId }
+        selectedNodeId = null; editorStatus = "Node and its connections removed from draft"
+    }
+    fun clearRoute() {
+        routePoints = emptyList(); remainingDistanceMetres = null; destinationReached = false
+    }
+
     var startupLoading by mutableStateOf(false)
     var projectBusy by mutableStateOf(false)
     var sessionLocked by mutableStateOf(false)
@@ -36,13 +117,13 @@ class TurnAppState {
     var mapEditorSupported by mutableStateOf(true)
     val canEditMap get() = mode == DataMode.DEMO ||
         (realMapReady && !startupLoading && !projectBusy && !sessionLocked && !surveyRunning && !liveRunning && mapEditorSupported)
-    val canChangeScale get() = canEditMap && (mode == DataMode.DEMO || !mapHasMeasurements)
+    val canChangeScale get() = canEditMap && (mode == DataMode.DEMO || (!mapHasMeasurements && navigationNodes.isEmpty()))
     private var savedDraft by mutableStateOf<List<Any?>?>(null)
     private fun draftSnapshot(): List<Any?> = listOf(venueName, floorName, floorLevel,
         floorWidthMetres, floorHeightMetres, floorPlanContentUri, floorPlanMimeType,
         floorPlanPixelWidth, floorPlanPixelHeight, floorPlanMetresPerPixel,
         calibrationPoints.toList(), draftWalkablePolygon.toList(), draftWalls.toList(),
-        referencePoints.toList(), qrAnchors.toList())
+        referencePoints.toList(), qrAnchors.toList(), navigationNodes.toList(), navigationEdges.toList(), destinations.toList())
     val hasUnsavedMapChanges get() = mode == DataMode.REAL_DEVICE && realMapReady &&
         savedDraft != null && savedDraft != draftSnapshot()
     fun markMapSaved() { savedDraft = draftSnapshot() }
@@ -238,6 +319,7 @@ class TurnAppState {
 
     fun clearMapDraft(force: Boolean = false) {
         if (!force && !requireMapEditing()) return
+        navigationNodes.clear(); navigationEdges.clear(); destinations.clear(); selectedNodeId = null
         draftWalkablePolygon.clear()
         draftWalls.clear()
         referencePoints.clear()
@@ -451,3 +533,5 @@ class TurnAppState {
 
 @Composable
 fun rememberTurnAppState(): TurnAppState = remember { TurnAppState() }
+
+data class SurveyPointProgress(val status: String, val freshCount: Int, val target: Int?, val accessPointCount: Int)

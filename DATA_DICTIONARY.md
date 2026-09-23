@@ -13,6 +13,8 @@ All distances and coordinates use metres. Screen pixels are never persisted as m
 | WallSegment | `id`, `floorId`, `x1`, `y1`, `x2`, `y2` | Blocking metric segment. |
 | VerticalTransition | `id`, `floorId`, `kind`, `x`, `y`, `linkedTransitionId`, `accessible` | Stair/lift/escalator endpoint. |
 | PointOfInterest | `id`, `floorId`, `name`, `category`, `x`, `y` | Editable destination metadata. |
+| NavigationNode | `id`, `floorId`, `xMetres`, `yMetres`, `poiId` | Metric graph node; optional destination association. |
+| NavigationEdge | `id`, `floorId`, `fromNodeId`, `toNodeId`, `distanceMetres`, `walkable`, `bidirectional`, `accessible`, `kind` | Persisted path; the prototype editor creates bidirectional corridor edges. |
 | ReferencePoint | `id`, `floorId`, `label`, `x`, `y`, `enabled` | Training coordinate used for fingerprint collection. |
 | QrAnchor | `id`, `floorId`, `label`, `x`, `y`, `initialHeadingRad` | Trusted explicit position fix. |
 | TestCheckpoint | `id`, `floorId`, `label`, `x`, `y` | Independent evaluation truth; never a training key. |
@@ -20,6 +22,8 @@ All distances and coordinates use metres. Screen pixels are never persisted as m
 `verticesJson` is an ordered JSON array of `{x,y}` objects. Heading is radians in the application's documented map convention.
 
 ## Survey and radio records
+
+Room schema 2 adds `targetSnapshotCount` (nullable for older rows) and `completionStatus` to SurveySession. New sessions progress from `COLLECTING` to `COMPLETED` or `PARTIAL`. Older rows become `LEGACY` without inventing their original target. New partial sessions retain raw data/aggregates but are excluded from matching; completed and legacy fingerprints remain eligible. Interrupted collecting rows are displayed as partial when reopened.
 
 | Record | Important fields | Meaning |
 | --- | --- | --- |

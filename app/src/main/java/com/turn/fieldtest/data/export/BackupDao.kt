@@ -9,6 +9,10 @@ import com.turn.fieldtest.data.local.*
 /** Lossless Room export/import boundary. Imports merge by stable ID and never silently wipe data. */
 @Dao
 interface BackupDao {
+    @Query("SELECT * FROM navigation_nodes ORDER BY id") suspend fun navigationNodes(): List<NavigationNodeEntity>
+    @Query("SELECT * FROM navigation_edges ORDER BY id") suspend fun navigationEdges(): List<NavigationEdgeEntity>
+    @Upsert suspend fun upsertNavigationNodes(values: List<NavigationNodeEntity>)
+    @Upsert suspend fun upsertNavigationEdges(values: List<NavigationEdgeEntity>)
     @Query("SELECT * FROM venues ORDER BY id") suspend fun venues(): List<VenueEntity>
     @Query("SELECT * FROM floors ORDER BY id") suspend fun floors(): List<FloorEntity>
     @Query("SELECT * FROM floor_plan_assets ORDER BY id") suspend fun floorPlanAssets(): List<FloorPlanAssetEntity>
@@ -69,6 +73,8 @@ interface BackupDao {
         wallSegments = wallSegments(),
         verticalTransitions = verticalTransitions(),
         pointsOfInterest = pointsOfInterest(),
+        navigationNodes = navigationNodes(),
+        navigationEdges = navigationEdges(),
         referencePoints = referencePoints(),
         qrAnchors = qrAnchors(),
         surveySessions = surveySessions(),
@@ -99,6 +105,8 @@ interface BackupDao {
         upsertWallSegments(value.wallSegments)
         upsertVerticalTransitions(value.verticalTransitions)
         upsertPointsOfInterest(value.pointsOfInterest)
+        upsertNavigationNodes(value.navigationNodes)
+        upsertNavigationEdges(value.navigationEdges)
         upsertReferencePoints(value.referencePoints)
         upsertQrAnchors(value.qrAnchors)
         upsertSurveySessions(value.surveySessions)
