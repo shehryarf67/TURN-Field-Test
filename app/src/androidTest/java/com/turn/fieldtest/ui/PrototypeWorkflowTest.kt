@@ -88,4 +88,24 @@ class PrototypeWorkflowTest {
             assertNull(state.realLivePosition)
         }
     }
+    @Test fun fullscreenExitKeepsPositionAndRoute() {
+        val state = fixture().apply {
+            destination = TurnDestination.LIVE_LOCATE
+            realLivePosition = Offset(5f, 5f)
+            routePoints = listOf(Offset(5f, 5f), Offset(15f, 5f))
+        }
+        val position = state.realLivePosition
+        val route = state.routePoints
+        compose.setContent { TurnApp(state, TurnAppActions()) }
+        compose.onNodeWithContentDescription("Full screen map").performClick()
+        compose.onNodeWithText("Landscape").performClick()
+        compose.runOnIdle { assertEquals(NavigationViewOrientation.LANDSCAPE, state.navigationViewOrientation) }
+        compose.onNodeWithText("Exit full screen").performClick()
+        compose.onNodeWithContentDescription("Full screen map").assertIsDisplayed()
+        compose.runOnIdle {
+            assertFalse(state.navigationFullscreen)
+            assertEquals(position, state.realLivePosition)
+            assertEquals(route, state.routePoints)
+        }
+    }
 }

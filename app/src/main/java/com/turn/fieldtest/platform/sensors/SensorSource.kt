@@ -7,6 +7,9 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.display.DisplayManager
+import android.view.Display
+import android.view.Surface
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.turn.fieldtest.platform.PlatformClock
@@ -67,6 +70,8 @@ data class SensorSample(
     val receivedAtEpochMillis: Long,
     val accuracy: Int,
     val simulated: Boolean,
+    /** Display orientation at receipt; Android sensor axes themselves never rotate with the UI. */
+    val displayRotation: Int = Surface.ROTATION_0,
 )
 
 data class SensorSourceConfig(
@@ -97,6 +102,7 @@ class AndroidSensorSource(
     private val clock: PlatformClock = SystemPlatformClock,
 ) : SensorSource, SensorEventListener {
     private val permissions = TurnPermissionChecker(context)
+    private val displays = context.applicationContext.getSystemService(DisplayManager::class.java)
     private val registeredTypes = mutableSetOf<Int>()
     private val mutableSamples = MutableSharedFlow<SensorSample>(extraBufferCapacity = 128)
     private val mutableState = MutableStateFlow(SensorSourceState())
@@ -142,6 +148,7 @@ class AndroidSensorSource(
                 receivedAtEpochMillis = clock.epochMillis(),
                 accuracy = event.accuracy,
                 simulated = false,
+                displayRotation = displays.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0,
             ),
         )
     }
@@ -157,6 +164,7 @@ class AndroidSensorSource(
                 receivedAtEpochMillis = clock.epochMillis(),
                 accuracy = accuracy,
                 simulated = false,
+                displayRotation = displays.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0,
             ),
         )
     }

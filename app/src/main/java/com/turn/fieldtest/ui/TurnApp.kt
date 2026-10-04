@@ -93,6 +93,10 @@ fun TurnApp(
     actions: TurnAppActions = TurnAppActions(),
 ) {
     TurnTheme(darkTheme = state.darkTheme) {
+        if (state.isNavigationFullscreen) {
+            com.turn.fieldtest.ui.screens.FullscreenNavigationScreen(state)
+            return@TurnTheme
+        }
         if (state.startupLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {

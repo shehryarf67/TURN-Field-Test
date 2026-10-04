@@ -10,6 +10,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.DisposableEffect
+import android.content.pm.ActivityInfo
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.turn.fieldtest.ui.NavigationViewOrientation
 import com.turn.fieldtest.ui.TurnApp
 import com.turn.fieldtest.ui.TurnAppActions
 import com.turn.fieldtest.ui.TurnRuntimeViewModel
@@ -56,10 +62,36 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val dark = runtimeViewModel.appState.darkTheme
+            val fullscreen = runtimeViewModel.appState.isNavigationFullscreen
+            val orientation = runtimeViewModel.appState.navigationViewOrientation
+            DisposableEffect(fullscreen) {
+                val previousOrientation = requestedOrientation
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                val previousBehavior = controller.systemBarsBehavior
+                if (fullscreen) {
+                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.hide(WindowInsetsCompat.Type.systemBars())
+                }
+                onDispose {
+                    if (fullscreen) {
+                        requestedOrientation = previousOrientation
+                        controller.systemBarsBehavior = previousBehavior
+                        controller.show(WindowInsetsCompat.Type.systemBars())
+                    }
+                }
+            }
             SideEffect {
                 val barStyle = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
                     else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
                 enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+                if (fullscreen) {
+                    requestedOrientation = when (orientation) {
+                        NavigationViewOrientation.AUTO -> ActivityInfo.SCREEN_ORIENTATION_USER
+                        NavigationViewOrientation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+                        NavigationViewOrientation.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
+                    }
+                    WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.systemBars())
+                }
             }
             TurnApp(
                 state = runtimeViewModel.appState,

@@ -25,6 +25,10 @@ import com.turn.fieldtest.core.*
 
 @Stable
 class TurnAppState {
+    var navigationFullscreen by mutableStateOf(false)
+    var navigationViewOrientation by mutableStateOf(NavigationViewOrientation.AUTO)
+    val isNavigationFullscreen get() = navigationFullscreen && mode == DataMode.REAL_DEVICE &&
+        destination == TurnDestination.LIVE_LOCATE && realMapReady && !startupLoading
     val navigationNodes = mutableStateListOf<NavigationNodeEntity>()
     val navigationEdges = mutableStateListOf<NavigationEdgeEntity>()
     val destinations = mutableStateListOf<PointOfInterestEntity>()
@@ -269,6 +273,7 @@ class TurnAppState {
     var darkTheme by mutableStateOf(true)
 
     fun selectDestination(value: TurnDestination) {
+        if (value != TurnDestination.LIVE_LOCATE) navigationFullscreen = false
         destination = value
         compactMenuOpen = false
     }
@@ -535,3 +540,5 @@ class TurnAppState {
 fun rememberTurnAppState(): TurnAppState = remember { TurnAppState() }
 
 data class SurveyPointProgress(val status: String, val freshCount: Int, val target: Int?, val accessPointCount: Int)
+
+enum class NavigationViewOrientation { AUTO, PORTRAIT, LANDSCAPE }

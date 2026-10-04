@@ -7,6 +7,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.ui.text.style.TextOverflow
 import com.turn.fieldtest.ui.*
 import kotlinx.coroutines.delay
 
@@ -19,35 +22,36 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
     var research by remember { mutableStateOf(false) }
     LaunchedEffect(state.liveRunning) { while (state.liveRunning) { now = System.currentTimeMillis(); delay(1000) } }
     val age = state.liveEstimateEpochMillis?.let { ((now - it).coerceAtLeast(0) / 1000) }
-    val confidence = when {
-        !state.liveRunning -> "Stopped"
-        !state.realLiveInitialized -> "Position unavailable"
-        age != null && age > 20 -> "Last estimate ${age}s ago"
-        state.realLiveConfidence >= 0.65 -> "Tracking"
-        else -> "Low confidence"
-    }
+    val confidence = navigationConfidence(state, age)
     if (research) {
         Column {
             TextButton(onClick = { research = false }) { Text("Back to navigation") }
             RealLiveLocateScreen(state, true, actions.onRealLiveToggled, actions.onRealLiveScanRequested, actions.onRealLiveRelocalizationRequested)
         }; return
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    @Composable fun MapPanel(modifier: Modifier) {
+      Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
-                Text(state.floorName, style = MaterialTheme.typography.titleLarge)
+                Text(state.floorName, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(confidence, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             }
             state.realLiveUncertaintyMetres?.let { Text("± %.1f m".format(it), style = MaterialTheme.typography.titleMedium) }
+            IconButton(onClick = { state.navigationFullscreen = true }) {
+                Icon(Icons.Outlined.Fullscreen, contentDescription = "Full screen map")
+            }
         }
-        NavigationMap(state, Modifier.fillMaxWidth().weight(1f).heightIn(min = 250.dp), showPosition = true,
+        NavigationMap(state, Modifier.fillMaxWidth().weight(1f), showPosition = true,
             showGraph = state.debugOverlays, showReferences = state.pickingStart, onTap = { point, _ ->
                 if (state.pickingStart && !state.sessionLocked) {
                     state.manualStartPoint = point; state.pickingStart = false
                     state.realLiveStatus = "Known start selected. Set the direction you are facing, then start."
                 }
             })
-        Column(Modifier.fillMaxWidth().heightIn(max = 290.dp).verticalScroll(rememberScrollState()).padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      }
+    }
+    @Composable fun Controls(modifier: Modifier) {
+        Column(modifier.verticalScroll(rememberScrollState()).padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Box {
                 OutlinedButton(onClick = { destinationsOpen = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(state.destinations.firstOrNull { it.id == state.selectedDestinationId }?.name ?: "Choose destination")
@@ -80,7 +84,7 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 if (state.manualStartPoint != null) TextButton(onClick = { state.manualStartPoint = null }) { Text("Use automatic Wi-Fi initialization") }
                 OutlinedTextField(heading, { heading = it; it.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { value -> state.initialHeadingDegrees = value } },
                     label = { Text("Facing direction on map (degrees)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Text("0° = right · 90° = up · 180° = left · 270° = down. Hold the phone facing that direction when you start.", style = MaterialTheme.typography.bodySmall)
+                Text("0° = right · 90° = up · 180° = left · 270° = down. Choose portrait or landscape before starting. Keep the top of the visible screen facing your walking direction.", style = MaterialTheme.typography.bodySmall)
             }
             Text(state.realLiveStatus, style = MaterialTheme.typography.bodySmall)
             state.realWifiIssue?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -97,6 +101,20 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 FilterChip(state.showRawPdr, { state.showRawPdr = !state.showRawPdr }, label = { Text("PDR") })
                 FilterChip(state.showWifiFixes, { state.showWifiFixes = !state.showWifiFixes }, label = { Text("Wi-Fi") })
                 FilterChip(state.showParticles, { state.showParticles = !state.showParticles }, label = { Text("Particles") })
+            }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        if (maxWidth > maxHeight) {
+            val controlsWidth = (maxWidth * 0.38f).coerceAtMost(320.dp)
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                MapPanel(Modifier.weight(1f).fillMaxHeight())
+                Controls(Modifier.width(controlsWidth).fillMaxHeight())
+            }
+        } else {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MapPanel(Modifier.fillMaxWidth().weight(1f))
+                Controls(Modifier.fillMaxWidth().heightIn(max = 290.dp))
             }
         }
     }

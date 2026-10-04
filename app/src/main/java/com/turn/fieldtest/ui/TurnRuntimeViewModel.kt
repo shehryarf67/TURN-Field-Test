@@ -2,7 +2,7 @@ package com.turn.fieldtest.ui
 
 import android.app.Application
 import android.graphics.BitmapFactory
-import android.hardware.SensorManager
+import com.turn.fieldtest.platform.sensors.DisplayHeading
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -142,6 +142,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var livePdrSequence = 0L
     private var latestDeviceYawRadians: Double? = null
     private var liveYawBaselineRadians: Double? = null
+    private var lastHeadingDisplayRotation: Int? = null
+    private var latestRotationVector: FloatArray? = null
     private var latestMapHeadingRadians = 0.0
     private var previousGyroscopeTimestampNanos: Long? = null
     private var rawPdrFloorId: String? = null
@@ -799,7 +801,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 rawPdrTracker = null
                 liveEstimateSequence = 0L
                 livePdrSequence = 0L
-                liveYawBaselineRadians = latestDeviceYawRadians
+                liveYawBaselineRadians = null
+                lastHeadingDisplayRotation = null
+                latestRotationVector = null
                 latestMapHeadingRadians = sessionInitialHeadingRadians
                 previousGyroscopeTimestampNanos = null
                 appState.liveRunning = true
@@ -1681,37 +1685,42 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun updateLiveHeading(sample: SensorSample) {
-        when (sample.kind) {
-            SensorSampleKind.RELATIVE_ROTATION_VECTOR,
-            SensorSampleKind.ROTATION_VECTOR,
-            -> {
-                if (sample.type != sensorSource.state.value.selectedHeadingSource) return
-                if (sample.values.size < 3) return
-                val matrix = FloatArray(9)
+        val selected = sensorSource.state.value.selectedHeadingSource
+        val previousRotation = lastHeadingDisplayRotation
+        val displayChanged = previousRotation != null && previousRotation != sample.displayRotation
+        lastHeadingDisplayRotation = sample.displayRotation
+        if (displayChanged && appState.liveRunning && selected == TurnSensorType.GYROSCOPE) {
+            latestMapHeadingRadians = normalizeRadians(latestMapHeadingRadians +
+                DisplayHeading.rotationDeltaRadians(requireNotNull(previousRotation), sample.displayRotation))
+        }
+        val rotationSample = sample.kind == SensorSampleKind.RELATIVE_ROTATION_VECTOR ||
+            sample.kind == SensorSampleKind.ROTATION_VECTOR
+        if (rotationSample && sample.type == selected && sample.values.size >= 3) {
+            latestRotationVector = sample.values.toFloatArray()
+        }
+        if ((rotationSample && sample.type == selected || displayChanged) &&
+            selected in setOf(TurnSensorType.GAME_ROTATION_VECTOR, TurnSensorType.ROTATION_VECTOR)) {
+            latestRotationVector?.let { vector ->
                 runCatching {
-                    SensorManager.getRotationMatrixFromVector(matrix, sample.values.toFloatArray())
-                    val orientation = SensorManager.getOrientation(matrix, FloatArray(3))
-                    val yaw = orientation[0].toDouble()
+                    val yaw = DisplayHeading.azimuth(vector, sample.displayRotation)
                     latestDeviceYawRadians = yaw
                     if (appState.liveRunning) {
                         val baseline = liveYawBaselineRadians ?: yaw.also { liveYawBaselineRadians = it }
-                        // Android yaw grows clockwise; TURN's metric convention grows counter-clockwise.
+                        // The visible screen's top is the declared forward direction in either orientation.
                         latestMapHeadingRadians = normalizeRadians(sessionInitialHeadingRadians - (yaw - baseline))
                     }
                 }
             }
-            SensorSampleKind.ANGULAR_VELOCITY -> {
-                if (sensorSource.state.value.selectedHeadingSource != TurnSensorType.GYROSCOPE) return
-                val previous = previousGyroscopeTimestampNanos
-                previousGyroscopeTimestampNanos = sample.sensorTimestampNanos
-                if (previous != null && appState.liveRunning) {
-                    val deltaSeconds = (sample.sensorTimestampNanos - previous).coerceAtLeast(0L) / 1_000_000_000.0
-                    val z = sample.values.getOrNull(2)?.toDouble() ?: return
-                    // Right-handed Android +z rotation is counter-clockwise for a face-up phone.
-                    latestMapHeadingRadians = normalizeRadians(latestMapHeadingRadians + z * deltaSeconds)
-                }
+        }
+        if (sample.kind == SensorSampleKind.ANGULAR_VELOCITY && selected == TurnSensorType.GYROSCOPE) {
+            val previous = previousGyroscopeTimestampNanos
+            previousGyroscopeTimestampNanos = sample.sensorTimestampNanos
+            if (previous != null && appState.liveRunning) {
+                val deltaSeconds = (sample.sensorTimestampNanos - previous).coerceAtLeast(0L) / 1_000_000_000.0
+                val z = sample.values.getOrNull(2)?.toDouble() ?: return
+                // Natural-axis +z is counter-clockwise for a face-up phone; display turns are handled above.
+                latestMapHeadingRadians = normalizeRadians(latestMapHeadingRadians + z * deltaSeconds)
             }
-            else -> Unit
         }
         appState.realLiveHeadingDegrees = latestMapHeadingRadians * 180.0 / PI
     }

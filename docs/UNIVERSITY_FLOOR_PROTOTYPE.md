@@ -31,6 +31,12 @@ Calibrate before adding path nodes or recording measurements. Scale changes are 
 6. Arrival is indicated only within 1.5 m along the route, with confidence ≥ 0.35 and uncertainty ≤ 3 m. Estimates older than 20 seconds are labelled as last known; stale arrival guidance is suppressed. These prototype thresholds are not a positioning accuracy guarantee.
 7. Enable Debug overlays for particles, raw PDR or Wi-Fi fixes. Research details retain correction diagnostics and explicit global relocalization. Stop navigation to close the persisted positioning session.
 
+### Optional full-screen map and landscape
+
+Tap the **Full screen map** icon beside the Navigate header. The map fills the display with compact floor/tracking/destination information. Choose **Landscape**, **Portrait** or **Auto rotate**; Auto follows the phone's rotation setting. **Exit full screen** or Android Back returns to the normal view and restores the earlier orientation policy. The normal landscape layout also places controls beside the map.
+
+Choose the orientation before starting your walk when possible. Set the initial map direction for the top edge of the **visible screen**, and keep that edge facing your walking direction. Screen rotation does not change Wi-Fi measurements or step detection. Android's sensor axes remain tied to the device's natural orientation, so TURN remaps rotation-vector heading to the displayed orientation and compensates display turns for the gyroscope fallback. Rotation keeps the same Activity, sensor listeners, positioning session, particles and route; it does not invoke the foreground-stop path. Changing physical grip or phone tilt while walking can still disturb heading, especially with gyroscope-only tracking; this requires validation on the actual phone. See Android's [sensor coordinate-system documentation](https://developer.android.com/develop/sensors-and-location/sensors/sensors_overview) and [immersive-mode guidance](https://developer.android.com/develop/ui/views/layout/immersive).
+
 Normal app restart preserves data. Uninstalling the app or clearing its storage does not. Android backgrounding ends collection/tracking rather than pretending sensors continued uninterrupted; begin a new session when returning.
 
 ## Persistence and compatibility
@@ -52,3 +58,10 @@ Automated builds, graph/freshness tests and emulator persistence/UI tests cannot
 - `assembleDebug`, `assembleDebugAndroidTest`, `lintDebug`: successful; lint has 0 errors and 9 existing warnings.
 - Android API 35 x86_64 emulator: all 7 instrumentation tests pass, covering populated v1 migration, restart persistence, partial/demo fingerprint exclusion, map/destination editing, selected survey progress, known-start selection and map hit testing after resize.
 - Verification used an isolated build copy and test emulator. No physical-phone data or installation was changed. Physical university-floor accuracy has not been validated.
+
+## Full-screen verification — 2026-10-04
+
+- 89 JVM tests and 11 Android API 35 instrumentation tests pass; debug app/test APKs compile and lint reports 0 errors, 9 existing warnings.
+- New checks cover heading remapping for all four display rotations, gyroscope display-turn compensation, full-screen exit, immersive bars, Android Back, orientation-policy restoration and Activity/ViewModel/session continuity through landscape and portrait.
+- Portrait and landscape layouts were inspected on the isolated emulator. Room schemas and persistence are unchanged by this feature.
+- These checks validate display math and lifecycle behavior, not physical walking accuracy. Validate phone grip, tilt, heading and radio coverage on the actual university floor before recording the demonstration.
