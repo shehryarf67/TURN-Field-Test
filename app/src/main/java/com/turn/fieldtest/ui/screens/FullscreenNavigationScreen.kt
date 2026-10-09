@@ -33,6 +33,9 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
                     Text(state.floorName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(confidence + (state.realLiveUncertaintyMetres?.let { " · ± %.1f m".format(it) } ?: ""),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(if (state.realHeadingAligned) "Heading %.0f° on map".format((state.realLiveHeadingDegrees + 360.0) % 360.0)
+                        else state.realHeadingStatus, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall)
                     state.destinations.firstOrNull { it.id == state.selectedDestinationId }?.let { poi ->
                         Text(poi.name + (state.remainingDistanceMetres?.let { " · %.1f m remaining".format(it) } ?: ""),
                             maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)

@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
                             withMotionPermissions(runtimeViewModel::toggleRealLive)
                         }
                     },
+                    onRealHeadingAligned = runtimeViewModel::alignLiveHeading,
                     onRealLiveScanRequested = {
                         withWifiPermissions(runtimeViewModel::requestLiveScan)
                     },

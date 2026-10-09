@@ -142,4 +142,48 @@ class PrototypeWorkflowTest {
             assertEquals(route, state.routePoints)
         }
     }
+
+    @Test fun startingRequiresExplicitHeadingAndPointAheadCalculatesLeft() {
+        val state = fixture().apply { manualStartPoint = Offset(10f, 10f) }
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) {
+            NavigationScreen(state, TurnAppActions())
+        } } }
+        compose.onNodeWithText("Start navigation").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Point ahead on map").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Floor map").performTouchInput {
+            click(Offset(center.x - width * 0.23f, center.y))
+        }
+        compose.runOnIdle {
+            assertTrue(state.headingChoiceConfirmed)
+            assertEquals(180.0, state.initialHeadingDegrees, 0.01)
+            assertEquals(Offset(10f, 10f), state.manualStartPoint)
+            assertFalse(state.pickingHeading)
+        }
+        compose.onNodeWithText("Start navigation").performScrollTo().assertIsEnabled()
+    }
+
+    @Test fun liveHeadingControlsDeclareLeftWithoutMovingOrClearingTrails() {
+        val state = fixture().apply {
+            liveRunning = true; sessionLocked = true; realLiveInitialized = true
+            realLivePosition = Offset(18f, 5f); realLiveHeadingDegrees = 0.0
+            realRawPdrTrail = listOf(Offset(17f, 5f), Offset(18f, 5f))
+            realFusedTrail = realRawPdrTrail
+        }
+        var declared: Double? = null
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) {
+            NavigationScreen(state, TurnAppActions(onRealHeadingAligned = { declared = it }))
+        } } }
+        compose.onNodeWithText("Correct walking direction").performScrollTo().performClick()
+        compose.onNodeWithText("Which way are you walking on the map?").performScrollTo()
+        compose.onNodeWithText("Left", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Align to this direction").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(180.0, declared!!, 0.0)
+            assertEquals(Offset(18f, 5f), state.realLivePosition)
+            assertEquals(2, state.realRawPdrTrail.size)
+            assertEquals(2, state.realFusedTrail.size)
+        }
+        compose.onNodeWithText("Reverse heading (180°)").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(180.0, declared!!, 0.0) }
+    }
 }

@@ -41,6 +41,23 @@ Choose the orientation before starting your walk when possible. Set the initial 
 
 Normal app restart preserves data. Uninstalling the app or clearing its storage does not. Android backgrounding ends collection/tracking rather than pretending sensors continued uninterrupted; begin a new session when returning.
 
+### Aligning the walking direction
+
+Reference points specify known **positions**. Their survey-facing notes do not align navigation heading. The starting map direction must now be chosen or explicitly confirmed for each completed navigation session; TURN no longer silently starts with the default Right direction.
+
+For the hallway-end example:
+
+1. Stand still at the endpoint. In Navigate, select **At a reference point** and the point you are physically standing at, or pick that known location on the drawing.
+2. If the corridor extends left from that point on the drawing and you will walk along it, choose **Left (180°)**. This is left on the drawing, not magnetic west and not necessarily your own left. For a diagonal corridor, choose **Point ahead on map** and tap a location farther along the corridor, at least 1 m from the start. TURN calculates the angle using +x right/+y up.
+3. Check the labelled starting-direction line on the map. Choose portrait/landscape first, keep the top of the visible screen toward your walking direction, press Start navigation and stay still until heading is aligned. Make a short walk and check the direction before recording the full route.
+4. If direction becomes wrong, stand still and open **Correct walking direction**. Choose the correct map direction (or tap ahead from the fused dot), then **Align to this direction**. **Reverse heading (180°)** handles an exactly reversed heading. Using a fused dot for angle calculation assumes that dot is close to your actual location; use the cardinal/degree controls if it is inaccurate.
+
+Manual realignment changes the sensor-to-map heading baseline for subsequent movement. It preserves the fused location, particles, route and historical PDR/fused trails; it cannot repair earlier position errors. If the position is already wrong, stop and start a new session from the reference point where you actually stand, or obtain a reliable absolute fix. Historical data remains persisted. Alignments are explicitly recorded as `MANUAL_HEADING_ALIGNMENT` correction events, with prior/declared degrees and `positionChanged=false`; they are researcher input, not measured sensor evidence.
+
+The first accepted heading frame must postdate startup/realignment. Step motion pauses if heading has not aligned or is stale (over 2 s; a 200 ms timestamp-order tolerance handles separate sensor queues). Rejected step events retain the reason in Room. Direction status and live heading are visible; full-screen mode retains a compact heading/status line. Keep a consistent grip and turn the phone with your walking turns; changing grip/tilt can otherwise look like a turn to PDR.
+
+After one map alignment, phone sensors update relative turns automatically. Fully automatic initial alignment requires a known relationship between the imported drawing and a physical heading anchor. A game rotation vector provides relative orientation rather than magnetic north; a compass alone cannot establish the drawing's orientation. See Android's [position-sensor documentation](https://developer.android.com/develop/sensors-and-location/sensors/sensors_position). TURN does not infer travel direction from a Wi-Fi fingerprint or force motion toward the selected destination.
+
 ## Persistence and compatibility
 
 - Room schema **1 → 2** uses an explicit additive migration: navigation nodes/edges and survey target/completion metadata. Existing map, Wi-Fi, sensor, positioning and evaluation tables/rows are retained. There is no destructive migration fallback.
@@ -92,3 +109,10 @@ Automated builds, graph/freshness tests and emulator persistence/UI tests cannot
 - All 13 Android API 35 instrumentation tests pass. New UI checks cover requesting Wi-Fi during initialized tracking, optional survey metadata without invented north, and choosing an initial direction on the drawing. Existing migration, persistence, navigation and rotation checks remain passing.
 - Debug app/test APKs compile; lint reports 0 errors and 9 existing warnings. Verification used an isolated build and emulator; source matches the verified copy and Room schemas remain unchanged. No physical-phone installation or saved data was altered.
 - No recorded hallway radio dataset was available for replay. The changes address reproducible code weaknesses, but the cause and accuracy of the reported physical test must be verified with the next known-point run.
+
+## Heading controls verification — 2026-10-09
+
+- 102 JVM tests pass with no failures/skips. New tests cover tap-ahead cardinal angles, leftward PDR movement from a hallway endpoint, heading changes without moving/resetting PDR state, clockwise/counter-clockwise turn signs, azimuth wrap, post-alignment/stale heading eligibility and particle propagation in all four map directions.
+- All 16 Android API 35 instrumentation tests pass. New UI tests require explicit starting heading, calculate Left from a map tap, and verify that live alignment/reverse controls declare the requested heading without changing UI position/trails. Android rotation-matrix tests combine remapped headings with leftward PDR and a clockwise turn in all four display orientations. Existing migration, persistence, Wi-Fi and lifecycle tests remain passing.
+- Debug app/test APKs compile; lint reports 0 errors and 9 existing warnings. Source matches the isolated verified build copy. The new controls were visually checked on the emulator. Room schema is unchanged; the manual alignment uses the existing correction-event table.
+- These tests validate math, UI wiring and compatibility. The reported physical hallway walk has not been replayed with recorded sensor data; grip, tilt, sensor drift and floor accuracy still need a real-phone check. No physical-phone installation or saved data was altered.

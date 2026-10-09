@@ -81,6 +81,7 @@ data class TurnAppActions(
     val onDiagnosticWalkToggled: () -> Unit = {},
     val onRealSurveyStarted: (SurveyCaptureMetadata) -> Unit = {},
     val onRealSurveyFinished: () -> Unit = {},
+    val onRealHeadingAligned: (Double) -> Unit = {},
     val onRealLiveToggled: () -> Unit = {},
     val onRealLiveScanRequested: () -> Unit = {},
     val onRealLiveRelocalizationRequested: () -> Unit = {},

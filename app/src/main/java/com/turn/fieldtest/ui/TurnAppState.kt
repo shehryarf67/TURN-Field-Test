@@ -25,6 +25,11 @@ import com.turn.fieldtest.core.*
 
 @Stable
 class TurnAppState {
+    var headingChoiceConfirmed by mutableStateOf(false)
+    var pickingHeading by mutableStateOf(false)
+    var realHeadingAligned by mutableStateOf(false)
+    var realHeadingAlignmentBusy by mutableStateOf(false)
+    var realHeadingStatus by mutableStateOf("Choose your walking direction on the map before starting")
     var navigationFullscreen by mutableStateOf(false)
     var navigationViewOrientation by mutableStateOf(NavigationViewOrientation.AUTO)
     val isNavigationFullscreen get() = navigationFullscreen && mode == DataMode.REAL_DEVICE &&

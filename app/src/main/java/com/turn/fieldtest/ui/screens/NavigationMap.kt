@@ -139,8 +139,15 @@ internal fun NavigationMap(
                         drawLine(TurnBlue, p, p + Offset(cos(angle).toFloat(), -sin(angle).toFloat()) * (24f / zoom), 5f / zoom, StrokeCap.Round)
                         drawCircle(Color.White, 10f / zoom, p); drawCircle(TurnBlue, 7f / zoom, p)
                     }
-                    if (!state.liveRunning) state.manualStartPoint?.let {
-                        drawCircle(TurnBlue, 9f / zoom, project(it), style = Stroke(3f / zoom))
+                    if (showPosition && !state.liveRunning) state.manualStartPoint?.let {
+                        val p = project(it)
+                        drawCircle(TurnBlue, 9f / zoom, p, style = Stroke(3f / zoom))
+                        if (state.headingChoiceConfirmed) {
+                            val angle = Math.toRadians(state.initialHeadingDegrees)
+                            val tip = p + Offset(cos(angle).toFloat(), -sin(angle).toFloat()) * (36f / zoom)
+                            drawLine(TurnAmber, p, tip, 4f / zoom, StrokeCap.Round)
+                            label("Starting direction", tip, TurnAmber)
+                        }
                     }
                 }
             }

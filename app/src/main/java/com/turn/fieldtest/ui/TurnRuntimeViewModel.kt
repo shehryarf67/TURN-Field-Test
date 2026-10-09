@@ -142,6 +142,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var livePdrSequence = 0L
     private var latestDeviceYawRadians: Double? = null
     private var liveYawBaselineRadians: Double? = null
+    private var lastLiveHeadingSensorNanos: Long? = null
+    private var headingAlignmentNotBeforeNanos = 0L
     private var lastHeadingDisplayRotation: Int? = null
     private var latestRotationVector: FloatArray? = null
     private var latestMapHeadingRadians = 0.0
@@ -507,6 +509,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realWifiFixes = emptyList()
         appState.realParticleCloud = emptyList()
         appState.realLiveInitialized = false
+        appState.headingChoiceConfirmed = false
+        appState.pickingHeading = false
+        appState.realHeadingAligned = false
+        appState.realHeadingStatus = "Choose your walking direction on the map before starting"
         appState.realLiveFloorId = null
         appState.realWifiFloorId = null
         appState.realLiveConfidence = 0.0
@@ -707,6 +713,52 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    /** Researcher-declared heading calibration; never changes position or invents sensor motion. */
+    fun alignLiveHeading(degrees: Double) {
+        if (!degrees.isFinite() || appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning ||
+            appState.realHeadingAlignmentBusy) return
+        appState.realHeadingAlignmentBusy = true
+        val requestedAtNanos = android.os.SystemClock.elapsedRealtimeNanos()
+        viewModelScope.launch {
+            try {
+                eventMutex.withLock {
+                    val session = activePositioningSession ?: return@withLock
+                    if (!appState.liveRunning) return@withLock
+                    val aligned = normalizeRadians(Math.toRadians(degrees))
+                    val priorDegrees = Math.toDegrees(latestMapHeadingRadians)
+                    app.database.positioningDao().upsertCorrection(CorrectionEventEntity(
+                        id = "COR-${UUID.randomUUID()}", positioningSessionId = session.id,
+                        floorId = activeContext.floorId, type = "MANUAL_HEADING_ALIGNMENT",
+                        sourceId = "USER_MAP_DIRECTION", accepted = true,
+                        reason = JsonObject(mapOf("priorHeadingDegrees" to JsonPrimitive(priorDegrees),
+                            "declaredHeadingDegrees" to JsonPrimitive(degrees),
+                            "positionChanged" to JsonPrimitive(false))).toString(),
+                        timestampEpochMillis = System.currentTimeMillis()))
+                    sessionInitialHeadingRadians = aligned
+                    latestMapHeadingRadians = aligned
+                    liveYawBaselineRadians = null
+                    latestRotationVector = null
+                    lastHeadingDisplayRotation = null
+                    previousGyroscopeTimestampNanos = null
+                    lastLiveHeadingSensorNanos = null
+                    headingAlignmentNotBeforeNanos = requestedAtNanos
+                    rawPdrTracker?.setHeading(aligned)
+                    appState.initialHeadingDegrees = degrees
+                    appState.realLiveHeadingDegrees = Math.toDegrees(aligned)
+                    appState.realHeadingAligned = false
+                    appState.pickingHeading = false
+                    appState.realHeadingStatus = "Stay still · realigning to your declared direction on the next sensor sample"
+                    appState.realLiveStatus = "Manual heading alignment recorded; position and existing trails retained"
+                }
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                appState.realHeadingStatus = "Heading was not changed: ${failure.message}"
+            } finally {
+                appState.realHeadingAlignmentBusy = false
+            }
+        }
+    }
+
     fun requestLiveScan() {
         if (!realWifiReady("Live locate")) return
         liveWifiEvidence.requireMeasurementsAfter(android.os.SystemClock.elapsedRealtimeNanos() / 1_000L)
@@ -754,6 +806,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.realLiveStatus = "Step or heading sensor unavailable. Check Diagnostics and permissions before walking."
             return
         }
+        if (!appState.headingChoiceConfirmed) { appState.realLiveStatus = "Choose or confirm your walking direction on the drawing before starting"; return }
         if (!appState.initialHeadingDegrees.isFinite()) { appState.realLiveStatus = "Enter a valid map heading"; return }
         sessionInitialHeadingRadians = normalizeRadians(Math.toRadians(appState.initialHeadingDegrees))
         val chosenStart = appState.manualStartPoint?.let { MetricPoint(it.x.toDouble(), it.y.toDouble()) }
@@ -813,9 +866,14 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 liveEstimateSequence = 0L
                 livePdrSequence = 0L
                 liveYawBaselineRadians = null
+                lastLiveHeadingSensorNanos = null
+                headingAlignmentNotBeforeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+                appState.realHeadingAligned = false
+                appState.realHeadingStatus = "Stay still · waiting for a fresh heading sensor sample"
                 lastHeadingDisplayRotation = null
                 latestRotationVector = null
                 latestMapHeadingRadians = sessionInitialHeadingRadians
+                appState.realLiveHeadingDegrees = Math.toDegrees(sessionInitialHeadingRadians)
                 previousGyroscopeTimestampNanos = null
                 appState.liveRunning = true
                 appState.realLiveInitialized = false
@@ -1569,6 +1627,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         liveScanJob = null
         appState.liveRunning = false
         appState.realLiveStatus = reason
+        appState.headingChoiceConfirmed = false
+        appState.pickingHeading = false
+        appState.realHeadingAligned = false
         val endedAt = System.currentTimeMillis()
         try {
             app.database.withTransaction {
@@ -1717,6 +1778,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun updateLiveHeading(sample: SensorSample) {
+        if (appState.liveRunning && sample.sensorTimestampNanos < headingAlignmentNotBeforeNanos) return
         val selected = sensorSource.state.value.selectedHeadingSource
         val previousRotation = lastHeadingDisplayRotation
         val displayChanged = previousRotation != null && previousRotation != sample.displayRotation
@@ -1727,10 +1789,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         val rotationSample = sample.kind == SensorSampleKind.RELATIVE_ROTATION_VECTOR ||
             sample.kind == SensorSampleKind.ROTATION_VECTOR
-        if (rotationSample && sample.type == selected && sample.values.size >= 3) {
+        val validRotationSample = rotationSample && sample.type == selected && sample.values.size >= 3 &&
+            sample.values.all { it.isFinite() }
+        if (validRotationSample) {
             latestRotationVector = sample.values.toFloatArray()
         }
-        if ((rotationSample && sample.type == selected || displayChanged) &&
+        if ((validRotationSample || displayChanged) &&
             selected in setOf(TurnSensorType.GAME_ROTATION_VECTOR, TurnSensorType.ROTATION_VECTOR)) {
             latestRotationVector?.let { vector ->
                 runCatching {
@@ -1739,12 +1803,23 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     if (appState.liveRunning) {
                         val baseline = liveYawBaselineRadians ?: yaw.also { liveYawBaselineRadians = it }
                         // The visible screen's top is the declared forward direction in either orientation.
-                        latestMapHeadingRadians = normalizeRadians(sessionInitialHeadingRadians - (yaw - baseline))
+                        latestMapHeadingRadians = com.turn.fieldtest.core.MapHeading.fromRelativeAzimuth(sessionInitialHeadingRadians, baseline, yaw)
+                        if (validRotationSample && yaw.isFinite()) {
+                            lastLiveHeadingSensorNanos = sample.sensorTimestampNanos
+                            appState.realHeadingAligned = true
+                            appState.realHeadingStatus = "Heading aligned · check the arrow before walking"
+                        }
                     }
                 }
             }
         }
-        if (sample.kind == SensorSampleKind.ANGULAR_VELOCITY && selected == TurnSensorType.GYROSCOPE) {
+        if (sample.kind == SensorSampleKind.ANGULAR_VELOCITY && selected == TurnSensorType.GYROSCOPE &&
+            sample.values.getOrNull(2)?.isFinite() == true) {
+            if (appState.liveRunning) {
+                lastLiveHeadingSensorNanos = sample.sensorTimestampNanos
+                appState.realHeadingAligned = true
+                appState.realHeadingStatus = "Gyroscope heading aligned · check regularly for drift"
+            }
             val previous = previousGyroscopeTimestampNanos
             previousGyroscopeTimestampNanos = sample.sensorTimestampNanos
             if (previous != null && appState.liveRunning) {
@@ -1760,6 +1835,19 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private suspend fun processLiveStep(sample: SensorSample) {
         if (sensorSource.state.value.selectedHeadingSource == null) {
             appState.realLiveStatus = "No active heading sensor; Wi-Fi fixes available but PDR movement is unavailable"
+            return
+        }
+        val lastHeading = lastLiveHeadingSensorNanos
+        if (!appState.realHeadingAligned || !com.turn.fieldtest.core.MapHeading.hasFreshHeading(
+                sample.sensorTimestampNanos, lastHeading, headingAlignmentNotBeforeNanos)) {
+            appState.realHeadingAligned = false
+            appState.realHeadingStatus = "Heading unavailable/stale · movement paused until a fresh heading sample"
+            activeSensorSession?.let { session -> repositories.positioning.savePdrEvent(PdrEventEntity(
+                id = "PDR-${session.id}-${livePdrSequence++}", sensorSessionId = session.id,
+                sequence = livePdrSequence - 1, eventType = "STEP", source = StepSource.STEP_DETECTOR.name,
+                timestampEpochMillis = sample.receivedAtEpochMillis, sensorTimestampNanos = sample.sensorTimestampNanos,
+                stepDelta = 0, strideMetres = 0.0, headingRadians = latestMapHeadingRadians,
+                accepted = false, rejectionReason = "HEADING_NOT_ALIGNED_OR_STALE")) }
             return
         }
         val tracker = rawPdrTracker ?: return

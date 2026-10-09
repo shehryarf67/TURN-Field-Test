@@ -1,5 +1,7 @@
 package com.turn.fieldtest.core
 
+import kotlin.math.PI
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -244,6 +246,19 @@ class ParticleFilterTest {
     private fun wideMap(): MetricMap = MetricMap(
         mapOf("F1" to MapFloor("F1", listOf(rectangle(0.0, 0.0, 20.0, 20.0)))),
     )
+
+    @Test fun particlePropagationUsesTheSameFourMapDirectionsAsPdr() {
+        val cases = listOf(0.0 to MetricPoint(10.7, 10.0),
+            PI / 2 to MetricPoint(10.0, 10.7), PI to MetricPoint(9.3, 10.0),
+            -PI / 2 to MetricPoint(10.0, 9.3))
+        for ((heading, expected) in cases) {
+            val filter = ParticleFilter(wideMap(), quietConfig(), seed = 17L)
+            filter.initialize(AbsoluteFix(MetricPoint(10.0, 10.0), "F1", AbsoluteFixSource.MANUAL))
+            val position = filter.predictStep(0.7, heading).summary!!.position
+            assertEquals(expected.x, position.x, 1e-10)
+            assertEquals(expected.y, position.y, 1e-10)
+        }
+    }
 
     private fun twoFloorMap(): MetricMap {
         val transitionArea = rectangle(9.0, 9.0, 11.0, 11.0)
