@@ -137,6 +137,18 @@ class ParticleFilterTest {
         assertFalse(result.resampled)
     }
 
+    @Test fun ambiguousOrUnlikeWifiCannotPullOrRelocalizeGoodFusedPosition() {
+        val filter = ParticleFilter(wideMap(), quietConfig(), seed = 27L)
+        val before = filter.initialize(AbsoluteFix(MetricPoint(2.0, 2.0), "F1", AbsoluteFixSource.MANUAL))
+        val distant = exactWifiMatch(MetricPoint(16.0, 16.0), "F1")
+        for (match in listOf(distant.copy(spatiallyAmbiguous = true), distant.copy(unlikeDatabase = true))) {
+            val result = filter.correctWithWifi(match)
+            assertEquals(WifiCorrectionKind.IGNORED_NO_ESTIMATE, result.kind)
+            assertEquals(before.position, result.summary?.position)
+            assertFalse(result.resampled)
+        }
+    }
+
     @Test
     fun strongDistantWifiMatchTriggersExplicitGlobalRelocalization() {
         val config = quietConfig(

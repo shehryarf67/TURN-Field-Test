@@ -2,6 +2,7 @@ package com.turn.fieldtest.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -82,17 +83,31 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 }
                 Text(state.manualStartPoint?.let { "Known start: %.1f, %.1f m".format(it.x, it.y) } ?: "Start position: wait for a confident fresh Wi-Fi fix", style = MaterialTheme.typography.bodySmall)
                 if (state.manualStartPoint != null) TextButton(onClick = { state.manualStartPoint = null }) { Text("Use automatic Wi-Fi initialization") }
+                Text("Which way are you walking on the map?", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Right" to 0.0, "Up" to 90.0, "Left" to 180.0, "Down" to 270.0).forEach { (label, degrees) ->
+                        FilterChip(selected = heading.toDoubleOrNull() == degrees,
+                            onClick = { heading = degrees.toInt().toString(); state.initialHeadingDegrees = degrees },
+                            label = { Text(label) })
+                    }
+                }
+                Text("Use the direction on this drawing, not compass north. Face the top of the visible phone screen that way. Use degrees below for diagonal directions.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(heading, { heading = it; it.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { value -> state.initialHeadingDegrees = value } },
                     label = { Text("Facing direction on map (degrees)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Text("0° = right · 90° = up · 180° = left · 270° = down. Choose portrait or landscape before starting. Keep the top of the visible screen facing your walking direction.", style = MaterialTheme.typography.bodySmall)
             }
+            Text(state.realWifiEvidenceStatus, style = MaterialTheme.typography.bodySmall)
+            state.realWifiFixEpochMillis?.let { Text("Latest usable Wi-Fi match: ${(now - it).coerceAtLeast(0) / 1000}s ago", style = MaterialTheme.typography.bodySmall) }
             Text(state.realLiveStatus, style = MaterialTheme.typography.bodySmall)
             state.realWifiIssue?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             Button(onClick = actions.onRealLiveToggled, modifier = Modifier.fillMaxWidth(),
                 enabled = !state.liveStarting && !state.projectBusy && !state.surveyRunning && heading.toDoubleOrNull()?.isFinite() == true) {
                 Text(if (state.liveStarting) "Starting…" else if (state.liveCloseFailed) "Retry saving" else if (state.liveRunning) "Stop navigation" else "Start navigation")
             }
-            if (state.liveRunning && !state.realLiveInitialized) OutlinedButton(onClick = actions.onRealLiveScanRequested) { Text("Request fresh Wi-Fi fix") }
+            if (state.liveRunning) state.realWifiNextPermittedRequestEpochMillis?.takeIf { it > now }?.let {
+                Text("Next Wi-Fi request in ${(it - now + 999) / 1000}s", style = MaterialTheme.typography.bodySmall)
+            }
+            if (state.liveRunning) OutlinedButton(onClick = actions.onRealLiveScanRequested) { Text("Request fresh Wi-Fi fix") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(state.debugOverlays, { state.debugOverlays = !state.debugOverlays }, label = { Text("Debug overlays") })
                 TextButton(onClick = { research = true }) { Text("Research details") }

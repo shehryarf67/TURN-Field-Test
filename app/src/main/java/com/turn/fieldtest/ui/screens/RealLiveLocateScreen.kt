@@ -149,7 +149,7 @@ internal fun RealLiveLocateScreen(
                         }
                         Spacer(Modifier.height(9.dp))
                         Text(
-                            "At initialization, point the phone along map +x. Relative turns then update heading; magnetometer north is not assumed.",
+                            "Set the initial direction in Navigate using Right/Up/Left/Down on the drawing. Keep the top of the visible screen facing that way. Relative turns update heading; compass north is not assumed.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -177,14 +177,16 @@ internal fun RealLiveLocateScreen(
             },
             secondary = {
                 SectionCard("Wi-Fi evidence", "Weighted kNN uses BSSID, not SSID") {
-                    LabelValue("k", state.knnK.toString())
+                    Text(state.realWifiEvidenceStatus, style = MaterialTheme.typography.bodySmall)
+                    state.realWifiFixEpochMillis?.let { LabelValue("Usable fix recorded", java.util.Date(it).toString()) }
+                    LabelValue("k (maximum)", state.knnK.toString())
                     LabelValue("Missing RSSI", "${state.missingRssi} dBm")
                     LabelValue("Match distance", state.realWifiMatchDistance?.let { "%.2f dB RMS".format(it) } ?: "no match")
                     Text("Nearest fingerprints", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     if (state.realNearestFingerprintIds.isEmpty()) {
                         Text("No neighbours yet", style = MaterialTheme.typography.bodySmall)
                     } else {
-                        state.realNearestFingerprintIds.forEach { id ->
+                        state.realWifiNeighbourDetails.forEach { id ->
                             Text("• $id", style = MaterialTheme.typography.bodySmall)
                         }
                     }
@@ -265,7 +267,7 @@ private fun RealPositionCanvas(state: TurnAppState, modifier: Modifier = Modifie
         }
         if (state.showRawPdr) drawTrail(state.realRawPdrTrail, TurnAmber, 3f, floorWidth, floorHeight)
         drawTrail(state.realFusedTrail, TurnBlue, 5f, floorWidth, floorHeight)
-        if (state.showWifiFixes) state.realWifiFixes.forEach { drawCircle(TurnCyan, 7f, metric(it, floorWidth, floorHeight), style = Stroke(3f)) }
+        if (state.showWifiFixes) state.realWifiPosition?.let { drawCircle(TurnCyan, 7f, metric(it, floorWidth, floorHeight), style = Stroke(3f)) }
         if (state.showParticles) state.realParticleCloud.forEach { drawCircle(TurnBlue.copy(alpha = 0.28f), 2.5f, metric(it, floorWidth, floorHeight)) }
         state.realLivePosition?.let { position ->
             val centre = metric(position, floorWidth, floorHeight)

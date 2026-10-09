@@ -188,8 +188,17 @@ data class WifiMatcherConfig(
     val inverseDistancePower: Double = 1.0,
     val exactMatchEpsilon: Double = 1e-9,
     val unlikeDatabaseDistanceThreshold: Double = 35.0,
+    /** Keep k as an upper bound; do not average clearly inferior radio matches. */
+    val neighbourDistanceSlackDb: Double = 3.0,
+    val neighbourRelativeSlack: Double = 0.5,
+    val minimumSharedBssids: Int = 1,
+    val ambiguitySpreadMetres: Double = 6.0,
 ) {
     init {
+        require(neighbourDistanceSlackDb.isFinite() && neighbourDistanceSlackDb >= 0.0)
+        require(neighbourRelativeSlack.isFinite() && neighbourRelativeSlack >= 0.0)
+        require(minimumSharedBssids > 0)
+        require(ambiguitySpreadMetres.isFinite() && ambiguitySpreadMetres > 0.0)
         require(k > 0) { "k must be positive" }
         require(missingRssiDbm < 0.0 && missingRssiDbm.isFinite())
         require(inverseDistancePower > 0.0 && inverseDistancePower.isFinite())
@@ -206,6 +215,7 @@ data class WifiNeighbour(
     /** Globally normalized inverse-distance weight across the selected neighbours. */
     val weight: Double,
     val appliedDeviceOffsetDb: Double,
+    val sharedBssidCount: Int = 0,
 )
 
 data class WifiMatchResult(
@@ -218,6 +228,7 @@ data class WifiMatchResult(
     val weightedMatchDistance: Double,
     val freshness: WifiScanFreshness,
     val unlikeDatabase: Boolean,
+    val spatiallyAmbiguous: Boolean = false,
 ) {
     val isExactMatch: Boolean get() = neighbours.isNotEmpty() && neighbours.all { it.distance <= 1e-9 }
 
@@ -253,7 +264,7 @@ class WeightedKnnWifiMatcher(private val config: WifiMatcherConfig = WifiMatcher
                 .mapTo(hashSetOf(), ::canonicalBssid)
             val observedIds = liveRssiByBssid.filterValues { it.isFinite() }.keys
                 .mapTo(hashSetOf(), ::canonicalBssid) - excluded
-            if (fingerprint.canonicalVector().keys.none { it in observedIds }) return@mapNotNull null
+            if (fingerprint.canonicalVector().keys.count { it in observedIds } < config.minimumSharedBssids) return@mapNotNull null
             val distance = WifiVectorDistance.calculate(
                 liveRssiByBssid = liveRssiByBssid,
                 storedRssiByBssid = fingerprint.canonicalVector(),
@@ -267,11 +278,14 @@ class WeightedKnnWifiMatcher(private val config: WifiMatcherConfig = WifiMatcher
             .take(config.k)
         if (distances.isEmpty()) return WifiMatchResult.noEstimate(freshness)
 
-        val exact = distances.filter { it.second.distance <= config.exactMatchEpsilon }
+        val bestDistance = distances.first().second.distance
+        val competitive = distances.filter { it.second.distance <= bestDistance +
+            max(config.neighbourDistanceSlackDb, bestDistance * config.neighbourRelativeSlack) }
+        val exact = competitive.filter { it.second.distance <= config.exactMatchEpsilon }
         val weightedRows = if (exact.isNotEmpty()) {
             exact.map { it to 1.0 / exact.size }
         } else {
-            val raw = distances.map { row ->
+            val raw = competitive.map { row ->
                 row to 1.0 / max(row.second.distance, config.exactMatchEpsilon)
                     .pow(config.inverseDistancePower)
             }
@@ -288,6 +302,10 @@ class WeightedKnnWifiMatcher(private val config: WifiMatcherConfig = WifiMatcher
                 distance = distance.distance,
                 weight = weight,
                 appliedDeviceOffsetDb = distance.appliedDeviceOffsetDb,
+                sharedBssidCount = fingerprint.canonicalVector().keys.intersect(
+                    liveRssiByBssid.keys.map(::canonicalBssid).toSet()).count {
+                    it !in (globallyExcludedBssids + fingerprint.canonicalExclusions()).map(::canonicalBssid)
+                },
             )
         }
         val floorVotes = neighbours.groupBy { it.floorId }
@@ -314,6 +332,8 @@ class WeightedKnnWifiMatcher(private val config: WifiMatcherConfig = WifiMatcher
         }
         val matchQuality = exp(-weightedDistance / 18.0)
         val spreadQuality = exp(-spread / 8.0)
+        val ambiguous = spread > config.ambiguitySpreadMetres &&
+            floorNeighbours.maxOf { it.weight } / floorWeight < 0.6
         val confidence = ((0.55 * matchQuality + 0.20 * spreadQuality + 0.25 * floorAgreement) *
             freshnessFactor).coerceIn(0.0, 1.0)
         val uncertainty = (
@@ -323,12 +343,13 @@ class WeightedKnnWifiMatcher(private val config: WifiMatcherConfig = WifiMatcher
             estimatedPosition = estimatedPosition,
             estimatedFloorId = selectedFloor.key,
             neighbours = neighbours,
-            confidence = confidence,
+            confidence = if (ambiguous) confidence.coerceAtMost(0.35) else confidence,
             uncertaintyRadiusMetres = uncertainty,
             floorAgreement = floorAgreement,
             weightedMatchDistance = weightedDistance,
             freshness = freshness,
             unlikeDatabase = neighbours.minOf { it.distance } > config.unlikeDatabaseDistanceThreshold,
+            spatiallyAmbiguous = ambiguous,
         )
     }
 }

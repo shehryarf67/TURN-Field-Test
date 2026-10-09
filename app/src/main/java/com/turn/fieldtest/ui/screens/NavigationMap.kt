@@ -122,7 +122,11 @@ internal fun NavigationMap(
                     }
                     if (showPosition && state.debugOverlays) {
                         if (state.showRawPdr) line(state.realRawPdrTrail, TurnAmber, 2f)
-                        if (state.showWifiFixes) state.realWifiFixes.forEach { drawCircle(TurnMint, 4f / zoom, project(it)) }
+                        if (state.showWifiFixes) state.realWifiPosition?.let {
+                            val p = project(it)
+                            drawCircle(TurnMint, 7f / zoom, p, style = Stroke(2f / zoom))
+                            label("Last Wi-Fi match", p, TurnMint)
+                        }
                         if (state.showParticles) state.realParticleCloud.forEach { drawCircle(TurnCyan.copy(alpha = 0.6f), 2f / zoom, project(it)) }
                     }
                     if (showPosition) state.realLivePosition?.let { position ->

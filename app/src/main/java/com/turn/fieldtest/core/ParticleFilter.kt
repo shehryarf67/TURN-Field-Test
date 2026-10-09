@@ -252,7 +252,7 @@ class ParticleFilter(
         }
         val wifiPosition = match.estimatedPosition
         val wifiFloor = match.estimatedFloorId
-        if (wifiPosition == null || wifiFloor == null || match.neighbours.isEmpty()) {
+        if (wifiPosition == null || wifiFloor == null || match.neighbours.isEmpty() || match.unlikeDatabase || match.spatiallyAmbiguous) {
             return WifiCorrectionResult(WifiCorrectionKind.IGNORED_NO_ESTIMATE, false, 0.0, summary())
         }
 

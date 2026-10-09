@@ -123,7 +123,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var sessionGraph: NavigationGraph? = null
     private var sessionInitialHeadingRadians = 0.0
     private var savedNavigationGraph: NavigationGraph? = null
-    private val lastLiveApTimestamps = mutableMapOf<String, Long>()
+    private val liveWifiEvidence = com.turn.fieldtest.platform.wifi.LiveWifiEvidenceGate()
     private val activeContext get() = requireNotNull(appState.activeProject) { "Open a saved project first" }
     private val captureService = WifiSurveyCaptureService(repositories.surveys)
 
@@ -188,6 +188,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             nearestFingerprintDetailsJson = JsonObject(mapOf(
                 "ids" to JsonArray(appState.realNearestFingerprintIds.map(::JsonPrimitive)),
                 "matchDistance" to (appState.realWifiMatchDistance?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull),
+                "candidateDetails" to JsonArray(appState.realWifiNeighbourDetails.map(::JsonPrimitive)),
+                "evidenceStatus" to JsonPrimitive(appState.realWifiEvidenceStatus),
+                "usableFixEpochMillis" to (appState.realWifiFixEpochMillis?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull),
             )).toString(),
             mapConstraintEventsJson = JsonObject(mapOf("rejectedParticleMoves" to JsonPrimitive(appState.realLiveMapRejectedCount))).toString(),
             timestampEpochMillis = now,
@@ -706,6 +709,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     fun requestLiveScan() {
         if (!realWifiReady("Live locate")) return
+        liveWifiEvidence.requireMeasurementsAfter(android.os.SystemClock.elapsedRealtimeNanos() / 1_000L)
+        appState.realWifiPosition = null
+        appState.realWifiFixEpochMillis = null
+        appState.realWifiEvidenceStatus = "Refresh requested · waiting for measurements taken after this request"
         viewModelScope.launch { requestRealScan("Live locate") }
     }
 
@@ -762,7 +769,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 sessionMap = saved.metricMap()
                 if (chosenStart != null) require(sessionMap!!.floors.getValue(context.floorId).isWalkable(chosenStart)) { "Known start must be inside saved walkable space" }
                 sessionGraph = NavigationGraph(sessionMap!!.floors.getValue(context.floorId), saved.nodes.map { it.core() }, saved.edges.map { it.core() })
-                lastLiveApTimestamps.clear()
+                liveWifiEvidence.reset(android.os.SystemClock.elapsedRealtimeNanos() / 1_000L)
+                appState.realWifiPosition = null
+                appState.realWifiFixEpochMillis = null
+                appState.realWifiNeighbourDetails = emptyList()
+                appState.realWifiEvidenceStatus = "Waiting for fresh live evidence"
                 val sourceState = sensorSource.state.value
                 val sensorSession = SensorSessionEntity(
                     id = "SNS-${UUID.randomUUID()}",
@@ -909,6 +920,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             is WifiScanRequestResult.Rejected -> {
                 appState.realWifiRequestAccepted = false
                 appState.realWifiIssue = result.issue.displayName()
+                if (source == "Live locate") {
+                    appState.realWifiEvidenceStatus = "Scan not accepted: ${result.issue.displayName()} · no new requested fix"
+                    appState.realLiveStatus = appState.realWifiEvidenceStatus
+                }
                 if (activeSurvey != null) appState.surveyRuntimeStatus = "$source request not accepted: ${result.issue.displayName()}"
             }
         }
@@ -1298,12 +1313,16 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         val fingerprints = loadPilotFingerprints()
         if (fingerprints.isEmpty()) {
+            appState.realWifiPosition = null
+            appState.realWifiFixEpochMillis = null
+            appState.realWifiEvidenceStatus = "No completed fingerprints on this floor · correction not applied"
             appState.realLiveStatus = "No saved fingerprints found; survey at least one reference point first"
             return
         }
         val matcher = WeightedKnnWifiMatcher(
             WifiMatcherConfig(
                 k = appState.knnK,
+                minimumSharedBssids = 3,
                 missingRssiDbm = appState.missingRssi.toDouble(),
                 normalization = if (appState.deviceOffsetNormalization) {
                     WifiNormalization.DEVICE_OFFSET
@@ -1313,13 +1332,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             ),
         )
         val matchStarted = System.currentTimeMillis()
-        val eligibleAps = batch.accessPoints.filter { ap -> ap.ageMillisAtReceipt in 0L..15_000L &&
-            ap.scanTimestampMicros > (lastLiveApTimestamps[ap.bssid.lowercase()] ?: 0L) }
+        val eligibleAps = liveWifiEvidence.consume(batch)
         if (freshness == CoreWifiFreshness.FRESH && eligibleAps.isEmpty()) {
-            appState.realLiveStatus = "No new individual AP measurements; waiting for a fresh scan"
+            appState.realWifiEvidenceStatus = "No new post-request AP measurements · correction not applied"
+            appState.realLiveStatus = appState.realWifiEvidenceStatus
             return
         }
-        if (freshness == CoreWifiFreshness.FRESH) eligibleAps.forEach { lastLiveApTimestamps[it.bssid.lowercase()] = it.scanTimestampMicros }
         val match = matcher.match(
             liveRssiByBssid = eligibleAps.associate { it.bssid.lowercase() to it.rssiDbm.toDouble() },
             fingerprints = fingerprints,
@@ -1329,29 +1347,43 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             it.referencePointId.substringBefore("::")
         }.distinct()
         appState.realWifiMatchDistance = match.weightedMatchDistance.takeIf(Double::isFinite)
-        if (freshness == CoreWifiFreshness.FRESH) {
-            appState.realWifiPosition = match.estimatedPosition?.takeUnless { match.unlikeDatabase }?.toUiOffset()
-            appState.realWifiFloorId = match.estimatedFloorId.takeUnless { match.unlikeDatabase }
-            appState.realWifiUncertaintyMetres = match.uncertaintyRadiusMetres.takeIf { it.isFinite() }
-        }
-        match.estimatedPosition?.let { position ->
-            if (freshness == CoreWifiFreshness.FRESH) {
-                appState.realWifiFixes = (appState.realWifiFixes + position.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
-            }
+        appState.realWifiNeighbourDetails = match.neighbours.map {
+            "${it.referencePointId}: %.1f dB · %.0f%% weight · ${it.sharedBssidCount} shared APs".format(it.distance, it.weight * 100)
         }
 
         if (freshness != CoreWifiFreshness.FRESH) {
             particleFilter?.correctWithWifi(match)
+            appState.realWifiEvidenceStatus = "Cached/stale broadcast · correction not applied"
             appState.lastCorrectionType = "cached Wi-Fi result ignored"
             appState.realLiveStatus = "Cached/stale Wi-Fi retained for diagnostics; fusion was not corrected"
             return
         }
-        if (match.estimatedPosition == null || match.estimatedFloorId == null || match.unlikeDatabase) {
+        if (match.estimatedPosition == null || match.estimatedFloorId == null || match.unlikeDatabase || match.spatiallyAmbiguous) {
             appState.lastCorrectionType = "confidence degraded"
-            appState.realLiveStatus = "Fresh scan does not resemble the fingerprint database"
+            appState.realWifiPosition = null
+            appState.realWifiFixEpochMillis = null
+            appState.realWifiEvidenceStatus = when {
+                match.spatiallyAmbiguous -> "Ambiguous Wi-Fi: similar matches at distant reference points · correction not applied"
+                match.estimatedPosition == null -> "Insufficient shared APs: need at least 3 per candidate · correction not applied"
+                else -> "Fresh scan unlike saved fingerprints · correction not applied"
+            }
+            appState.realLiveStatus = appState.realWifiEvidenceStatus
             return
         }
 
+        if (currentPilotMap().floors[match.estimatedFloorId]?.isWalkable(match.estimatedPosition) != true) {
+            appState.realWifiPosition = null
+            appState.realWifiFixEpochMillis = null
+            appState.realWifiEvidenceStatus = "Wi-Fi average falls outside walkable space · correction not applied"
+            appState.realLiveStatus = appState.realWifiEvidenceStatus
+            return
+        }
+        appState.realWifiPosition = match.estimatedPosition.toUiOffset()
+        appState.realWifiFloorId = match.estimatedFloorId
+        appState.realWifiUncertaintyMetres = match.uncertaintyRadiusMetres
+        appState.realWifiFixEpochMillis = batch.receivedAtEpochMillis
+        appState.realWifiFixes = (appState.realWifiFixes + match.estimatedPosition.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
+        appState.realWifiEvidenceStatus = "Fresh Wi-Fi match · ${eligibleAps.size} new APs · ${match.neighbours.size} competitive reference points"
         val prior = particleFilter?.summary()
         if (particleFilter == null || particleFilter?.isLost == true) {
             if (match.confidence < 0.55 || match.floorAgreement < 0.7) {

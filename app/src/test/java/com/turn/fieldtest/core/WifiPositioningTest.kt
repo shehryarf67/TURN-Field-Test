@@ -7,6 +7,31 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WifiPositioningTest {
+    @Test fun hallwayEndIsNotAveragedWithClearlyInferiorMiddleAndStartMatches() {
+        val result = WeightedKnnWifiMatcher().match(mapOf("a" to -50.0), listOf(
+            fingerprint("end", "F1", 30.0, mapOf("a" to -52.0)),
+            fingerprint("middle", "F1", 15.0, mapOf("a" to -62.0)),
+            fingerprint("start", "F1", 0.0, mapOf("a" to -70.0))))
+        assertEquals(30.0, result.estimatedPosition!!.x, 1e-12)
+        assertEquals(listOf("end"), result.neighbours.map { it.referencePointId })
+    }
+
+    @Test fun IndistinguishableHallwayLocationsAreFlaggedInsteadOfConfidentMiddleFix() {
+        val result = WeightedKnnWifiMatcher().match(mapOf("a" to -50.0), listOf(
+            fingerprint("start", "F1", 0.0, mapOf("a" to -50.0)),
+            fingerprint("end", "F1", 30.0, mapOf("a" to -50.0))))
+        assertTrue(result.spatiallyAmbiguous)
+        assertTrue(result.confidence <= 0.35)
+        assertTrue(result.uncertaintyRadiusMetres >= 20)
+    }
+
+    @Test fun physicalPolicyRequiresEnoughSharedBssids() {
+        val matcher = WeightedKnnWifiMatcher(WifiMatcherConfig(minimumSharedBssids = 3))
+        val fp = fingerprint("end", "F1", 30.0, mapOf("a" to -50.0, "b" to -60.0, "c" to -70.0))
+        assertEquals(null, matcher.match(mapOf("a" to -50.0), listOf(fp)).estimatedPosition)
+        assertEquals(3, matcher.match(fp.rssiByBssid, listOf(fp)).neighbours.single().sharedBssidCount)
+    }
+
     @Test
     fun unrelatedWeakAccessPointsCannotInitializeLocation() {
         val result = WeightedKnnWifiMatcher().match(

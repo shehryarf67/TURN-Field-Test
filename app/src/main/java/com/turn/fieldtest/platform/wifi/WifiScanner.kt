@@ -253,8 +253,8 @@ class AndroidWifiScanner(
             .values
             .map { duplicateRows ->
                 duplicateRows.maxWith(
-                    compareBy<WifiAccessPoint> { it.rssiDbm }
-                        .thenBy { it.scanTimestampMicros },
+                    compareBy<WifiAccessPoint> { it.scanTimestampMicros }
+                        .thenBy { it.rssiDbm },
                 )
             }
             .sortedByDescending(WifiAccessPoint::rssiDbm)

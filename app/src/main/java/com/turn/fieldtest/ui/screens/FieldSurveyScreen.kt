@@ -54,7 +54,7 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
             if (!state.sessionLocked) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(target, { value -> target = value.filter(Char::isDigit).take(2); target.toIntOrNull()?.let { state.surveyTargetSnapshots = it.coerceIn(1, 50) } },
                     label = { Text("Fresh scans") }, modifier = Modifier.weight(0.4f), singleLine = true)
-                OutlinedTextField(notes, { notes = it }, label = { Text("Notes / orientation") }, modifier = Modifier.weight(0.6f), singleLine = true)
+                OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, modifier = Modifier.weight(0.6f), singleLine = true)
             }
             LinearProgressIndicator(progress = { (freshCount.toFloat() / targetCount.coerceAtLeast(1)).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
             Text("${freshCount} / ${targetCount} fresh snapshots · ${apCount} APs", style = MaterialTheme.typography.labelLarge)

@@ -81,12 +81,46 @@ class PrototypeWorkflowTest {
         compose.onNodeWithText("Lab 1").performClick()
         compose.onNodeWithText("At a reference point").performScrollTo().performClick()
         compose.onNodeWithText("I am at RP-01").performClick()
+        compose.onNodeWithText("Up", useUnmergedTree = true).performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("lab", state.selectedDestinationId)
             assertEquals(Offset(2f, 2f), state.manualStartPoint)
             assertFalse(state.realLiveInitialized)
             assertNull(state.realLivePosition)
+            assertEquals(90.0, state.initialHeadingDegrees, 0.0)
         }
+    }
+
+    @Test fun surveyDoesNotInventCompassDirectionOrRequireAFacingNote() {
+        val state = fixture().apply {
+            referencePoints.add(MapPointUi("a", "f", Offset(2f, 2f), "RP-01"))
+            selectedSurveyReferencePointId = "a"
+        }
+        var metadata: SurveyCaptureMetadata? = null
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) {
+            SurveyScreen(state, true, onStartRealSurvey = { metadata = it })
+        } } }
+        compose.onNodeWithText("North-facing").assertDoesNotExist()
+        compose.onNodeWithText("Begin collection").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals("a", metadata!!.referencePointId)
+            assertNull(metadata!!.orientationLabel)
+            assertEquals("", metadata!!.researcherNotes)
+        }
+    }
+
+    @Test fun freshWifiRequestRemainsAvailableWhileFusedTrackingIsInitialized() {
+        val state = fixture().apply {
+            liveRunning = true; realLiveInitialized = true
+            realWifiEvidenceStatus = "Scan not accepted: Android throttled · no new requested fix"
+        }
+        var requested = false
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) {
+            NavigationScreen(state, TurnAppActions(onRealLiveScanRequested = { requested = true }))
+        } } }
+        compose.onNodeWithText("Request fresh Wi-Fi fix").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(requested) }
+        compose.onNodeWithText(state.realWifiEvidenceStatus).performScrollTo().assertIsDisplayed()
     }
     @Test fun fullscreenExitKeepsPositionAndRoute() {
         val state = fixture().apply {

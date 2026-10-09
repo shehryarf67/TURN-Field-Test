@@ -61,9 +61,9 @@ fun SurveyScreen(
     onStartRealSurvey: (SurveyCaptureMetadata) -> Unit = {},
     onFinishRealSurvey: () -> Unit = {},
 ) {
-    var orientation by remember { mutableStateOf("North-facing") }
+    var orientation by remember { mutableStateOf("Not recorded") }
     var crowd by remember { mutableStateOf("Normal") }
-    var notes by remember { mutableStateOf("Pilot survey after lunch") }
+    var notes by remember { mutableStateOf("") }
     var saveStatus by remember { mutableStateOf("Draft autosaved locally") }
     val excluded = remember { mutableStateMapOf<String, Boolean>() }
     val simulated = state.mode == DataMode.DEMO
@@ -111,7 +111,7 @@ fun SurveyScreen(
                         onStartRealSurvey(
                             SurveyCaptureMetadata(
                                 referencePointId = selectedPoint.id,
-                                orientationLabel = orientation,
+                                orientationLabel = orientation.takeUnless { it == "Not recorded" },
                                 crowdConditionLabel = crowd,
                                 researcherNotes = notes,
                             ),
@@ -209,8 +209,9 @@ fun SurveyScreen(
                         }
                         Text("Use 4 for a quick trial and 8–12 for the actual fingerprint dataset.", style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(9.dp))
-                        Text("Orientation", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                        ChoiceChips(listOf("North-facing", "East-facing", "South-facing", "West-facing"), orientation) { orientation = it }
+                        Text("Facing direction note (optional)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text("You can leave this unrecorded. It is a research note, not a tracking setting. Directions refer to the drawing, not compass north.", style = MaterialTheme.typography.bodySmall)
+                        ChoiceChips(listOf("Not recorded", "Map right", "Map up", "Map left", "Map down"), orientation) { orientation = it }
                         Spacer(Modifier.height(9.dp))
                         Text("Crowd condition", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         ChoiceChips(listOf("Quiet", "Normal", "Busy"), crowd) { crowd = it }

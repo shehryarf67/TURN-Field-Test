@@ -21,10 +21,12 @@ Calibrate before adding path nodes or recording measurements. Scale changes are 
 4. Reaching the target closes and saves the fingerprint automatically. **Finish and save** before the target records a partial collection, preserving its raw lineage. A partial new collection is excluded from live matching; start a new collection to finish the point. Older completed data at that point remains usable.
 5. Repeat at enough distinct physical positions to cover the route. Close/reopen the app: map, graph, sessions and completion badges reload from Room. Old surveys are labelled Saved legacy because their original target was not recorded; they remain available for matching.
 
+Survey facing direction is optional research metadata. It does not select a fingerprint, rotate reference-point coordinates or initialize live heading. Research details now defaults to **Not recorded** (saved as null) and offers optional **Map right/up/left/down** notes instead of compass labels. Old stored North/East/South/West notes are preserved. Hold the phone consistently during surveying and subsequent use; grip/orientation can affect the radio measurements themselves even though the text note is not used by matching.
+
 ## Walk the route
 
 1. Open Navigate and select a destination. Choose **Pick known start** on the map or **At a reference point** only when physically standing there; otherwise use fresh Wi-Fi initialization.
-2. Enter the direction the phone is facing in the map's coordinates: 0° right, 90° up, 180° left, 270° down. Keep the phone facing that direction when pressing Start navigation. This aligns relative sensor heading with the drawing; it does not infer compass orientation from the image.
+2. Choose **Right / Up / Left / Down** for the direction you are walking on the drawing, or enter degrees for a diagonal: 0° right, 90° up, 180° left, 270° down. Keep the top of the visible phone screen facing that direction when pressing Start navigation. This aligns relative sensor heading with the drawing; it does not infer compass orientation from the image. No compass direction is required for surveying. Automatic alignment of live heading would require a known relationship between the drawing and physical north or another heading anchor; a compass alone cannot establish it.
 3. Start navigation. A declared known location initializes a particle distribution; automatic initialization waits for a sufficiently confident fresh weighted-kNN fix. There is no simulated fallback if hardware or data is missing.
 4. The blue dot is the particle-filter estimate, with an uncertainty circle. Physical step events propagate PDR and particles; geometry rejects impossible motion; fresh Wi-Fi evidence periodically corrects the filter. The phone needs a working supported step source and relative-heading source.
 5. A* attaches the current estimate to the nearest wall-safe mapped path/node within 3 m and routes to the destination. It recalculates from new estimates, showing remaining metric distance. It does not snap or animate the position along the route. Disconnected paths, off-path estimates and lost tracking produce an explicit unavailable-route state.
@@ -48,6 +50,24 @@ Normal app restart preserves data. Uninstalling the app or clearing its storage 
 
 ## Demonstration acceptance run
 
+### Checking live Wi-Fi accuracy — 2026-10-09
+
+The hollow marker is the latest usable **Wi-Fi match**, not ground truth or the fused blue dot. Earlier fixes remain in research state, but the map no longer draws them all as current positions. Fresh Wi-Fi changes particle weights; a correction does not necessarily teleport the fused estimate to that marker. Raw PDR intentionally retains its uncorrected trajectory for evaluation.
+
+Manual **Request fresh Wi-Fi fix** requires AP measurements taken after the button press, using monotonic Android scan timestamps. Cached broadcasts, duplicate AP measurements, pre-session/pre-request rows, stale rows and simulated batches cannot provide that requested correction. A rejected/throttled request is labelled explicitly; the screen shows the next permitted request countdown. Keep the phone stationary while waiting for a new result. Android can deliver platform/other-app scans too; fresh post-request evidence can be used without claiming the broadcast came from TURN's request.
+
+Weighted kNN now treats k as a maximum. Candidates must share at least 3 BSSIDs for physical live matching, and only candidates within best RSSI distance + max(3 dB, 50% of best distance) contribute. If competitive candidates have spatial spread over 6 m and none carries 60% of the selected-floor weight, the match is labelled ambiguous and cannot initialize, correct or globally relocalize the filter. Matches unlike the database or averaging outside walkable space are also rejected. These conservative prototype thresholds need field validation; they cannot make identical radio fingerprints distinguishable.
+
+For the next hallway test:
+
+1. Keep existing Room data. Confirm reference-point coordinates at the corridor start, middle and end and that each survey is Completed. Collect additional completed surveys at a point if its radio environment or phone grip has changed.
+2. Use the same phone and grip as surveying. Leave device-offset normalization off for this comparison: removing a uniform RSSI difference may remove useful location evidence when fingerprints differ mainly in overall signal level.
+3. Stand still at each known point, request a fresh fix, and wait for a new usable-match timestamp. Repeated taps cannot bypass Android throttling.
+4. Open Research details → Wi-Fi evidence. Record the candidate reference IDs, RMS RSSI distances, weights, shared AP counts, result age, rejection reason, Wi-Fi marker and fused estimate. Repeat several independent fresh scans at each point.
+5. Use evaluation checkpoints/exports to compare against known coordinates. If start and end have similar scores, improve survey coverage or record that radio ambiguity; do not force the endpoint just because the researcher knows where they are.
+
+The existing raw survey observations, completion eligibility, BSSID matching, Room persistence and real/demo separation are retained. Physical university-floor accuracy still requires this phone test.
+
 On the actual university floor, record the complete prepare/survey/reopen/navigate sequence. Include at least one turn, a wall separating nearby corridors, multiple surveyed points, a disconnected-path failure, and a stop/restart. Use independent evaluation checkpoints to measure error rather than treating the displayed blue dot as ground truth.
 
 Automated builds, graph/freshness tests and emulator persistence/UI tests cannot validate physical step detection, heading alignment, radio coverage or positioning accuracy. A real-phone walk-through and parameter tuning on the chosen floor remain required before the external demonstration. Full multi-floor navigation, cloud services, automatic floor-plan extraction, BLE deployment, QR camera initialization and accessibility certification are outside this slice.
@@ -65,3 +85,10 @@ Automated builds, graph/freshness tests and emulator persistence/UI tests cannot
 - New checks cover heading remapping for all four display rotations, gyroscope display-turn compensation, full-screen exit, immersive bars, Android Back, orientation-policy restoration and Activity/ViewModel/session continuity through landscape and portrait.
 - Portrait and landscape layouts were inspected on the isolated emulator. Room schemas and persistence are unchanged by this feature.
 - These checks validate display math and lifecycle behavior, not physical walking accuracy. Validate phone grip, tilt, heading and radio coverage on the actual university floor before recording the demonstration.
+
+## Wi-Fi and survey workflow verification — 2026-10-09
+
+- 96 JVM tests pass with no failures/skips, including pre-refresh/session timestamp rejection, repeated/cached/simulated evidence rejection, duplicate AP row selection, hallway endpoint matching, ambiguity detection, shared-BSSID eligibility and rejection by the particle filter.
+- All 13 Android API 35 instrumentation tests pass. New UI checks cover requesting Wi-Fi during initialized tracking, optional survey metadata without invented north, and choosing an initial direction on the drawing. Existing migration, persistence, navigation and rotation checks remain passing.
+- Debug app/test APKs compile; lint reports 0 errors and 9 existing warnings. Verification used an isolated build and emulator; source matches the verified copy and Room schemas remain unchanged. No physical-phone installation or saved data was altered.
+- No recorded hallway radio dataset was available for replay. The changes address reproducible code weaknesses, but the cause and accuracy of the reported physical test must be verified with the next known-point run.
