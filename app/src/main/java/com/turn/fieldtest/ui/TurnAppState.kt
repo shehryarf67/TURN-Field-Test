@@ -28,6 +28,7 @@ class TurnAppState {
     var headingChoiceConfirmed by mutableStateOf(false)
     var pickingHeading by mutableStateOf(false)
     var realHeadingAligned by mutableStateOf(false)
+    var realHeadingSampleEpochMillis by mutableStateOf<Long?>(null)
     var realHeadingAlignmentBusy by mutableStateOf(false)
     var realHeadingStatus by mutableStateOf("Choose your walking direction on the map before starting")
     var navigationFullscreen by mutableStateOf(false)
@@ -46,6 +47,17 @@ class TurnAppState {
     var destinationReached by mutableStateOf(false)
     var debugOverlays by mutableStateOf(false)
     var manualStartPoint by mutableStateOf<Offset?>(null)
+    /** A direction picked from a location must be chosen again if that location changes. */
+    fun chooseKnownStart(point: Offset?) {
+        if (sessionLocked || liveRunning || liveStarting) return
+        if (manualStartPoint != point) {
+            headingChoiceConfirmed = false
+            realHeadingStatus = "Start changed · face along the corridor and choose your direction again"
+        }
+        manualStartPoint = point
+        pickingStart = false
+        pickingHeading = false
+    }
     var pickingStart by mutableStateOf(false)
     var initialHeadingDegrees by mutableStateOf(0.0)
     var liveEstimateEpochMillis by mutableStateOf<Long?>(null)
@@ -127,6 +139,10 @@ class TurnAppState {
     val canEditMap get() = mode == DataMode.DEMO ||
         (realMapReady && !startupLoading && !projectBusy && !sessionLocked && !surveyRunning && !liveRunning && mapEditorSupported)
     val canChangeScale get() = canEditMap && (mode == DataMode.DEMO || (!mapHasMeasurements && navigationNodes.isEmpty()))
+    val canChangeAlgorithmSettings get() = !startupLoading && !projectBusy && !sessionLocked &&
+        !liveStarting && !liveRunning && !surveyStarting && !surveyRunning && !diagnosticWalkRunning
+    val keepScreenAwake get() = mode == DataMode.REAL_DEVICE &&
+        (liveStarting || liveRunning || surveyStarting || surveyRunning || diagnosticWalkRunning)
     private var savedDraft by mutableStateOf<List<Any?>?>(null)
     private fun draftSnapshot(): List<Any?> = listOf(venueName, floorName, floorLevel,
         floorWidthMetres, floorHeightMetres, floorPlanContentUri, floorPlanMimeType,
@@ -479,6 +495,7 @@ class TurnAppState {
         pendingWallStart = pendingWallStart?.let(::scaled)
         floorWidthMetres = width
         floorHeightMetres = height
+        chooseKnownStart(null)
         floorPlanMetresPerPixel = floorPlanPixelWidth?.takeIf { it > 0 }?.let { width.toDouble() / it }
         return true
     }

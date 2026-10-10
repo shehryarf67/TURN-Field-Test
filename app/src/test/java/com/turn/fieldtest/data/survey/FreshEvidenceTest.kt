@@ -6,6 +6,13 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class FreshEvidenceTest {
+    @Test fun futureTimestampIsRetainedForLineageButCannotTrainTheFingerprint() {
+        val result = WifiSurveyCaptureFactory().create(session, 0,
+            batch(listOf(fresh.copy(scanTimestampMicros = 10_001_000, ageMillisAtReceipt = 0))))
+        assertFalse(result.snapshot.isFresh)
+        assertFalse(result.observations.single().isFresh)
+        assertEquals(10_001_000L, result.observations.single().scanTimestampMicros)
+    }
     private val session = SurveySessionEntity("s", "v", "f", "rp", 1.0, 1.0, "test", "test", "35", "1", dataMode = "REAL_DEVICE", startedAtEpochMillis = 10000)
     private val fresh = WifiAccessPoint("aa", null, -50, 2412, 1, 999000, 100)
     private fun batch(aps: List<WifiAccessPoint>) = WifiScanBatch(12000, 10000, true, true, WifiFreshness.FRESH, aps, 100, true)

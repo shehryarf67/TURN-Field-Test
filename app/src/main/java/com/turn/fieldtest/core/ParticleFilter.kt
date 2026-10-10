@@ -149,7 +149,9 @@ class ParticleFilter(
     seed: Long = 0L,
 ) {
     private val random = Random(seed)
+    private var cachedSummary: ParticleSummary? = null
     private var mutableParticles: List<Particle> = emptyList()
+        set(value) { field = value; cachedSummary = null }
     private val mutableEvents = mutableListOf<FilterEvent>()
     private var nextEventSequence = 1L
 
@@ -382,6 +384,7 @@ class ParticleFilter(
 
     /** Uses the highest-density spatial cluster on the strongest weighted floor. */
     fun summary(): ParticleSummary? {
+        cachedSummary?.let { return it }
         if (mutableParticles.isEmpty()) return null
         val normalized = normalizeWeights(mutableParticles)
         val floorVotes = normalized.groupBy { it.floorId }
@@ -389,7 +392,7 @@ class ParticleFilter(
         val selectedFloor = floorVotes.entries
             .sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key })
             .first()
-        val floorParticles = normalized.filter { it.floorId == selectedFloor.key }
+        val floorParticles = normalized.filter { it.floorId == selectedFloor.key && it.weight > 0.0 }
         val seed = floorParticles.map { candidate ->
             candidate to floorParticles.filter {
                 it.position.distanceTo(candidate.position) <= config.clusterRadiusMetres
@@ -399,14 +402,29 @@ class ParticleFilter(
                 .thenBy { it.first.x }
                 .thenBy { it.first.y },
         ).first().first
+        val floor = metricMap.floors.getValue(selectedFloor.key)
+        fun reachable(point: MetricPoint): Boolean = seed.position.distanceTo(point) <= MetricGeometry.DEFAULT_EPSILON ||
+            (floor.isPathInsideWalkableSpace(seed.position, point) && !floor.crossesWall(seed.position, point))
         val cluster = floorParticles.filter {
-            it.position.distanceTo(seed.position) <= config.clusterRadiusMetres
+            it.position.distanceTo(seed.position) <= config.clusterRadiusMetres && reachable(it.position)
         }
         val clusterWeight = cluster.sumOf { it.weight }
-        val position = MetricPoint(
+        val mean = MetricPoint(
             cluster.sumOf { it.x * it.weight } / clusterWeight,
             cluster.sumOf { it.y * it.weight } / clusterWeight,
         )
+        // A mean of valid points need not be valid in a concave corridor. Constrain the aggregate
+        // along the seed-to-mean line; retain the distribution's spread rather than claiming certainty.
+        val position = if (reachable(mean)) mean else {
+            var low = 0.0; var high = 1.0
+            repeat(32) {
+                val fraction = (low + high) / 2.0
+                val candidate = MetricPoint(seed.x + (mean.x - seed.x) * fraction,
+                    seed.y + (mean.y - seed.y) * fraction)
+                if (reachable(candidate)) low = fraction else high = fraction
+            }
+            MetricPoint(seed.x + (mean.x - seed.x) * low, seed.y + (mean.y - seed.y) * low)
+        }
         val spread = sqrt(
             cluster.sumOf { it.weight * it.position.distanceTo(position).squared() } / clusterWeight,
         )
@@ -422,7 +440,7 @@ class ParticleFilter(
             uncertaintyRadiusMetres = max(0.25, 2.146 * spread),
             spatialSpreadMetres = spread,
             clusterParticleCount = cluster.size,
-        )
+        ).also { cachedSummary = it }
     }
 
     private fun initializeParticles(fix: AbsoluteFix, positionStdMetres: Double) {

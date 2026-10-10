@@ -148,6 +148,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var latestRotationVector: FloatArray? = null
     private var latestMapHeadingRadians = 0.0
     private var previousGyroscopeTimestampNanos: Long? = null
+    private var gyroNeedsRealignment = false
     private var rawPdrFloorId: String? = null
 
     fun captureCheckpoint(input: CheckpointInput) {
@@ -288,7 +289,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
         viewModelScope.launch {
-            wifiScanner.batches.collect { batch -> eventMutex.withLock { handleWifiBatch(batch) } }
+            wifiScanner.batches.collect { batch -> eventMutex.withLock {
+                try { handleWifiBatch(batch) }
+                catch (error: Exception) { stopAfterLiveFailure(error) }
+            } }
         }
         viewModelScope.launch {
             sensorSource.state.collectLatest { sourceState ->
@@ -303,7 +307,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
         viewModelScope.launch {
-            sensorSource.samples.collect { sample -> eventMutex.withLock { handleSensorSample(sample) } }
+            sensorSource.samples.collect { sample -> eventMutex.withLock {
+                try { handleSensorSample(sample) }
+                catch (error: Exception) { stopAfterLiveFailure(error) }
+            } }
         }
     }
 
@@ -311,6 +318,14 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         foreground = true
         refreshWifiPermissionStatus()
         if (!appState.startupLoading && appState.mode == DataMode.REAL_DEVICE) startRealSources()
+    }
+
+    /** Fail a physical session visibly rather than crash or continue with unrecorded movement. */
+    private suspend fun stopAfterLiveFailure(error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        val reason = "Tracking stopped after a processing/storage error: ${error.message ?: error::class.java.simpleName}"
+        if (activePositioningSession != null) finishActiveLive(reason)
+        else appState.realLiveStatus = reason
     }
 
     fun onBackground() {
@@ -740,7 +755,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     latestRotationVector = null
                     lastHeadingDisplayRotation = null
                     previousGyroscopeTimestampNanos = null
+                    gyroNeedsRealignment = false
                     lastLiveHeadingSensorNanos = null
+                    appState.realHeadingSampleEpochMillis = null
                     headingAlignmentNotBeforeNanos = requestedAtNanos
                     rawPdrTracker?.setHeading(aligned)
                     appState.initialHeadingDegrees = degrees
@@ -875,6 +892,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 latestMapHeadingRadians = sessionInitialHeadingRadians
                 appState.realLiveHeadingDegrees = Math.toDegrees(sessionInitialHeadingRadians)
                 previousGyroscopeTimestampNanos = null
+                gyroNeedsRealignment = false
+                appState.realHeadingSampleEpochMillis = null
                 appState.liveRunning = true
                 appState.realLiveInitialized = false
                 appState.realLivePosition = null
@@ -1009,7 +1028,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 frequencyMhz = accessPoint.frequencyMhz,
                 channel = accessPoint.channel,
                 ageSeconds = ((accessPoint.ageMillisAtReceipt + 999L) / 1_000L).toInt(),
-                fresh = batch.isIndependentFreshScan,
+                fresh = batch.isIndependentFreshScan && accessPoint.ageMillisAtReceipt in 0L..15_000L &&
+                    accessPoint.scanTimestampMicros <= batch.receivedAtElapsedMillis * 1_000L + 999L,
             )
         }
 
@@ -1630,6 +1650,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.headingChoiceConfirmed = false
         appState.pickingHeading = false
         appState.realHeadingAligned = false
+        appState.realHeadingSampleEpochMillis = null
+        appState.realHeadingStatus = "Navigation stopped · choose your starting direction before the next walk"
         val endedAt = System.currentTimeMillis()
         try {
             app.database.withTransaction {
@@ -1791,6 +1813,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             sample.kind == SensorSampleKind.ROTATION_VECTOR
         val validRotationSample = rotationSample && sample.type == selected && sample.values.size >= 3 &&
             sample.values.all { it.isFinite() }
+        if (appState.liveRunning && validRotationSample &&
+            lastLiveHeadingSensorNanos?.let { sample.sensorTimestampNanos <= it } == true) return
         if (validRotationSample) {
             latestRotationVector = sample.values.toFloatArray()
         }
@@ -1806,6 +1830,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         latestMapHeadingRadians = com.turn.fieldtest.core.MapHeading.fromRelativeAzimuth(sessionInitialHeadingRadians, baseline, yaw)
                         if (validRotationSample && yaw.isFinite()) {
                             lastLiveHeadingSensorNanos = sample.sensorTimestampNanos
+                            appState.realHeadingSampleEpochMillis = sample.receivedAtEpochMillis
                             appState.realHeadingAligned = true
                             appState.realHeadingStatus = "Heading aligned · check the arrow before walking"
                         }
@@ -1813,17 +1838,28 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 }
             }
         }
-        if (sample.kind == SensorSampleKind.ANGULAR_VELOCITY && selected == TurnSensorType.GYROSCOPE &&
+        if (sample.kind == SensorSampleKind.ANGULAR_VELOCITY && sample.type == selected && selected == TurnSensorType.GYROSCOPE &&
             sample.values.getOrNull(2)?.isFinite() == true) {
+            val previous = previousGyroscopeTimestampNanos
+            if (previous != null && sample.sensorTimestampNanos <= previous) return
+            if (appState.liveRunning && previous != null &&
+                com.turn.fieldtest.core.MapHeading.gyroIntervalSeconds(previous, sample.sensorTimestampNanos) == null) {
+                gyroNeedsRealignment = true
+            }
+            previousGyroscopeTimestampNanos = sample.sensorTimestampNanos
+            if (appState.liveRunning && gyroNeedsRealignment) {
+                appState.realHeadingAligned = false
+                appState.realHeadingStatus = "Gyroscope gap · stop and use Correct walking direction to realign"
+                return
+            }
             if (appState.liveRunning) {
                 lastLiveHeadingSensorNanos = sample.sensorTimestampNanos
+                appState.realHeadingSampleEpochMillis = sample.receivedAtEpochMillis
                 appState.realHeadingAligned = true
                 appState.realHeadingStatus = "Gyroscope heading aligned · check regularly for drift"
             }
-            val previous = previousGyroscopeTimestampNanos
-            previousGyroscopeTimestampNanos = sample.sensorTimestampNanos
             if (previous != null && appState.liveRunning) {
-                val deltaSeconds = (sample.sensorTimestampNanos - previous).coerceAtLeast(0L) / 1_000_000_000.0
+                val deltaSeconds = com.turn.fieldtest.core.MapHeading.gyroIntervalSeconds(previous, sample.sensorTimestampNanos) ?: return
                 val z = sample.values.getOrNull(2)?.toDouble() ?: return
                 // Natural-axis +z is counter-clockwise for a face-up phone; display turns are handled above.
                 latestMapHeadingRadians = normalizeRadians(latestMapHeadingRadians + z * deltaSeconds)

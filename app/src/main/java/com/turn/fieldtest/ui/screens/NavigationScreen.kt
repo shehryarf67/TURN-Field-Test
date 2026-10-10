@@ -24,7 +24,8 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
     var research by remember { mutableStateOf(false) }
     LaunchedEffect(state.liveRunning) { while (state.liveRunning) { now = System.currentTimeMillis(); delay(1000) } }
     val age = state.liveEstimateEpochMillis?.let { ((now - it).coerceAtLeast(0) / 1000) }
-    val confidence = navigationConfidence(state, age)
+    val confidence = navigationConfidence(state, age, now)
+    val canChooseHeading = !state.liveStarting && !state.liveCloseFailed && !state.realHeadingAlignmentBusy
     fun proposeHeading(degrees: Double) {
         heading = "%.1f".format(java.util.Locale.US, degrees)
         if (!state.liveRunning) {
@@ -63,7 +64,7 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                             .onFailure { state.realHeadingStatus = it.message ?: "Choose a point farther ahead" }
                     }
                 } else if (state.pickingStart && !state.sessionLocked) {
-                    state.manualStartPoint = point; state.pickingStart = false
+                    state.chooseKnownStart(point)
                     state.realLiveStatus = "Known start selected. Set the direction you are facing, then start."
                 }
             })
@@ -89,18 +90,18 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
             }
             if (!state.sessionLocked) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { state.pickingStart = !state.pickingStart }, modifier = Modifier.weight(1f)) { Text(if (state.pickingStart) "Tap your known location" else "Pick known start") }
+                    OutlinedButton(onClick = { state.pickingHeading = false; state.pickingStart = !state.pickingStart }, modifier = Modifier.weight(1f)) { Text(if (state.pickingStart) "Tap your known location" else "Pick known start") }
                     Box(Modifier.weight(1f)) {
                         OutlinedButton(onClick = { startsOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("At a reference point") }
                         DropdownMenu(startsOpen, { startsOpen = false }) {
                             state.referencePoints.forEach { point -> DropdownMenuItem(text = { Text("I am at ${point.label}") }, onClick = {
-                                state.manualStartPoint = point.metres; state.pickingStart = false; startsOpen = false
+                                state.chooseKnownStart(point.metres); startsOpen = false
                             }) }
                         }
                     }
                 }
                 Text(state.manualStartPoint?.let { "Known start: %.1f, %.1f m".format(it.x, it.y) } ?: "Start position: wait for a confident fresh Wi-Fi fix", style = MaterialTheme.typography.bodySmall)
-                if (state.manualStartPoint != null) TextButton(onClick = { state.manualStartPoint = null }) { Text("Use automatic Wi-Fi initialization") }
+                if (state.manualStartPoint != null) TextButton(onClick = { state.chooseKnownStart(null) }) { Text("Use automatic Wi-Fi initialization") }
             }
             if (state.liveRunning) {
                 Text("Walking heading: %.0f° on map".format((state.realLiveHeadingDegrees + 360.0) % 360.0), style = MaterialTheme.typography.titleMedium)
@@ -113,25 +114,32 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("Right" to 0.0, "Up" to 90.0, "Left" to 180.0, "Down" to 270.0).forEach { (label, degrees) ->
                         FilterChip(selected = heading.toDoubleOrNull() == degrees && (state.liveRunning || state.headingChoiceConfirmed),
-                            enabled = !state.realHeadingAlignmentBusy,
+                            enabled = canChooseHeading,
                             onClick = { proposeHeading(degrees) }, label = { Text(label) })
                     }
                 }
-                Text("Directions refer to this drawing, not north. Hold the top of the visible phone screen toward your walking direction. Stand still when aligning.", style = MaterialTheme.typography.bodySmall)
+                Text("Directions refer to this drawing, not north. Hold the phone roughly level, with the top of the visible screen toward your walking direction. Stand still when aligning.", style = MaterialTheme.typography.bodySmall)
                 OutlinedButton(onClick = { state.pickingStart = false; state.pickingHeading = !state.pickingHeading },
-                    enabled = !state.realHeadingAlignmentBusy && (if (state.liveRunning) state.realLivePosition != null else state.manualStartPoint != null)) {
+                    enabled = canChooseHeading && (if (state.liveRunning) state.realLivePosition != null else state.manualStartPoint != null)) {
                     Text(if (state.pickingHeading) "Tap a point ahead of you" else "Point ahead on map")
                 }
                 if (state.pickingHeading) Text("Tap at least 1 m ahead from the ${if (state.liveRunning) "fused dot" else "known start"}. This calculates the angle; it does not change position.", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(heading, { value -> heading = value; value.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { if (!state.liveRunning) { state.initialHeadingDegrees = it; state.headingChoiceConfirmed = true } } },
-                    label = { Text("Facing direction on map (degrees)") }, enabled = !state.realHeadingAlignmentBusy, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(heading, { value ->
+                    heading = value
+                    if (!state.liveRunning) {
+                        val parsed = value.toDoubleOrNull()?.takeIf(Double::isFinite)
+                        state.headingChoiceConfirmed = parsed != null
+                        parsed?.let { state.initialHeadingDegrees = it }
+                    }
+                },
+                    label = { Text("Facing direction on map (degrees)") }, enabled = canChooseHeading, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (state.liveRunning) {
                     Button(onClick = { heading.toDoubleOrNull()?.let(actions.onRealHeadingAligned) }, enabled = !state.realHeadingAlignmentBusy && heading.toDoubleOrNull()?.isFinite() == true) {
                         Text("Align to this direction")
                     }
                     TextButton(onClick = { actions.onRealHeadingAligned((state.realLiveHeadingDegrees + 540.0) % 360.0) }, enabled = !state.realHeadingAlignmentBusy) { Text("Reverse heading (180°)") }
                 } else {
-                    TextButton(onClick = { heading.toDoubleOrNull()?.takeIf(Double::isFinite)?.let(::proposeHeading) }) { Text("Confirm starting direction") }
+                    TextButton(onClick = { heading.toDoubleOrNull()?.takeIf(Double::isFinite)?.let(::proposeHeading) }, enabled = canChooseHeading) { Text("Confirm starting direction") }
                     Text(if (state.headingChoiceConfirmed) "Starting direction confirmed: %.0f° · check the map arrow".format((state.initialHeadingDegrees + 360.0) % 360.0)
                         else "Starting direction required · choose Right, Up, Left, Down or a point ahead", style = MaterialTheme.typography.bodySmall)
                 }
@@ -143,7 +151,7 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
             Text(state.realLiveStatus, style = MaterialTheme.typography.bodySmall)
             state.realWifiIssue?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             Button(onClick = actions.onRealLiveToggled, modifier = Modifier.fillMaxWidth(),
-                enabled = !state.liveStarting && !state.projectBusy && !state.surveyRunning && !state.realHeadingAlignmentBusy && (state.liveRunning || state.headingChoiceConfirmed && heading.toDoubleOrNull()?.isFinite() == true)) {
+                enabled = !state.liveStarting && !state.projectBusy && !state.surveyRunning && !state.realHeadingAlignmentBusy && (state.liveRunning || state.liveCloseFailed || state.headingChoiceConfirmed && heading.toDoubleOrNull()?.isFinite() == true)) {
                 Text(if (state.liveStarting) "Starting…" else if (state.liveCloseFailed) "Retry saving" else if (state.liveRunning) "Stop navigation" else "Start navigation")
             }
             if (state.liveRunning) state.realWifiNextPermittedRequestEpochMillis?.takeIf { it > now }?.let {

@@ -116,3 +116,31 @@ Automated builds, graph/freshness tests and emulator persistence/UI tests cannot
 - All 16 Android API 35 instrumentation tests pass. New UI tests require explicit starting heading, calculate Left from a map tap, and verify that live alignment/reverse controls declare the requested heading without changing UI position/trails. Android rotation-matrix tests combine remapped headings with leftward PDR and a clockwise turn in all four display orientations. Existing migration, persistence, Wi-Fi and lifecycle tests remain passing.
 - Debug app/test APKs compile; lint reports 0 errors and 9 existing warnings. Source matches the isolated verified build copy. The new controls were visually checked on the emulator. Room schema is unchanged; the manual alignment uses the existing correction-event table.
 - These tests validate math, UI wiring and compatibility. The reported physical hallway walk has not been replayed with recorded sensor data; grip, tilt, sensor drift and floor accuracy still need a real-phone check. No physical-phone installation or saved data was altered.
+
+## Field-test readiness fixes — 2026-10-10
+
+- Changing the known starting position, switching to Wi-Fi initialization, or rescaling the map invalidates the previous starting direction. Pick the actual location first, face down the corridor, then use **Point ahead on map** and check the arrow. Start selection and heading selection cancel each other's map-tap tool.
+- Algorithm controls and Reset defaults are locked during active/startup/closing operations and diagnostic walks. This prevents recorded session settings from differing from the settings used later in that session. Appearance remains editable.
+- Physical collection and navigation keep the screen on while active. Leaving TURN or locking the phone explicitly still closes the foreground session; the app does not claim background tracking.
+- Stop navigation and Retry saving do not request radio/motion permissions. A failed close remains retryable even though starting-direction confirmation was reset. A live processing/storage exception closes the session visibly instead of crashing or continuing to claim recorded movement.
+- Tracking status checks heading availability separately from the age of the fused location. On the gyroscope fallback, a gap longer than two seconds requires explicit realignment; the newest angular velocity is never extrapolated across missing data. Duplicate/out-of-order heading samples are ignored.
+- Survey AP timestamps in the future are retained as raw lineage but excluded from fresh counts and fingerprints. Diagnostics label individual stale/future AP rows honestly even when the broadcast includes other fresh results.
+- The particle summary excludes hypotheses separated from its cluster seed by a wall or non-walkable space. If a weighted cluster mean falls outside a concave corridor, it is constrained toward the cluster along a valid map segment. The blue dot remains an aggregate estimate; uncertainty includes the spread around that constrained estimate. No route snapping or fabricated sensor motion is introduced.
+- Zero-weight hypotheses cannot seed the fused cluster after repeated corrections. Particle summaries are cached only until the next cloud mutation, avoiding repeated density calculations for the same state.
+- Room schema, migrations and saved survey/map records are unchanged.
+
+### Automated verification
+
+- All 112 JVM tests pass with no failures, errors or skips. New regressions cover changed/rescaled starts, session configuration locks, stale-heading status, sensor gaps, future survey timestamps, wall-separated clusters, concave hallway estimates and numerical weight underflow.
+- All 20 Android API 35 instrumentation tests pass, including populated Room migration/reopen persistence, heading remapping, fullscreen rotation, screen-awake flag release, direction re-selection, save retry and locked algorithm controls with appearance still available.
+- Debug app/test APKs compile; lint reports 0 errors and 9 existing warnings. Application sources and Room schemas match the isolated verified build copy. Testing used an isolated emulator; no physical-phone installation or saved data was changed.
+- These results establish automated regression coverage, not physical sensor/RF accuracy or a guarantee that all possible bugs are absent. Validate the measured hallway walk before the external demonstration.
+
+### Before the next physical walk
+
+1. Pull the current `main` and install an Android Studio build over your existing app using the same signing key. Keep the existing Room data; do not clear storage or uninstall to update.
+2. Open the saved university project and confirm the plan, scale, polygon, walls, paths, destinations and completed fingerprints. Save any draft map changes.
+3. At a known corridor point, align while stationary using **Point ahead on map**. Hold the phone roughly level, with the visible screen's top facing along your walking direction, and wait for heading alignment. If the position is wrong, restart from the correct known point rather than only correcting heading.
+4. Walk the corridor in both directions and make a 90-degree turn. Repeat in portrait and landscape; inspect the arrow and fused dot separately from the optional raw PDR and Wi-Fi overlays.
+5. At independently measured checkpoints, request a fresh Wi-Fi fix and wait for its usable-match timestamp. Record rejected/ambiguous/throttled results as such; repeated taps cannot produce independent scans on demand.
+6. Stop, save the complete database JSON, then close and reopen TURN to confirm the project and fingerprints remain available. Physical heading drift, stride and RF distinguishability require this measured run; automated checks cannot certify their accuracy.

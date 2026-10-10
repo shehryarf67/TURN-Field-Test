@@ -43,6 +43,7 @@ fun SettingsScreen(
     compact: Boolean,
     onModeChanged: (DataMode) -> Unit = { state.mode = it },
 ) {
+    val editable = state.canChangeAlgorithmSettings
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -56,13 +57,14 @@ fun SettingsScreen(
             description = "Tune research parameters explicitly. TURN never substitutes simulated radio or sensor readings in real-device mode.",
             compact = compact,
             action = {
-                OutlinedButton(onClick = { resetAlgorithmDefaults(state) }) {
+                OutlinedButton(onClick = { resetAlgorithmDefaults(state) }, enabled = editable) {
                     Icon(Icons.Outlined.RestartAlt, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Reset defaults")
                 }
             }
         )
+        if (!editable) Text("Finish the active operation before changing algorithm settings.", style = MaterialTheme.typography.bodySmall)
 
         SectionCard("Data source", "Choose the environment before starting a session") {
             AdaptiveColumns(
@@ -100,6 +102,7 @@ fun SettingsScreen(
                         value = state.knnK.toFloat(),
                         range = 1f..10f,
                         steps = 8,
+                        enabled = editable,
                         onChange = { state.knnK = it.roundToInt() }
                     )
                     SettingSlider(
@@ -108,13 +111,15 @@ fun SettingsScreen(
                         value = state.missingRssi.toFloat(),
                         range = -120f..-80f,
                         steps = 39,
+                        enabled = editable,
                         onChange = { state.missingRssi = it.roundToInt() }
                     )
                     SettingToggle(
                         "Device-offset normalization",
                         "Optional median offset normalization across shared BSSIDs",
                         state.deviceOffsetNormalization,
-                        { state.deviceOffsetNormalization = it }
+                        enabled = editable,
+                        onCheckedChange = { state.deviceOffsetNormalization = it }
                     )
                     LabelValue("Exact-match safeguard", "Enabled")
                     LabelValue("Unlike-database detection", "Enabled")
@@ -128,6 +133,7 @@ fun SettingsScreen(
                         value = state.strideMetres,
                         range = 0.4f..1.2f,
                         steps = 79,
+                        enabled = editable,
                         onChange = { state.strideMetres = it }
                     )
                     SettingSlider(
@@ -136,6 +142,7 @@ fun SettingsScreen(
                         value = state.particleCount.toFloat(),
                         range = 100f..1_500f,
                         steps = 13,
+                        enabled = editable,
                         onChange = { state.particleCount = (it / 100f).roundToInt() * 100 }
                     )
                     LabelValue("Accelerometer fallback", "Not implemented; step detector required")
@@ -235,6 +242,7 @@ private fun SettingSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
+    enabled: Boolean = true,
     onChange: (Float) -> Unit
 ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
@@ -242,18 +250,18 @@ private fun SettingSlider(
             Text(label, style = MaterialTheme.typography.bodySmall)
             Text(valueLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
         }
-        Slider(value = value.coerceIn(range), onValueChange = onChange, valueRange = range, steps = steps)
+        Slider(value = value.coerceIn(range), onValueChange = onChange, valueRange = range, steps = steps, enabled = enabled)
     }
 }
 
 @Composable
-private fun SettingToggle(title: String, detail: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SettingToggle(title: String, detail: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
@@ -263,6 +271,7 @@ private fun PermissionRow(label: String, detail: String, active: Boolean) {
 }
 
 private fun resetAlgorithmDefaults(state: TurnAppState) {
+    if (!state.canChangeAlgorithmSettings) return
     state.knnK = 4
     state.missingRssi = -100
     state.strideMetres = 0.73f

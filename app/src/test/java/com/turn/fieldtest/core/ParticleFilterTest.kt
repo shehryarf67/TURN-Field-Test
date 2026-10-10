@@ -9,6 +9,49 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ParticleFilterTest {
+    @Test fun zeroWeightHypothesesAcrossWallCannotSeedTheFusedCluster() {
+        val floor = MapFloor("F1", listOf(rectangle(0.0, 0.0, 10.0, 10.0)),
+            listOf(WallSegment("divider", MetricPoint(5.0, 0.0), MetricPoint(5.0, 10.0))))
+        val filter = ParticleFilter(MetricMap(mapOf("F1" to floor)),
+            quietConfig(particleCount = 500, initialPositionStdMetres = 1.0,
+                correctionSpatialSigmaMetres = 0.001, resampleEffectiveSizeRatio = 0.0)
+                .copy(clusterRadiusMetres = 100.0), seed = 42)
+        filter.initialize(AbsoluteFix(MetricPoint(4.9, 5.0), "F1", AbsoluteFixSource.MANUAL))
+        val target = filter.particles.maxBy { it.x }.position
+        val match = exactWifiMatch(target, "F1").copy(confidence = 1.0)
+        filter.correctWithWifi(match, allowGlobalRelocalization = false)
+        val result = filter.correctWithWifi(match, allowGlobalRelocalization = false)
+        assertTrue(filter.particles.any { it.weight == 0.0 && it.x < 5.0 })
+        assertNotNull(result.summary)
+        assertTrue(result.summary!!.position.x > 5.0)
+        assertTrue(floor.isWalkable(result.summary.position))
+    }
+    @Test fun nearbyHypothesesAcrossWallCannotBecomeOneConfidentCluster() {
+        val floor = MapFloor("F1", listOf(rectangle(0.0, 0.0, 10.0, 10.0)),
+            listOf(WallSegment("divider", MetricPoint(5.0, 0.0), MetricPoint(5.0, 10.0))))
+        val filter = ParticleFilter(MetricMap(mapOf("F1" to floor)),
+            quietConfig(particleCount = 500, initialPositionStdMetres = 1.0).copy(clusterRadiusMetres = 100.0), seed = 42)
+        val summary = filter.initialize(AbsoluteFix(MetricPoint(4.9, 5.0), "F1", AbsoluteFixSource.MANUAL))
+        assertTrue(filter.particles.any { it.x > 5.0 })
+        assertTrue(filter.particles.any { it.x < 5.0 })
+        assertTrue(summary.clusterParticleCount < filter.particles.size * 0.75)
+        assertTrue(summary.confidence < 0.75)
+        assertTrue(floor.isWalkable(summary.position))
+        assertTrue(filter.particles.none { it.position.distanceTo(summary.position) < 1e-10 })
+    }
+
+    @Test fun fusedAggregateStaysInsideConcaveHallway() {
+        val outline = MetricPolygon(listOf(MetricPoint(0.0, 0.0), MetricPoint(10.0, 0.0),
+            MetricPoint(10.0, 1.0), MetricPoint(1.0, 1.0), MetricPoint(1.0, 10.0), MetricPoint(0.0, 10.0)))
+        val floor = MapFloor("F1", listOf(outline))
+        val filter = ParticleFilter(MetricMap(mapOf("F1" to floor)),
+            quietConfig(particleCount = 500, initialPositionStdMetres = 3.0).copy(clusterRadiusMetres = 100.0), seed = 21)
+        val summary = filter.initialize(AbsoluteFix(MetricPoint(0.8, 0.8), "F1", AbsoluteFixSource.MANUAL))
+        val naiveMean = MetricPoint(filter.particles.sumOf { it.x } / 500, filter.particles.sumOf { it.y } / 500)
+        assertFalse(floor.isWalkable(naiveMean))
+        assertTrue(floor.isWalkable(summary.position))
+        assertTrue(summary.uncertaintyRadiusMetres > 0.25)
+    }
     @Test
     fun seededInitializationIsDeterministic() {
         val config = quietConfig(initialPositionStdMetres = 1.0)

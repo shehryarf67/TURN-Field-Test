@@ -33,6 +33,7 @@ class WifiSurveyCaptureFactory(
         val snapshotId = idGenerator.nextId()
         fun eligible(ap: com.turn.fieldtest.platform.wifi.WifiAccessPoint): Boolean =
             ap.ageMillisAtReceipt in 0L..15_000L && ap.scanTimestampMicros > (previousTimestamps[ap.bssid.lowercase()] ?: 0L) &&
+                ap.scanTimestampMicros <= batch.receivedAtElapsedMillis * 1_000L + 999L &&
                 batch.receivedAtEpochMillis - ap.ageMillisAtReceipt >= session.startedAtEpochMillis
         val uniqueAccessPoints = batch.accessPoints.groupBy { it.bssid.lowercase() }.values.map { rows ->
             rows.maxWith(compareBy<com.turn.fieldtest.platform.wifi.WifiAccessPoint> { it.scanTimestampMicros }.thenBy { it.rssiDbm })

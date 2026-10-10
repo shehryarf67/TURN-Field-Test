@@ -4,6 +4,12 @@ import kotlin.math.PI
 import kotlin.test.*
 
 class MapHeadingTest {
+    @Test fun gyroCannotExtrapolateThroughMissingOrOutOfOrderSamples() {
+        assertEquals(0.02, MapHeading.gyroIntervalSeconds(1_000_000_000, 1_020_000_000)!!, 1e-10)
+        assertNull(MapHeading.gyroIntervalSeconds(1_000_000_000, 4_000_000_000))
+        assertNull(MapHeading.gyroIntervalSeconds(1_000_000_000, 1_000_000_000))
+        assertNull(MapHeading.gyroIntervalSeconds(1_000_000_000, 900_000_000))
+    }
     @Test fun mapPointsGiveRightUpLeftDownAndRejectTinyBaselines() {
         val start = MetricPoint(10.0, 10.0)
         assertEquals(0.0, MapHeading.toward(start, MetricPoint(15.0, 10.0)), 1e-10)

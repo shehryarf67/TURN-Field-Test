@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -160,6 +161,45 @@ class PrototypeWorkflowTest {
             assertFalse(state.pickingHeading)
         }
         compose.onNodeWithText("Start navigation").performScrollTo().assertIsEnabled()
+    }
+
+    @Test fun changingReferenceStartRequiresNewDirectionAndCancelsAheadPicking() {
+        val state = fixture().apply {
+            referencePoints.add(MapPointUi("b", "f", Offset(2f, 2f), "RP-02"))
+            manualStartPoint = Offset(10f, 10f); headingChoiceConfirmed = true
+            initialHeadingDegrees = 180.0; pickingHeading = true
+        }
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) { NavigationScreen(state, TurnAppActions()) } } }
+        compose.onNodeWithText("At a reference point").performScrollTo().performClick()
+        compose.onNodeWithText("I am at RP-02").performClick()
+        compose.onNodeWithText("Start navigation").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(Offset(2f, 2f), state.manualStartPoint)
+            assertFalse(state.headingChoiceConfirmed); assertFalse(state.pickingHeading)
+        }
+    }
+
+    @Test fun failedSessionCloseCanRetryWithoutChoosingAnotherHeading() {
+        val state = fixture().apply { liveCloseFailed = true; sessionLocked = true }
+        var retried = false
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) {
+            NavigationScreen(state, TurnAppActions(onRealLiveToggled = { retried = true }))
+        } } }
+        compose.onNodeWithText("Retry saving").performScrollTo().assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(retried) }
+    }
+
+    @Test fun settingsCannotChangeAlgorithmDuringTrackingButThemeRemainsAvailable() {
+        val state = fixture().apply { liveRunning = true; sessionLocked = true }
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) { SettingsScreen(state, true) } } }
+        compose.onNodeWithText("Reset defaults").performScrollTo().assertIsNotEnabled()
+        val sliders = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+        sliders.assertCountEquals(4)
+        repeat(4) { sliders[it].assertIsNotEnabled() }
+        compose.onNodeWithText("Device-offset normalization").performScrollTo()
+        compose.onAllNodes(isToggleable())[0].assertIsNotEnabled()
+        compose.onNodeWithText("Dark field theme").performScrollTo()
+        compose.onAllNodes(isToggleable())[1].assertIsEnabled()
     }
 
     @Test fun liveHeadingControlsDeclareLeftWithoutMovingOrClearingTrails() {

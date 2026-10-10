@@ -12,6 +12,7 @@ import androidx.activity.SystemBarStyle
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.DisposableEffect
 import android.content.pm.ActivityInfo
+import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -64,6 +65,11 @@ class MainActivity : ComponentActivity() {
             val dark = runtimeViewModel.appState.darkTheme
             val fullscreen = runtimeViewModel.appState.isNavigationFullscreen
             val orientation = runtimeViewModel.appState.navigationViewOrientation
+            val keepAwake = runtimeViewModel.appState.keepScreenAwake
+            DisposableEffect(keepAwake) {
+                if (keepAwake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                onDispose { if (keepAwake) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+            }
             DisposableEffect(fullscreen) {
                 val previousOrientation = requestedOrientation
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -113,8 +119,12 @@ class MainActivity : ComponentActivity() {
                     },
                     onRealSurveyFinished = runtimeViewModel::finishRealSurvey,
                     onRealLiveToggled = {
-                        withWifiPermissions {
-                            withMotionPermissions(runtimeViewModel::toggleRealLive)
+                        if (runtimeViewModel.appState.liveRunning || runtimeViewModel.appState.liveCloseFailed) {
+                            runtimeViewModel.toggleRealLive()
+                        } else {
+                            withWifiPermissions {
+                                withMotionPermissions(runtimeViewModel::toggleRealLive)
+                            }
                         }
                     },
                     onRealHeadingAligned = runtimeViewModel::alignLiveHeading,

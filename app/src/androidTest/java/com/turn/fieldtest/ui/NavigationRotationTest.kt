@@ -1,6 +1,7 @@
 package com.turn.fieldtest.ui
 
 import android.content.res.Configuration
+import android.view.WindowManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -22,6 +23,20 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class NavigationRotationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @Test fun physicalCollectionKeepsScreenOnAndReleasesItWhenStopped() {
+        val runtime = ViewModelProvider(compose.activity)[TurnRuntimeViewModel::class.java]
+        val state = runtime.appState
+        compose.waitUntil(15_000) { !state.startupLoading }
+        val originalMode = state.mode
+        try {
+            compose.runOnIdle { state.mode = DataMode.REAL_DEVICE; state.surveyRunning = true }
+            compose.runOnIdle { assertTrue(compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0) }
+            compose.runOnIdle { state.surveyRunning = false }
+            compose.runOnIdle { assertEquals(0, compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        } finally {
+            compose.runOnIdle { state.surveyRunning = false; state.mode = originalMode }
+        }
+    }
 
     @Test fun fullscreenRotatesAndBackRestoresUiWithoutStoppingOrRecreatingActivity() {
         val activity = compose.activity

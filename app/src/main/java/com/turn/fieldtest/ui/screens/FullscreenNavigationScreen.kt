@@ -23,7 +23,7 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
         while (state.liveRunning) { now = System.currentTimeMillis(); delay(1000) }
     }
     val age = state.liveEstimateEpochMillis?.let { (now - it).coerceAtLeast(0) / 1000 }
-    val confidence = navigationConfidence(state, age)
+    val confidence = navigationConfidence(state, age, now)
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         NavigationMap(state, Modifier.fillMaxSize(), showPosition = true, showGraph = state.debugOverlays)
         Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing)
@@ -65,9 +65,11 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
     }
 }
 
-internal fun navigationConfidence(state: TurnAppState, ageSeconds: Long?): String = when {
+internal fun navigationConfidence(state: TurnAppState, ageSeconds: Long?, nowEpochMillis: Long = System.currentTimeMillis()): String = when {
     !state.liveRunning -> "Stopped"
     !state.realLiveInitialized -> "Position unavailable"
+    !state.realHeadingAligned -> "Heading unavailable · movement paused"
+    state.realHeadingSampleEpochMillis?.let { nowEpochMillis - it > 2_000L } != false -> "Heading stale · movement paused"
     ageSeconds != null && ageSeconds > 20 -> "Last estimate ${ageSeconds}s ago"
     state.realLiveConfidence >= 0.65 -> "Tracking"
     else -> "Low confidence"
