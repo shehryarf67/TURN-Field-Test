@@ -31,6 +31,8 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
             Surface(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.medium) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(state.floorName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (state.liveRunning) Text("Steps ${state.realLiveStepCount} / ${state.realLiveDetectedSteps} detected",
+                        style = MaterialTheme.typography.bodySmall)
                     Text(confidence + (state.realLiveUncertaintyMetres?.let { " · ± %.1f m".format(it) } ?: ""),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     Text(if (state.realHeadingAligned) "Heading %.0f° on map".format((state.realLiveHeadingDegrees + 360.0) % 360.0)

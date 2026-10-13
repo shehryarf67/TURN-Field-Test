@@ -149,6 +149,11 @@ fun NavigationScreen(state: TurnAppState, actions: TurnAppActions) {
             Text(state.realWifiEvidenceStatus, style = MaterialTheme.typography.bodySmall)
             state.realWifiFixEpochMillis?.let { Text("Latest usable Wi-Fi match: ${(now - it).coerceAtLeast(0) / 1000}s ago", style = MaterialTheme.typography.bodySmall) }
             Text(state.realLiveStatus, style = MaterialTheme.typography.bodySmall)
+            if (state.liveRunning) {
+                Text("Steps detected: ${state.realLiveDetectedSteps} · used: ${state.realLiveStepCount}", style = MaterialTheme.typography.labelLarge)
+                Text(state.realLiveStepStatus, style = MaterialTheme.typography.bodySmall)
+                Text(state.realLiveRecordingStatus, style = MaterialTheme.typography.bodySmall)
+            }
             state.realWifiIssue?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             Button(onClick = actions.onRealLiveToggled, modifier = Modifier.fillMaxWidth(),
                 enabled = !state.liveStarting && !state.projectBusy && !state.surveyRunning && !state.realHeadingAlignmentBusy && (state.liveRunning || state.liveCloseFailed || state.headingChoiceConfirmed && heading.toDoubleOrNull()?.isFinite() == true)) {

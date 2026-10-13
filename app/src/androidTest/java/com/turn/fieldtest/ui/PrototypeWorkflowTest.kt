@@ -24,6 +24,17 @@ import org.junit.runner.RunWith
 /** UI fixtures only: these tests never feed simulated evidence into the physical runtime. */
 @RunWith(AndroidJUnit4::class)
 class PrototypeWorkflowTest {
+    @Test fun navigationExplainsDetectedStepsThatCannotProduceMovement() {
+        val state = fixture().apply {
+            liveRunning = true; realLiveDetectedSteps = 8; realLiveStepCount = 0
+            realLiveStepStatus = "Step detected · choose a known start or wait for a confident Wi-Fi position"
+            realLiveRecordingStatus = "Step saved with reason: POSITION_NOT_INITIALIZED"
+        }
+        compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) { NavigationScreen(state, TurnAppActions()) } } }
+        compose.onNodeWithText("Steps detected: 8 · used: 0").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(state.realLiveStepStatus).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(state.realLiveRecordingStatus).performScrollTo().assertIsDisplayed()
+    }
     @get:Rule val compose = createComposeRule()
     private fun fixture() = TurnAppState().apply {
         mode = DataMode.REAL_DEVICE; activeProject = ProjectContext("v", "f"); realMapReady = true

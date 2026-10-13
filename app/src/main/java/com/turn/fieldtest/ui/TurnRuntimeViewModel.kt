@@ -134,6 +134,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var liveScanJob: Job? = null
     private val surveyBssids = linkedSetOf<String>()
     private val latestSensorValues = linkedMapOf<TurnSensorType, String>()
+    private val lastDiagnosticValueNanos = mutableMapOf<TurnSensorType, Long>()
     private var activePositioningSession: PositioningSessionEntity? = null
     private var activeSensorSession: SensorSessionEntity? = null
     private var particleFilter: ParticleFilter? = null
@@ -149,6 +150,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var latestMapHeadingRadians = 0.0
     private var previousGyroscopeTimestampNanos: Long? = null
     private var gyroNeedsRealignment = false
+    private val stepHeadingHistory = com.turn.fieldtest.core.StepHeadingHistory()
+    private var lastSensorUiPublishNanos = 0L
+    private var lastHeadingUiPublishNanos = 0L
+    private var lastHeadingReceiptEpochMillis: Long? = null
     private var rawPdrFloorId: String? = null
 
     fun captureCheckpoint(input: CheckpointInput) {
@@ -168,7 +173,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             if (point == null || floor == null) null else EvaluationEstimate(point.x.toDouble(), point.y.toDouble(), floor, radius)
         val wifi = snapshot(appState.realWifiPosition, appState.realWifiFloorId, appState.realWifiUncertaintyMetres)
         val raw = snapshot(appState.realRawPdrPosition, rawPdrFloorId)
-        val fused = if (particleFilter?.isLost == false) snapshot(appState.realLivePosition,
+        val fused = if (appState.realLiveInitialized) snapshot(appState.realLivePosition,
             appState.realLiveFloorId, appState.realLiveUncertaintyMetres) else null
         val truth = MetricPoint(input.x, input.y)
         val wifiError = evaluateAtCheckpoint(truth, context.floorId, wifi)
@@ -759,6 +764,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     lastLiveHeadingSensorNanos = null
                     appState.realHeadingSampleEpochMillis = null
                     headingAlignmentNotBeforeNanos = requestedAtNanos
+                    stepHeadingHistory.reset(requestedAtNanos)
                     rawPdrTracker?.setHeading(aligned)
                     appState.initialHeadingDegrees = degrees
                     appState.realLiveHeadingDegrees = Math.toDegrees(aligned)
@@ -885,6 +891,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 liveYawBaselineRadians = null
                 lastLiveHeadingSensorNanos = null
                 headingAlignmentNotBeforeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+                stepHeadingHistory.reset(headingAlignmentNotBeforeNanos)
+                appState.realLiveDetectedSteps = 0
+                appState.realLiveStepStatus = "Waiting for a physical step event"
+                appState.realLiveRecordingStatus = "Session saved · waiting for movement"
                 appState.realHeadingAligned = false
                 appState.realHeadingStatus = "Stay still · waiting for a fresh heading sensor sample"
                 lastHeadingDisplayRotation = null
@@ -917,7 +927,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLiveHeadingSource = sensorSource.state.value.selectedHeadingSource?.name ?: "unavailable"
                 appState.realLiveStatus = "Waiting for a fresh Wi-Fi fix. Heading aligned to %.0f° on the map.".format(appState.initialHeadingDegrees)
                 if (chosenStart != null) {
-                    try { initializeManual(chosenStart, context.floorId) }
+                    try { eventMutex.withLock { initializeManual(chosenStart, context.floorId) } }
                     catch (error: Exception) { appState.realLiveStatus = "Known start could not initialize tracking: ${error.message}. Stop and choose another point." }
                 }
                 startLiveScanLoop()
@@ -1474,14 +1484,14 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 seed = positioningSession.startedAtEpochMillis,
             )
             runCatching {
-                filter.initialize(
+                withContext(Dispatchers.Default) { filter.initialize(
                     AbsoluteFix(
                         position = match.estimatedPosition,
                         floorId = match.estimatedFloorId,
                         source = AbsoluteFixSource.WIFI,
                     ),
                     positionStdMetres = (match.uncertaintyRadiusMetres / 2.0).coerceIn(0.35, 4.0),
-                )
+                ) }
             }.onFailure { failure ->
                 appState.realLiveStatus = "Wi-Fi fix lies outside configured walkable geometry: ${failure.message}"
                 return
@@ -1511,7 +1521,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 initializationType = "FRESH_WIFI",
             ).also { repositories.positioning.saveSession(it) }
         } else {
-            val correction = requireNotNull(particleFilter).correctWithWifi(match)
+            val correction = withContext(Dispatchers.Default) { requireNotNull(particleFilter).correctWithWifi(match) }
             if (correction.kind == WifiCorrectionKind.GLOBAL_RELOCALIZATION) {
                 appState.relocalizationCount += 1
             }
@@ -1739,7 +1749,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private suspend fun initializeManual(point: MetricPoint, floorId: String) {
         val session = requireNotNull(activePositioningSession)
         val filter = ParticleFilter(currentPilotMap(), ParticleFilterConfig(particleCount = appState.particleCount), session.startedAtEpochMillis)
-        filter.initialize(AbsoluteFix(point, floorId, AbsoluteFixSource.MANUAL), positionStdMetres = 0.5)
+        withContext(Dispatchers.Default) { filter.initialize(AbsoluteFix(point, floorId, AbsoluteFixSource.MANUAL), positionStdMetres = 0.5) }
         particleFilter = filter
         val sources = if (sensorSource.state.value.selectedStepSource == TurnSensorType.STEP_DETECTOR) setOf(StepSource.STEP_DETECTOR) else emptySet()
         rawPdrTracker = PdrTracker(point, latestMapHeadingRadians, StepProcessor(sources), StrideModel(appState.strideMetres.toDouble()))
@@ -1780,7 +1790,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun handleSensorSample(sample: SensorSample) {
         if (appState.mode != DataMode.REAL_DEVICE || sample.simulated) return
-        latestSensorValues[sample.type] = sample.displayValue()
+        if (sample.sensorTimestampNanos - (lastDiagnosticValueNanos[sample.type] ?: 0L) >= 200_000_000L ||
+            sample.kind == SensorSampleKind.STEP_DETECTED || sample.kind == SensorSampleKind.ACCURACY_CHANGED) {
+            latestSensorValues[sample.type] = sample.displayValue()
+            lastDiagnosticValueNanos[sample.type] = sample.sensorTimestampNanos
+        }
         updateLiveHeading(sample)
         if (appState.diagnosticWalkRunning && sample.kind == SensorSampleKind.STEP_DETECTED) {
             appState.diagnosticWalkSteps += 1
@@ -1789,6 +1803,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         if (appState.liveRunning && sample.kind == SensorSampleKind.STEP_DETECTED) {
             processLiveStep(sample)
         }
+        val uiNow = android.os.SystemClock.elapsedRealtimeNanos()
+        if (uiNow - lastSensorUiPublishNanos < 200_000_000L) return
+        lastSensorUiPublishNanos = uiNow
         val sourceState = sensorSource.state.value
         appState.realSensorReadings = sourceState.availability.map { availability ->
             availability.toUi(
@@ -1830,7 +1847,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         latestMapHeadingRadians = com.turn.fieldtest.core.MapHeading.fromRelativeAzimuth(sessionInitialHeadingRadians, baseline, yaw)
                         if (validRotationSample && yaw.isFinite()) {
                             lastLiveHeadingSensorNanos = sample.sensorTimestampNanos
-                            appState.realHeadingSampleEpochMillis = sample.receivedAtEpochMillis
+                            lastHeadingReceiptEpochMillis = sample.receivedAtEpochMillis
+                            stepHeadingHistory.record(sample.sensorTimestampNanos, latestMapHeadingRadians)
                             appState.realHeadingAligned = true
                             appState.realHeadingStatus = "Heading aligned · check the arrow before walking"
                         }
@@ -1854,7 +1872,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
             if (appState.liveRunning) {
                 lastLiveHeadingSensorNanos = sample.sensorTimestampNanos
-                appState.realHeadingSampleEpochMillis = sample.receivedAtEpochMillis
+                lastHeadingReceiptEpochMillis = sample.receivedAtEpochMillis
                 appState.realHeadingAligned = true
                 appState.realHeadingStatus = "Gyroscope heading aligned · check regularly for drift"
             }
@@ -1864,35 +1882,50 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 // Natural-axis +z is counter-clockwise for a face-up phone; display turns are handled above.
                 latestMapHeadingRadians = normalizeRadians(latestMapHeadingRadians + z * deltaSeconds)
             }
+            if (appState.liveRunning) stepHeadingHistory.record(sample.sensorTimestampNanos, latestMapHeadingRadians)
         }
-        appState.realLiveHeadingDegrees = latestMapHeadingRadians * 180.0 / PI
+        val uiNow = android.os.SystemClock.elapsedRealtimeNanos()
+        if (uiNow - lastHeadingUiPublishNanos >= 100_000_000L) {
+            lastHeadingUiPublishNanos = uiNow
+            appState.realLiveHeadingDegrees = latestMapHeadingRadians * 180.0 / PI
+            appState.realHeadingSampleEpochMillis = lastHeadingReceiptEpochMillis
+        }
     }
 
     private suspend fun processLiveStep(sample: SensorSample) {
-        if (sensorSource.state.value.selectedHeadingSource == null) {
-            appState.realLiveStatus = "No active heading sensor; Wi-Fi fixes available but PDR movement is unavailable"
-            return
-        }
-        val lastHeading = lastLiveHeadingSensorNanos
-        if (!appState.realHeadingAligned || !com.turn.fieldtest.core.MapHeading.hasFreshHeading(
-                sample.sensorTimestampNanos, lastHeading, headingAlignmentNotBeforeNanos)) {
-            appState.realHeadingAligned = false
-            appState.realHeadingStatus = "Heading unavailable/stale · movement paused until a fresh heading sample"
-            activeSensorSession?.let { session -> repositories.positioning.savePdrEvent(PdrEventEntity(
-                id = "PDR-${session.id}-${livePdrSequence++}", sensorSessionId = session.id,
-                sequence = livePdrSequence - 1, eventType = "STEP", source = StepSource.STEP_DETECTOR.name,
-                timestampEpochMillis = sample.receivedAtEpochMillis, sensorTimestampNanos = sample.sensorTimestampNanos,
-                stepDelta = 0, strideMetres = 0.0, headingRadians = latestMapHeadingRadians,
-                accepted = false, rejectionReason = "HEADING_NOT_ALIGNED_OR_STALE")) }
-            return
-        }
-        val tracker = rawPdrTracker ?: return
-        val filter = particleFilter
         val sensorSession = activeSensorSession ?: return
         val positioningSession = activePositioningSession ?: return
-        val event = tracker.processStep(
+        appState.realLiveDetectedSteps += 1
+        val stepHeading = stepHeadingHistory.headingForStep(sample.sensorTimestampNanos)
+        val tracker = rawPdrTracker
+        val rejection = when {
+            sensorSource.state.value.selectedHeadingSource == null -> "HEADING_SENSOR_UNAVAILABLE"
+            tracker == null -> "POSITION_NOT_INITIALIZED"
+            gyroNeedsRealignment -> "GYROSCOPE_REALIGNMENT_REQUIRED"
+            stepHeading == null -> "HEADING_NOT_ALIGNED_OR_STALE"
+            else -> null
+        }
+        if (rejection != null) {
+            val sequence = livePdrSequence++
+            repositories.positioning.savePdrEvent(PdrEventEntity(
+                id = "PDR-${sensorSession.id}-$sequence", sensorSessionId = sensorSession.id,
+                sequence = sequence, eventType = "STEP", source = StepSource.STEP_DETECTOR.name,
+                timestampEpochMillis = sample.receivedAtEpochMillis, sensorTimestampNanos = sample.sensorTimestampNanos,
+                stepDelta = 0, strideMetres = 0.0, headingRadians = latestMapHeadingRadians,
+                accepted = false, rejectionReason = rejection))
+            appState.realLiveStepStatus = when (rejection) {
+                "POSITION_NOT_INITIALIZED" -> "Step detected · choose a known start or wait for a confident Wi-Fi position"
+                "GYROSCOPE_REALIGNMENT_REQUIRED" -> "Step detected · correct walking direction before moving"
+                else -> "Step detected · no measured heading at that step's timestamp"
+            }
+            appState.realLiveRecordingStatus = "Step saved with reason: $rejection"
+            return
+        }
+        val filter = particleFilter
+        val heading = requireNotNull(stepHeading)
+        val event = requireNotNull(tracker).processStep(
             signal = StepSignal(sample.sensorTimestampNanos, StepSource.STEP_DETECTOR),
-            headingRadians = latestMapHeadingRadians,
+            headingRadians = heading,
         )
         val pdrSequence = livePdrSequence++
         repositories.positioning.savePdrEvent(
@@ -1906,16 +1939,22 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 sensorTimestampNanos = sample.sensorTimestampNanos,
                 stepDelta = if (event.decision.acceptedForMovement) 1 else 0,
                 strideMetres = event.strideMetres,
-                headingRadians = latestMapHeadingRadians,
+                headingRadians = heading,
                 accepted = event.decision.acceptedForMovement,
                 rejectionReason = event.decision.reason.takeUnless {
                     it == com.turn.fieldtest.core.StepRejectionReason.NONE
                 }?.name,
             ),
         )
-        if (!event.decision.acceptedForMovement) return
+        if (!event.decision.acceptedForMovement) {
+            appState.realLiveStepStatus = "Step ignored: ${event.decision.reason}"
+            appState.realLiveRecordingStatus = "Rejected step saved"
+            return
+        }
 
-        val prediction = filter?.predictStep(event.strideMetres, latestMapHeadingRadians)
+        val prediction = withContext(Dispatchers.Default) { filter?.predictStep(event.strideMetres, heading) }
+        appState.realLiveStepStatus = if (prediction?.accepted == true) "Step accepted · position updated"
+            else "Step recorded · fused position lost; request a fresh Wi-Fi fix"
         appState.realLiveStepCount = event.stateAfter.acceptedStepCount.toLong()
         appState.realLiveDistanceMetres = event.stateAfter.estimatedDistanceMetres
         appState.realRawPdrPosition = event.stateAfter.position.toUiOffset()
@@ -1943,7 +1982,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 floorId = rawPdrFloorId,
                 xMetres = event.stateAfter.position.x,
                 yMetres = event.stateAfter.position.y,
-                headingRadians = latestMapHeadingRadians,
+                headingRadians = heading,
                 confidenceScore = 0.0,
                 floorConfidence = appState.realLiveFloorConfidence,
                 stepCount = appState.realLiveStepCount,
@@ -1961,7 +2000,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     floorId = summary.floorId,
                     xMetres = summary.position.x,
                     yMetres = summary.position.y,
-                    headingRadians = latestMapHeadingRadians,
+                    headingRadians = heading,
                     confidenceRadiusMetres = summary.uncertaintyRadiusMetres,
                     confidenceScore = summary.confidence,
                     floorConfidence = summary.floorConfidence,
@@ -1972,6 +2011,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 ),
             )
         }
+        appState.realLiveRecordingStatus = "Saved ${appState.realLiveStepCount} movement steps on this phone"
     }
 
     private fun SensorAvailability.toUi(

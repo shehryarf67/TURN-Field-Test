@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -81,7 +82,7 @@ data class SensorSourceConfig(
 )
 
 interface SensorSource {
-    val samples: SharedFlow<SensorSample>
+    val samples: Flow<SensorSample>
     val state: StateFlow<SensorSourceState>
     fun start()
     fun stop()
@@ -104,13 +105,14 @@ class AndroidSensorSource(
     private val permissions = TurnPermissionChecker(context)
     private val displays = context.applicationContext.getSystemService(DisplayManager::class.java)
     private val registeredTypes = mutableSetOf<Int>()
-    private val mutableSamples = MutableSharedFlow<SensorSample>(extraBufferCapacity = 128)
+    // Non-blocking callbacks must not silently drop step events behind diagnostic/heading traffic.
+    private val pendingSamples = SensorEventQueue()
     private val mutableState = MutableStateFlow(SensorSourceState())
     private val sensorsByAndroidType: Map<Int, Sensor?> = sensorTypes.associate { (_, androidType) ->
         androidType to sensorManager.getDefaultSensor(androidType)
     }
 
-    override val samples: SharedFlow<SensorSample> = mutableSamples.asSharedFlow()
+    override val samples: Flow<SensorSample> = pendingSamples.samples
     override val state: StateFlow<SensorSourceState> = mutableState.asStateFlow()
 
     init {
@@ -124,7 +126,9 @@ class AndroidSensorSource(
             if (sensor.type in listOf(Sensor.TYPE_STEP_DETECTOR, Sensor.TYPE_STEP_COUNTER) &&
                 !permissions.isGranted(TurnCapability.PDR_MOTION)) return@forEach
             val registered = runCatching {
-                sensorManager.registerListener(this, sensor, config.samplingPeriodUs)
+                val period = if (sensor.type.toTurnSensorAndKind()?.first == selectedHeadingSource())
+                    config.samplingPeriodUs else SensorManager.SENSOR_DELAY_NORMAL
+                sensorManager.registerListener(this, sensor, period)
             }.getOrDefault(false)
             if (registered) registeredTypes += sensor.type
         }
@@ -134,12 +138,13 @@ class AndroidSensorSource(
     override fun stop() {
         sensorManager.unregisterListener(this)
         registeredTypes.clear()
+        pendingSamples.clear()
         mutableState.value = stateFromSensors(running = false)
     }
 
     override fun onSensorChanged(event: SensorEvent) {
         val mapped = event.sensor.type.toTurnSensorAndKind() ?: return
-        mutableSamples.tryEmit(
+        pendingSamples.offer(
             SensorSample(
                 type = mapped.first,
                 kind = mapped.second,
@@ -155,7 +160,7 @@ class AndroidSensorSource(
 
     override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {
         val type = sensor.type.toTurnSensorAndKind()?.first ?: return
-        mutableSamples.tryEmit(
+        pendingSamples.offer(
             SensorSample(
                 type = type,
                 kind = SensorSampleKind.ACCURACY_CHANGED,
