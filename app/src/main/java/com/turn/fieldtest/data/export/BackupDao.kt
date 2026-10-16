@@ -9,6 +9,8 @@ import com.turn.fieldtest.data.local.*
 /** Lossless Room export/import boundary. Imports merge by stable ID and never silently wipe data. */
 @Dao
 interface BackupDao {
+    @Query("SELECT * FROM walk_scan_drafts ORDER BY id") suspend fun scanDrafts(): List<com.turn.fieldtest.mapper.data.ScanDraftEntity>
+    @Upsert suspend fun upsertScanDrafts(values: List<com.turn.fieldtest.mapper.data.ScanDraftEntity>)
     @Query("SELECT * FROM navigation_nodes ORDER BY id") suspend fun navigationNodes(): List<NavigationNodeEntity>
     @Query("SELECT * FROM navigation_edges ORDER BY id") suspend fun navigationEdges(): List<NavigationEdgeEntity>
     @Upsert suspend fun upsertNavigationNodes(values: List<NavigationNodeEntity>)
@@ -65,6 +67,7 @@ interface BackupDao {
 
     @Transaction
     suspend fun createExport(exportedAtEpochMillis: Long): TurnDatabaseExport = TurnDatabaseExport(
+        scanDrafts = scanDrafts(),
         exportedAtEpochMillis = exportedAtEpochMillis,
         venues = venues(),
         floors = floors(),
@@ -100,6 +103,7 @@ interface BackupDao {
         require(errors.isEmpty()) { errors.joinToString(prefix = "Invalid TURN import: ", separator = "; ") }
         upsertVenues(value.venues)
         upsertFloors(value.floors)
+        upsertScanDrafts(value.scanDrafts)
         upsertFloorPlanAssets(value.floorPlanAssets)
         upsertWalkableRegions(value.walkableRegions)
         upsertWallSegments(value.wallSegments)

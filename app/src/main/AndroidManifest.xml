@@ -31,6 +31,9 @@
         android:roundIcon="@drawable/ic_turn"
         android:supportsRtl="true"
         android:theme="@style/Theme.TurnFieldTest">
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
+        <activity android:name=".mapper.WalkMapperActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"

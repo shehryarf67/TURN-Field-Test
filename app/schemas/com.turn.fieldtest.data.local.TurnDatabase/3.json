@@ -1,0 +1,3448 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "9061ac26fe5fd0f60f4745727db44b06",
+    "entities": [
+      {
+        "tableName": "walk_scan_drafts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `documentJson` TEXT NOT NULL, `status` TEXT NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "documentJson",
+            "columnName": "documentJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_walk_scan_drafts_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_walk_scan_drafts_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "navigation_nodes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `xMetres` REAL NOT NULL, `yMetres` REAL NOT NULL, `poiId` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`poiId`) REFERENCES `points_of_interest`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xMetres",
+            "columnName": "xMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yMetres",
+            "columnName": "yMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "poiId",
+            "columnName": "poiId",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_navigation_nodes_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_navigation_nodes_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_navigation_nodes_poiId",
+            "unique": false,
+            "columnNames": [
+              "poiId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_navigation_nodes_poiId` ON `${TABLE_NAME}` (`poiId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "points_of_interest",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "poiId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "navigation_edges",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `fromNodeId` TEXT NOT NULL, `toNodeId` TEXT NOT NULL, `distanceMetres` REAL NOT NULL, `walkable` INTEGER NOT NULL, `bidirectional` INTEGER NOT NULL, `accessible` INTEGER NOT NULL, `kind` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`fromNodeId`) REFERENCES `navigation_nodes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`toNodeId`) REFERENCES `navigation_nodes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromNodeId",
+            "columnName": "fromNodeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toNodeId",
+            "columnName": "toNodeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distanceMetres",
+            "columnName": "distanceMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "walkable",
+            "columnName": "walkable",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bidirectional",
+            "columnName": "bidirectional",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accessible",
+            "columnName": "accessible",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_navigation_edges_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_navigation_edges_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_navigation_edges_fromNodeId",
+            "unique": false,
+            "columnNames": [
+              "fromNodeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_navigation_edges_fromNodeId` ON `${TABLE_NAME}` (`fromNodeId`)"
+          },
+          {
+            "name": "index_navigation_edges_toNodeId",
+            "unique": false,
+            "columnNames": [
+              "toNodeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_navigation_edges_toNodeId` ON `${TABLE_NAME}` (`toNodeId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "navigation_nodes",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "fromNodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "navigation_nodes",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "toNodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "venues",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `notes` TEXT, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_venues_name",
+            "unique": false,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_venues_name` ON `${TABLE_NAME}` (`name`)"
+          },
+          {
+            "name": "index_venues_updatedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "updatedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_venues_updatedAtEpochMillis` ON `${TABLE_NAME}` (`updatedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "floors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `venueId` TEXT NOT NULL, `name` TEXT NOT NULL, `levelNumber` INTEGER NOT NULL, `widthMetres` REAL NOT NULL, `heightMetres` REAL NOT NULL, `originXMetres` REAL NOT NULL, `originYMetres` REAL NOT NULL, `imageYAxisPointsDown` INTEGER NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`venueId`) REFERENCES `venues`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "venueId",
+            "columnName": "venueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "levelNumber",
+            "columnName": "levelNumber",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "widthMetres",
+            "columnName": "widthMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heightMetres",
+            "columnName": "heightMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originXMetres",
+            "columnName": "originXMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originYMetres",
+            "columnName": "originYMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "imageYAxisPointsDown",
+            "columnName": "imageYAxisPointsDown",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_floors_venueId",
+            "unique": false,
+            "columnNames": [
+              "venueId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_floors_venueId` ON `${TABLE_NAME}` (`venueId`)"
+          },
+          {
+            "name": "index_floors_venueId_levelNumber",
+            "unique": true,
+            "columnNames": [
+              "venueId",
+              "levelNumber"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_floors_venueId_levelNumber` ON `${TABLE_NAME}` (`venueId`, `levelNumber`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "venues",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "venueId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "floor_plan_assets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `contentUri` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `pixelWidth` INTEGER, `pixelHeight` INTEGER, `calibrationImageX1` REAL, `calibrationImageY1` REAL, `calibrationImageX2` REAL, `calibrationImageY2` REAL, `calibrationDistanceMetres` REAL, `metresPerPixel` REAL, `importedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentUri",
+            "columnName": "contentUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pixelWidth",
+            "columnName": "pixelWidth",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pixelHeight",
+            "columnName": "pixelHeight",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "calibrationImageX1",
+            "columnName": "calibrationImageX1",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "calibrationImageY1",
+            "columnName": "calibrationImageY1",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "calibrationImageX2",
+            "columnName": "calibrationImageX2",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "calibrationImageY2",
+            "columnName": "calibrationImageY2",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "calibrationDistanceMetres",
+            "columnName": "calibrationDistanceMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "metresPerPixel",
+            "columnName": "metresPerPixel",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "importedAtEpochMillis",
+            "columnName": "importedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_floor_plan_assets_floorId",
+            "unique": true,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_floor_plan_assets_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "walkable_regions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `name` TEXT NOT NULL, `polygonJson` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "polygonJson",
+            "columnName": "polygonJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_walkable_regions_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_walkable_regions_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "wall_segments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `startXMetres` REAL NOT NULL, `startYMetres` REAL NOT NULL, `endXMetres` REAL NOT NULL, `endYMetres` REAL NOT NULL, `kind` TEXT NOT NULL, `enabled` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startXMetres",
+            "columnName": "startXMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startYMetres",
+            "columnName": "startYMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endXMetres",
+            "columnName": "endXMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endYMetres",
+            "columnName": "endYMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_wall_segments_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wall_segments_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "vertical_transitions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `fromFloorId` TEXT NOT NULL, `toFloorId` TEXT NOT NULL, `kind` TEXT NOT NULL, `fromXMetres` REAL NOT NULL, `fromYMetres` REAL NOT NULL, `toXMetres` REAL NOT NULL, `toYMetres` REAL NOT NULL, `activationRadiusMetres` REAL NOT NULL, `bidirectional` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`fromFloorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`toFloorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromFloorId",
+            "columnName": "fromFloorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toFloorId",
+            "columnName": "toFloorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromXMetres",
+            "columnName": "fromXMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromYMetres",
+            "columnName": "fromYMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toXMetres",
+            "columnName": "toXMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toYMetres",
+            "columnName": "toYMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activationRadiusMetres",
+            "columnName": "activationRadiusMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bidirectional",
+            "columnName": "bidirectional",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_vertical_transitions_fromFloorId",
+            "unique": false,
+            "columnNames": [
+              "fromFloorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_vertical_transitions_fromFloorId` ON `${TABLE_NAME}` (`fromFloorId`)"
+          },
+          {
+            "name": "index_vertical_transitions_toFloorId",
+            "unique": false,
+            "columnNames": [
+              "toFloorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_vertical_transitions_toFloorId` ON `${TABLE_NAME}` (`toFloorId`)"
+          },
+          {
+            "name": "index_vertical_transitions_fromFloorId_toFloorId_kind",
+            "unique": false,
+            "columnNames": [
+              "fromFloorId",
+              "toFloorId",
+              "kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_vertical_transitions_fromFloorId_toFloorId_kind` ON `${TABLE_NAME}` (`fromFloorId`, `toFloorId`, `kind`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "fromFloorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "toFloorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "points_of_interest",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `name` TEXT NOT NULL, `kind` TEXT NOT NULL, `xMetres` REAL NOT NULL, `yMetres` REAL NOT NULL, `notes` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xMetres",
+            "columnName": "xMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yMetres",
+            "columnName": "yMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_points_of_interest_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_points_of_interest_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_points_of_interest_floorId_name",
+            "unique": false,
+            "columnNames": [
+              "floorId",
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_points_of_interest_floorId_name` ON `${TABLE_NAME}` (`floorId`, `name`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "reference_points",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `name` TEXT NOT NULL, `xMetres` REAL NOT NULL, `yMetres` REAL NOT NULL, `isInsideWalkableSpace` INTEGER NOT NULL, `notes` TEXT, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xMetres",
+            "columnName": "xMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yMetres",
+            "columnName": "yMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isInsideWalkableSpace",
+            "columnName": "isInsideWalkableSpace",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_reference_points_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reference_points_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_reference_points_floorId_name",
+            "unique": true,
+            "columnNames": [
+              "floorId",
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_reference_points_floorId_name` ON `${TABLE_NAME}` (`floorId`, `name`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "qr_anchors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `anchorId` TEXT NOT NULL, `xMetres` REAL NOT NULL, `yMetres` REAL NOT NULL, `initialDirectionDegrees` REAL, `schemaVersion` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorId",
+            "columnName": "anchorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xMetres",
+            "columnName": "xMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yMetres",
+            "columnName": "yMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialDirectionDegrees",
+            "columnName": "initialDirectionDegrees",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "schemaVersion",
+            "columnName": "schemaVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_qr_anchors_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_qr_anchors_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_qr_anchors_anchorId",
+            "unique": true,
+            "columnNames": [
+              "anchorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_qr_anchors_anchorId` ON `${TABLE_NAME}` (`anchorId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "survey_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `venueId` TEXT NOT NULL, `floorId` TEXT NOT NULL, `referencePointId` TEXT NOT NULL, `knownXMetres` REAL NOT NULL, `knownYMetres` REAL NOT NULL, `deviceManufacturer` TEXT NOT NULL, `deviceModel` TEXT NOT NULL, `androidVersion` TEXT NOT NULL, `appVersion` TEXT NOT NULL, `researcherNotes` TEXT, `orientationLabel` TEXT, `crowdConditionLabel` TEXT, `dataMode` TEXT NOT NULL, `startedAtEpochMillis` INTEGER NOT NULL, `endedAtEpochMillis` INTEGER, `targetSnapshotCount` INTEGER, `completionStatus` TEXT NOT NULL DEFAULT 'LEGACY', PRIMARY KEY(`id`), FOREIGN KEY(`venueId`) REFERENCES `venues`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`referencePointId`) REFERENCES `reference_points`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "venueId",
+            "columnName": "venueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referencePointId",
+            "columnName": "referencePointId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownXMetres",
+            "columnName": "knownXMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownYMetres",
+            "columnName": "knownYMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceManufacturer",
+            "columnName": "deviceManufacturer",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceModel",
+            "columnName": "deviceModel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "androidVersion",
+            "columnName": "androidVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appVersion",
+            "columnName": "appVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "researcherNotes",
+            "columnName": "researcherNotes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "orientationLabel",
+            "columnName": "orientationLabel",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "crowdConditionLabel",
+            "columnName": "crowdConditionLabel",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dataMode",
+            "columnName": "dataMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtEpochMillis",
+            "columnName": "startedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtEpochMillis",
+            "columnName": "endedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "targetSnapshotCount",
+            "columnName": "targetSnapshotCount",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "completionStatus",
+            "columnName": "completionStatus",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'LEGACY'"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_survey_sessions_venueId",
+            "unique": false,
+            "columnNames": [
+              "venueId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_survey_sessions_venueId` ON `${TABLE_NAME}` (`venueId`)"
+          },
+          {
+            "name": "index_survey_sessions_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_survey_sessions_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_survey_sessions_referencePointId",
+            "unique": false,
+            "columnNames": [
+              "referencePointId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_survey_sessions_referencePointId` ON `${TABLE_NAME}` (`referencePointId`)"
+          },
+          {
+            "name": "index_survey_sessions_startedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "startedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_survey_sessions_startedAtEpochMillis` ON `${TABLE_NAME}` (`startedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "venues",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "venueId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "reference_points",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "referencePointId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "wifi_scan_snapshots",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `surveySessionId` TEXT NOT NULL, `scanSequence` INTEGER NOT NULL, `requestedAtEpochMillis` INTEGER NOT NULL, `resultsReceivedAtEpochMillis` INTEGER NOT NULL, `newestResultAgeMillis` INTEGER, `requestAccepted` INTEGER NOT NULL, `resultsUpdated` INTEGER NOT NULL, `isFresh` INTEGER NOT NULL, `isCached` INTEGER NOT NULL, `visibleAccessPointCount` INTEGER NOT NULL, `throttled` INTEGER NOT NULL, `nextPermittedRequestAtEpochMillis` INTEGER, `failureCode` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`surveySessionId`) REFERENCES `survey_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surveySessionId",
+            "columnName": "surveySessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scanSequence",
+            "columnName": "scanSequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestedAtEpochMillis",
+            "columnName": "requestedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resultsReceivedAtEpochMillis",
+            "columnName": "resultsReceivedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "newestResultAgeMillis",
+            "columnName": "newestResultAgeMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "requestAccepted",
+            "columnName": "requestAccepted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resultsUpdated",
+            "columnName": "resultsUpdated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFresh",
+            "columnName": "isFresh",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isCached",
+            "columnName": "isCached",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "visibleAccessPointCount",
+            "columnName": "visibleAccessPointCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "throttled",
+            "columnName": "throttled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextPermittedRequestAtEpochMillis",
+            "columnName": "nextPermittedRequestAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "failureCode",
+            "columnName": "failureCode",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_wifi_scan_snapshots_surveySessionId",
+            "unique": false,
+            "columnNames": [
+              "surveySessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wifi_scan_snapshots_surveySessionId` ON `${TABLE_NAME}` (`surveySessionId`)"
+          },
+          {
+            "name": "index_wifi_scan_snapshots_surveySessionId_scanSequence",
+            "unique": true,
+            "columnNames": [
+              "surveySessionId",
+              "scanSequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_wifi_scan_snapshots_surveySessionId_scanSequence` ON `${TABLE_NAME}` (`surveySessionId`, `scanSequence`)"
+          },
+          {
+            "name": "index_wifi_scan_snapshots_resultsReceivedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "resultsReceivedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wifi_scan_snapshots_resultsReceivedAtEpochMillis` ON `${TABLE_NAME}` (`resultsReceivedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "survey_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "surveySessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "wifi_observations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `snapshotId` TEXT NOT NULL, `surveySessionId` TEXT NOT NULL, `referencePointId` TEXT NOT NULL, `bssid` TEXT NOT NULL, `ssid` TEXT, `rssiDbm` INTEGER NOT NULL, `frequencyMhz` INTEGER NOT NULL, `channel` INTEGER, `scanTimestampMicros` INTEGER NOT NULL, `observedAtEpochMillis` INTEGER NOT NULL, `isFresh` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`snapshotId`) REFERENCES `wifi_scan_snapshots`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`surveySessionId`) REFERENCES `survey_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`referencePointId`) REFERENCES `reference_points`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "snapshotId",
+            "columnName": "snapshotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surveySessionId",
+            "columnName": "surveySessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referencePointId",
+            "columnName": "referencePointId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bssid",
+            "columnName": "bssid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ssid",
+            "columnName": "ssid",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "rssiDbm",
+            "columnName": "rssiDbm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "frequencyMhz",
+            "columnName": "frequencyMhz",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "scanTimestampMicros",
+            "columnName": "scanTimestampMicros",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observedAtEpochMillis",
+            "columnName": "observedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFresh",
+            "columnName": "isFresh",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_wifi_observations_snapshotId",
+            "unique": false,
+            "columnNames": [
+              "snapshotId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wifi_observations_snapshotId` ON `${TABLE_NAME}` (`snapshotId`)"
+          },
+          {
+            "name": "index_wifi_observations_surveySessionId",
+            "unique": false,
+            "columnNames": [
+              "surveySessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wifi_observations_surveySessionId` ON `${TABLE_NAME}` (`surveySessionId`)"
+          },
+          {
+            "name": "index_wifi_observations_referencePointId",
+            "unique": false,
+            "columnNames": [
+              "referencePointId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wifi_observations_referencePointId` ON `${TABLE_NAME}` (`referencePointId`)"
+          },
+          {
+            "name": "index_wifi_observations_bssid",
+            "unique": false,
+            "columnNames": [
+              "bssid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wifi_observations_bssid` ON `${TABLE_NAME}` (`bssid`)"
+          },
+          {
+            "name": "index_wifi_observations_snapshotId_bssid",
+            "unique": true,
+            "columnNames": [
+              "snapshotId",
+              "bssid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_wifi_observations_snapshotId_bssid` ON `${TABLE_NAME}` (`snapshotId`, `bssid`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "wifi_scan_snapshots",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "snapshotId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "survey_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "surveySessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "reference_points",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "referencePointId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "aggregated_wifi_fingerprints",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `referencePointId` TEXT NOT NULL, `surveySessionId` TEXT NOT NULL, `bssid` TEXT NOT NULL, `medianRssiDbm` REAL NOT NULL, `meanRssiDbm` REAL NOT NULL, `standardDeviationDb` REAL NOT NULL, `minimumRssiDbm` INTEGER NOT NULL, `maximumRssiDbm` INTEGER NOT NULL, `observationCount` INTEGER NOT NULL, `eligibleFreshSnapshotCount` INTEGER NOT NULL, `totalFreshSnapshotCount` INTEGER NOT NULL, `detectionRate` REAL NOT NULL, `unstable` INTEGER NOT NULL, `excludedFromMatching` INTEGER NOT NULL, `exclusionReason` TEXT, `calculatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`referencePointId`) REFERENCES `reference_points`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`surveySessionId`) REFERENCES `survey_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referencePointId",
+            "columnName": "referencePointId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surveySessionId",
+            "columnName": "surveySessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bssid",
+            "columnName": "bssid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "medianRssiDbm",
+            "columnName": "medianRssiDbm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meanRssiDbm",
+            "columnName": "meanRssiDbm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "standardDeviationDb",
+            "columnName": "standardDeviationDb",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minimumRssiDbm",
+            "columnName": "minimumRssiDbm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maximumRssiDbm",
+            "columnName": "maximumRssiDbm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observationCount",
+            "columnName": "observationCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eligibleFreshSnapshotCount",
+            "columnName": "eligibleFreshSnapshotCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalFreshSnapshotCount",
+            "columnName": "totalFreshSnapshotCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detectionRate",
+            "columnName": "detectionRate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unstable",
+            "columnName": "unstable",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "excludedFromMatching",
+            "columnName": "excludedFromMatching",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "exclusionReason",
+            "columnName": "exclusionReason",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "calculatedAtEpochMillis",
+            "columnName": "calculatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_aggregated_wifi_fingerprints_referencePointId",
+            "unique": false,
+            "columnNames": [
+              "referencePointId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aggregated_wifi_fingerprints_referencePointId` ON `${TABLE_NAME}` (`referencePointId`)"
+          },
+          {
+            "name": "index_aggregated_wifi_fingerprints_surveySessionId",
+            "unique": false,
+            "columnNames": [
+              "surveySessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aggregated_wifi_fingerprints_surveySessionId` ON `${TABLE_NAME}` (`surveySessionId`)"
+          },
+          {
+            "name": "index_aggregated_wifi_fingerprints_bssid",
+            "unique": false,
+            "columnNames": [
+              "bssid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aggregated_wifi_fingerprints_bssid` ON `${TABLE_NAME}` (`bssid`)"
+          },
+          {
+            "name": "index_aggregated_wifi_fingerprints_surveySessionId_referencePointId_bssid",
+            "unique": true,
+            "columnNames": [
+              "surveySessionId",
+              "referencePointId",
+              "bssid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_aggregated_wifi_fingerprints_surveySessionId_referencePointId_bssid` ON `${TABLE_NAME}` (`surveySessionId`, `referencePointId`, `bssid`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "reference_points",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "referencePointId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "survey_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "surveySessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sensor_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `dataMode` TEXT NOT NULL, `selectedStepSource` TEXT NOT NULL, `selectedHeadingSource` TEXT NOT NULL, `initialStrideMetres` REAL NOT NULL, `heightMetres` REAL, `strideScale` REAL NOT NULL, `headingOffsetDegrees` REAL NOT NULL, `startedAtEpochMillis` INTEGER NOT NULL, `endedAtEpochMillis` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dataMode",
+            "columnName": "dataMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "selectedStepSource",
+            "columnName": "selectedStepSource",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "selectedHeadingSource",
+            "columnName": "selectedHeadingSource",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialStrideMetres",
+            "columnName": "initialStrideMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heightMetres",
+            "columnName": "heightMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "strideScale",
+            "columnName": "strideScale",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "headingOffsetDegrees",
+            "columnName": "headingOffsetDegrees",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtEpochMillis",
+            "columnName": "startedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtEpochMillis",
+            "columnName": "endedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sensor_sessions_startedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "startedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sensor_sessions_startedAtEpochMillis` ON `${TABLE_NAME}` (`startedAtEpochMillis`)"
+          },
+          {
+            "name": "index_sensor_sessions_dataMode",
+            "unique": false,
+            "columnNames": [
+              "dataMode"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sensor_sessions_dataMode` ON `${TABLE_NAME}` (`dataMode`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "pdr_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sensorSessionId` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `eventType` TEXT NOT NULL, `source` TEXT NOT NULL, `timestampEpochMillis` INTEGER NOT NULL, `sensorTimestampNanos` INTEGER NOT NULL, `stepDelta` INTEGER NOT NULL, `strideMetres` REAL, `headingRadians` REAL, `deltaHeadingRadians` REAL, `pressureHpa` REAL, `rawValuesJson` TEXT, `accepted` INTEGER NOT NULL, `rejectionReason` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`sensorSessionId`) REFERENCES `sensor_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sensorSessionId",
+            "columnName": "sensorSessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sequence",
+            "columnName": "sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sensorTimestampNanos",
+            "columnName": "sensorTimestampNanos",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stepDelta",
+            "columnName": "stepDelta",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "strideMetres",
+            "columnName": "strideMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "headingRadians",
+            "columnName": "headingRadians",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "deltaHeadingRadians",
+            "columnName": "deltaHeadingRadians",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pressureHpa",
+            "columnName": "pressureHpa",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "rawValuesJson",
+            "columnName": "rawValuesJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "accepted",
+            "columnName": "accepted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rejectionReason",
+            "columnName": "rejectionReason",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_pdr_events_sensorSessionId",
+            "unique": false,
+            "columnNames": [
+              "sensorSessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pdr_events_sensorSessionId` ON `${TABLE_NAME}` (`sensorSessionId`)"
+          },
+          {
+            "name": "index_pdr_events_sensorSessionId_sequence",
+            "unique": true,
+            "columnNames": [
+              "sensorSessionId",
+              "sequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pdr_events_sensorSessionId_sequence` ON `${TABLE_NAME}` (`sensorSessionId`, `sequence`)"
+          },
+          {
+            "name": "index_pdr_events_timestampEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pdr_events_timestampEpochMillis` ON `${TABLE_NAME}` (`timestampEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "sensor_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sensorSessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "positioning_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `venueId` TEXT NOT NULL, `initialFloorId` TEXT, `sensorSessionId` TEXT, `initializationType` TEXT, `dataMode` TEXT NOT NULL, `wifiOnlyEnabled` INTEGER NOT NULL, `particleCount` INTEGER NOT NULL, `startedAtEpochMillis` INTEGER NOT NULL, `endedAtEpochMillis` INTEGER, `failureReason` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`venueId`) REFERENCES `venues`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`initialFloorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL , FOREIGN KEY(`sensorSessionId`) REFERENCES `sensor_sessions`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "venueId",
+            "columnName": "venueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialFloorId",
+            "columnName": "initialFloorId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "sensorSessionId",
+            "columnName": "sensorSessionId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "initializationType",
+            "columnName": "initializationType",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dataMode",
+            "columnName": "dataMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wifiOnlyEnabled",
+            "columnName": "wifiOnlyEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "particleCount",
+            "columnName": "particleCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtEpochMillis",
+            "columnName": "startedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtEpochMillis",
+            "columnName": "endedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "failureReason",
+            "columnName": "failureReason",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_positioning_sessions_venueId",
+            "unique": false,
+            "columnNames": [
+              "venueId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_positioning_sessions_venueId` ON `${TABLE_NAME}` (`venueId`)"
+          },
+          {
+            "name": "index_positioning_sessions_initialFloorId",
+            "unique": false,
+            "columnNames": [
+              "initialFloorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_positioning_sessions_initialFloorId` ON `${TABLE_NAME}` (`initialFloorId`)"
+          },
+          {
+            "name": "index_positioning_sessions_sensorSessionId",
+            "unique": false,
+            "columnNames": [
+              "sensorSessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_positioning_sessions_sensorSessionId` ON `${TABLE_NAME}` (`sensorSessionId`)"
+          },
+          {
+            "name": "index_positioning_sessions_startedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "startedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_positioning_sessions_startedAtEpochMillis` ON `${TABLE_NAME}` (`startedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "venues",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "venueId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "initialFloorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "sensor_sessions",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sensorSessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "position_estimates",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `positioningSessionId` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `method` TEXT NOT NULL, `floorId` TEXT, `xMetres` REAL NOT NULL, `yMetres` REAL NOT NULL, `headingRadians` REAL, `confidenceRadiusMetres` REAL, `confidenceScore` REAL NOT NULL, `floorConfidence` REAL NOT NULL, `particleSpreadMetres` REAL, `nearestFingerprintIdsJson` TEXT, `wifiResultAgeMillis` INTEGER, `stepCount` INTEGER NOT NULL, `timestampEpochMillis` INTEGER NOT NULL, `latencyMillis` INTEGER, `status` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`positioningSessionId`) REFERENCES `positioning_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positioningSessionId",
+            "columnName": "positioningSessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sequence",
+            "columnName": "sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "method",
+            "columnName": "method",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "xMetres",
+            "columnName": "xMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yMetres",
+            "columnName": "yMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "headingRadians",
+            "columnName": "headingRadians",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "confidenceRadiusMetres",
+            "columnName": "confidenceRadiusMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "confidenceScore",
+            "columnName": "confidenceScore",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorConfidence",
+            "columnName": "floorConfidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "particleSpreadMetres",
+            "columnName": "particleSpreadMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "nearestFingerprintIdsJson",
+            "columnName": "nearestFingerprintIdsJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "wifiResultAgeMillis",
+            "columnName": "wifiResultAgeMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "stepCount",
+            "columnName": "stepCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latencyMillis",
+            "columnName": "latencyMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_position_estimates_positioningSessionId",
+            "unique": false,
+            "columnNames": [
+              "positioningSessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_position_estimates_positioningSessionId` ON `${TABLE_NAME}` (`positioningSessionId`)"
+          },
+          {
+            "name": "index_position_estimates_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_position_estimates_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_position_estimates_positioningSessionId_sequence_method",
+            "unique": true,
+            "columnNames": [
+              "positioningSessionId",
+              "sequence",
+              "method"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_position_estimates_positioningSessionId_sequence_method` ON `${TABLE_NAME}` (`positioningSessionId`, `sequence`, `method`)"
+          },
+          {
+            "name": "index_position_estimates_timestampEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_position_estimates_timestampEpochMillis` ON `${TABLE_NAME}` (`timestampEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "positioning_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "positioningSessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "correction_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `positioningSessionId` TEXT NOT NULL, `floorId` TEXT, `type` TEXT NOT NULL, `sourceId` TEXT, `priorXMetres` REAL, `priorYMetres` REAL, `correctedXMetres` REAL, `correctedYMetres` REAL, `accepted` INTEGER NOT NULL, `globalRelocalization` INTEGER NOT NULL, `reason` TEXT, `timestampEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`positioningSessionId`) REFERENCES `positioning_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positioningSessionId",
+            "columnName": "positioningSessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceId",
+            "columnName": "sourceId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priorXMetres",
+            "columnName": "priorXMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priorYMetres",
+            "columnName": "priorYMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "correctedXMetres",
+            "columnName": "correctedXMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "correctedYMetres",
+            "columnName": "correctedYMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "accepted",
+            "columnName": "accepted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "globalRelocalization",
+            "columnName": "globalRelocalization",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_correction_events_positioningSessionId",
+            "unique": false,
+            "columnNames": [
+              "positioningSessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_correction_events_positioningSessionId` ON `${TABLE_NAME}` (`positioningSessionId`)"
+          },
+          {
+            "name": "index_correction_events_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_correction_events_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_correction_events_timestampEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_correction_events_timestampEpochMillis` ON `${TABLE_NAME}` (`timestampEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "positioning_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "positioningSessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "test_runs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `venueId` TEXT NOT NULL, `positioningSessionId` TEXT, `anonymousDeviceId` TEXT NOT NULL, `deviceManufacturer` TEXT NOT NULL, `deviceModel` TEXT NOT NULL, `androidVersion` TEXT NOT NULL, `appVersion` TEXT NOT NULL, `notes` TEXT, `startedAtEpochMillis` INTEGER NOT NULL, `endedAtEpochMillis` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`venueId`) REFERENCES `venues`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`positioningSessionId`) REFERENCES `positioning_sessions`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "venueId",
+            "columnName": "venueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positioningSessionId",
+            "columnName": "positioningSessionId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "anonymousDeviceId",
+            "columnName": "anonymousDeviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceManufacturer",
+            "columnName": "deviceManufacturer",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceModel",
+            "columnName": "deviceModel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "androidVersion",
+            "columnName": "androidVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appVersion",
+            "columnName": "appVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "startedAtEpochMillis",
+            "columnName": "startedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtEpochMillis",
+            "columnName": "endedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_test_runs_venueId",
+            "unique": false,
+            "columnNames": [
+              "venueId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_runs_venueId` ON `${TABLE_NAME}` (`venueId`)"
+          },
+          {
+            "name": "index_test_runs_positioningSessionId",
+            "unique": false,
+            "columnNames": [
+              "positioningSessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_runs_positioningSessionId` ON `${TABLE_NAME}` (`positioningSessionId`)"
+          },
+          {
+            "name": "index_test_runs_startedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "startedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_runs_startedAtEpochMillis` ON `${TABLE_NAME}` (`startedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "venues",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "venueId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "positioning_sessions",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "positioningSessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "test_checkpoints",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `venueId` TEXT NOT NULL, `floorId` TEXT NOT NULL, `checkpointCode` TEXT NOT NULL, `xMetres` REAL NOT NULL, `yMetres` REAL NOT NULL, `notes` TEXT, `enabled` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`venueId`) REFERENCES `venues`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "venueId",
+            "columnName": "venueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkpointCode",
+            "columnName": "checkpointCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xMetres",
+            "columnName": "xMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yMetres",
+            "columnName": "yMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_test_checkpoints_venueId",
+            "unique": false,
+            "columnNames": [
+              "venueId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_checkpoints_venueId` ON `${TABLE_NAME}` (`venueId`)"
+          },
+          {
+            "name": "index_test_checkpoints_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_checkpoints_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_test_checkpoints_venueId_checkpointCode",
+            "unique": true,
+            "columnNames": [
+              "venueId",
+              "checkpointCode"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_test_checkpoints_venueId_checkpointCode` ON `${TABLE_NAME}` (`venueId`, `checkpointCode`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "venues",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "venueId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "test_samples",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `testRunId` TEXT NOT NULL, `checkpointId` TEXT NOT NULL, `trueFloorId` TEXT NOT NULL, `trueXMetres` REAL NOT NULL, `trueYMetres` REAL NOT NULL, `wifiOnlyEstimateJson` TEXT, `rawPdrEstimateJson` TEXT, `mapConstrainedEstimateJson` TEXT, `fusedEstimateJson` TEXT, `wifiOnlyHorizontalErrorMetres` REAL, `rawPdrHorizontalErrorMetres` REAL, `mapConstrainedHorizontalErrorMetres` REAL, `fusedHorizontalErrorMetres` REAL, `wifiOnlyFloorCorrect` INTEGER, `rawPdrFloorCorrect` INTEGER, `mapConstrainedFloorCorrect` INTEGER, `fusedFloorCorrect` INTEGER, `confidenceRadiusMetres` REAL, `actualErrorInsideConfidence` INTEGER, `timeSinceLastWifiCorrectionMillis` INTEGER, `positioningLatencyMillis` INTEGER, `stepCount` INTEGER NOT NULL, `wifiAccessPointCount` INTEGER NOT NULL, `nearestFingerprintDetailsJson` TEXT, `mapConstraintEventsJson` TEXT, `timestampEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`testRunId`) REFERENCES `test_runs`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`checkpointId`) REFERENCES `test_checkpoints`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`trueFloorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "testRunId",
+            "columnName": "testRunId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkpointId",
+            "columnName": "checkpointId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trueFloorId",
+            "columnName": "trueFloorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trueXMetres",
+            "columnName": "trueXMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trueYMetres",
+            "columnName": "trueYMetres",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wifiOnlyEstimateJson",
+            "columnName": "wifiOnlyEstimateJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "rawPdrEstimateJson",
+            "columnName": "rawPdrEstimateJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "mapConstrainedEstimateJson",
+            "columnName": "mapConstrainedEstimateJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fusedEstimateJson",
+            "columnName": "fusedEstimateJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "wifiOnlyHorizontalErrorMetres",
+            "columnName": "wifiOnlyHorizontalErrorMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "rawPdrHorizontalErrorMetres",
+            "columnName": "rawPdrHorizontalErrorMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "mapConstrainedHorizontalErrorMetres",
+            "columnName": "mapConstrainedHorizontalErrorMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fusedHorizontalErrorMetres",
+            "columnName": "fusedHorizontalErrorMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "wifiOnlyFloorCorrect",
+            "columnName": "wifiOnlyFloorCorrect",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "rawPdrFloorCorrect",
+            "columnName": "rawPdrFloorCorrect",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "mapConstrainedFloorCorrect",
+            "columnName": "mapConstrainedFloorCorrect",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fusedFloorCorrect",
+            "columnName": "fusedFloorCorrect",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "confidenceRadiusMetres",
+            "columnName": "confidenceRadiusMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "actualErrorInsideConfidence",
+            "columnName": "actualErrorInsideConfidence",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timeSinceLastWifiCorrectionMillis",
+            "columnName": "timeSinceLastWifiCorrectionMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "positioningLatencyMillis",
+            "columnName": "positioningLatencyMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "stepCount",
+            "columnName": "stepCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wifiAccessPointCount",
+            "columnName": "wifiAccessPointCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nearestFingerprintDetailsJson",
+            "columnName": "nearestFingerprintDetailsJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "mapConstraintEventsJson",
+            "columnName": "mapConstraintEventsJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_test_samples_testRunId",
+            "unique": false,
+            "columnNames": [
+              "testRunId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_samples_testRunId` ON `${TABLE_NAME}` (`testRunId`)"
+          },
+          {
+            "name": "index_test_samples_checkpointId",
+            "unique": false,
+            "columnNames": [
+              "checkpointId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_samples_checkpointId` ON `${TABLE_NAME}` (`checkpointId`)"
+          },
+          {
+            "name": "index_test_samples_trueFloorId",
+            "unique": false,
+            "columnNames": [
+              "trueFloorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_samples_trueFloorId` ON `${TABLE_NAME}` (`trueFloorId`)"
+          },
+          {
+            "name": "index_test_samples_timestampEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_samples_timestampEpochMillis` ON `${TABLE_NAME}` (`timestampEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "test_runs",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "testRunId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "test_checkpoints",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "checkpointId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "trueFloorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "beacon_definitions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `venueId` TEXT NOT NULL, `floorId` TEXT, `stableIdentifier` TEXT NOT NULL, `protocol` TEXT NOT NULL, `displayName` TEXT NOT NULL, `xMetres` REAL, `yMetres` REAL, `enabled` INTEGER NOT NULL, `metadataJson` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`venueId`) REFERENCES `venues`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "venueId",
+            "columnName": "venueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "floorId",
+            "columnName": "floorId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "stableIdentifier",
+            "columnName": "stableIdentifier",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "protocol",
+            "columnName": "protocol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xMetres",
+            "columnName": "xMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "yMetres",
+            "columnName": "yMetres",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metadataJson",
+            "columnName": "metadataJson",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_beacon_definitions_venueId",
+            "unique": false,
+            "columnNames": [
+              "venueId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_beacon_definitions_venueId` ON `${TABLE_NAME}` (`venueId`)"
+          },
+          {
+            "name": "index_beacon_definitions_floorId",
+            "unique": false,
+            "columnNames": [
+              "floorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_beacon_definitions_floorId` ON `${TABLE_NAME}` (`floorId`)"
+          },
+          {
+            "name": "index_beacon_definitions_stableIdentifier",
+            "unique": true,
+            "columnNames": [
+              "stableIdentifier"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_beacon_definitions_stableIdentifier` ON `${TABLE_NAME}` (`stableIdentifier`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "venues",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "venueId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "floors",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "floorId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "ble_observations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `beaconDefinitionId` TEXT, `surveySessionId` TEXT NOT NULL, `stableIdentifier` TEXT NOT NULL, `protocol` TEXT NOT NULL, `rssiDbm` INTEGER NOT NULL, `txPowerDbm` INTEGER, `observedAtEpochMillis` INTEGER NOT NULL, `rawPayloadHex` TEXT NOT NULL, `simulated` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`beaconDefinitionId`) REFERENCES `beacon_definitions`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL , FOREIGN KEY(`surveySessionId`) REFERENCES `survey_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "beaconDefinitionId",
+            "columnName": "beaconDefinitionId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "surveySessionId",
+            "columnName": "surveySessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stableIdentifier",
+            "columnName": "stableIdentifier",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "protocol",
+            "columnName": "protocol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rssiDbm",
+            "columnName": "rssiDbm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "txPowerDbm",
+            "columnName": "txPowerDbm",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "observedAtEpochMillis",
+            "columnName": "observedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawPayloadHex",
+            "columnName": "rawPayloadHex",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "simulated",
+            "columnName": "simulated",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_ble_observations_beaconDefinitionId",
+            "unique": false,
+            "columnNames": [
+              "beaconDefinitionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_ble_observations_beaconDefinitionId` ON `${TABLE_NAME}` (`beaconDefinitionId`)"
+          },
+          {
+            "name": "index_ble_observations_surveySessionId",
+            "unique": false,
+            "columnNames": [
+              "surveySessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_ble_observations_surveySessionId` ON `${TABLE_NAME}` (`surveySessionId`)"
+          },
+          {
+            "name": "index_ble_observations_stableIdentifier",
+            "unique": false,
+            "columnNames": [
+              "stableIdentifier"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_ble_observations_stableIdentifier` ON `${TABLE_NAME}` (`stableIdentifier`)"
+          },
+          {
+            "name": "index_ble_observations_observedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "observedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_ble_observations_observedAtEpochMillis` ON `${TABLE_NAME}` (`observedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "beacon_definitions",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "beaconDefinitionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "survey_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "surveySessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "aggregated_ble_fingerprints",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `referencePointId` TEXT NOT NULL, `surveySessionId` TEXT NOT NULL, `stableIdentifier` TEXT NOT NULL, `medianRssiDbm` REAL NOT NULL, `meanRssiDbm` REAL NOT NULL, `standardDeviationDb` REAL NOT NULL, `minimumRssiDbm` INTEGER NOT NULL, `maximumRssiDbm` INTEGER NOT NULL, `observationCount` INTEGER NOT NULL, `detectionRate` REAL NOT NULL, `excludedFromMatching` INTEGER NOT NULL, `calculatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`referencePointId`) REFERENCES `reference_points`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`surveySessionId`) REFERENCES `survey_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referencePointId",
+            "columnName": "referencePointId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surveySessionId",
+            "columnName": "surveySessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stableIdentifier",
+            "columnName": "stableIdentifier",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "medianRssiDbm",
+            "columnName": "medianRssiDbm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meanRssiDbm",
+            "columnName": "meanRssiDbm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "standardDeviationDb",
+            "columnName": "standardDeviationDb",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minimumRssiDbm",
+            "columnName": "minimumRssiDbm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maximumRssiDbm",
+            "columnName": "maximumRssiDbm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observationCount",
+            "columnName": "observationCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detectionRate",
+            "columnName": "detectionRate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "excludedFromMatching",
+            "columnName": "excludedFromMatching",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calculatedAtEpochMillis",
+            "columnName": "calculatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_aggregated_ble_fingerprints_referencePointId",
+            "unique": false,
+            "columnNames": [
+              "referencePointId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aggregated_ble_fingerprints_referencePointId` ON `${TABLE_NAME}` (`referencePointId`)"
+          },
+          {
+            "name": "index_aggregated_ble_fingerprints_surveySessionId",
+            "unique": false,
+            "columnNames": [
+              "surveySessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aggregated_ble_fingerprints_surveySessionId` ON `${TABLE_NAME}` (`surveySessionId`)"
+          },
+          {
+            "name": "index_aggregated_ble_fingerprints_stableIdentifier",
+            "unique": false,
+            "columnNames": [
+              "stableIdentifier"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aggregated_ble_fingerprints_stableIdentifier` ON `${TABLE_NAME}` (`stableIdentifier`)"
+          },
+          {
+            "name": "index_aggregated_ble_fingerprints_surveySessionId_referencePointId_stableIdentifier",
+            "unique": true,
+            "columnNames": [
+              "surveySessionId",
+              "referencePointId",
+              "stableIdentifier"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_aggregated_ble_fingerprints_surveySessionId_referencePointId_stableIdentifier` ON `${TABLE_NAME}` (`surveySessionId`, `referencePointId`, `stableIdentifier`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "reference_points",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "referencePointId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "survey_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "surveySessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9061ac26fe5fd0f60f4745727db44b06')"
+    ]
+  }
+}

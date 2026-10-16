@@ -25,6 +25,26 @@ import com.turn.fieldtest.core.*
 
 @Stable
 class TurnAppState {
+    var editedRegionId by mutableStateOf<String?>(null)
+    var editedRegionOriginal: WalkableRegionEntity?=null
+    var editedRegionName by mutableStateOf("Walkable area")
+    val otherWalkableRegions = mutableStateListOf<WalkableRegionEntity>()
+    fun allWalkablePolygons(): List<List<Offset>> = listOf(draftWalkablePolygon.toList()).filter { it.isNotEmpty() } +
+        otherWalkableRegions.map { com.turn.fieldtest.data.repository.decodePolygon(it.polygonJson).vertices.map { p->Offset(p.x.toFloat(),p.y.toFloat()) } }
+    fun polygonJson(points: List<Offset>): String = kotlinx.serialization.json.JsonArray(points.map {
+        kotlinx.serialization.json.JsonObject(mapOf("x" to kotlinx.serialization.json.JsonPrimitive(it.x.toDouble()),"y" to kotlinx.serialization.json.JsonPrimitive(it.y.toDouble()))) }).toString()
+    fun selectWalkableRegion(id: String) {
+        if(!canEditMap || id==editedRegionId) return
+        val next=otherWalkableRegions.firstOrNull { it.id==id } ?: return
+        val original=editedRegionOriginal
+        val unchanged=original!=null && com.turn.fieldtest.data.repository.decodePolygon(original.polygonJson).vertices.map {Offset(it.x.toFloat(),it.y.toFloat())}==draftWalkablePolygon.toList()
+        val previous=if(unchanged) original!! else WalkableRegionEntity(editedRegionId ?: "REGION-${java.util.UUID.randomUUID()}",next.floorId,editedRegionName,polygonJson(draftWalkablePolygon.toList()),updatedAtEpochMillis=0)
+        otherWalkableRegions.remove(next)
+        if(draftWalkablePolygon.size>=3) otherWalkableRegions.add(previous)
+        editedRegionId=next.id; editedRegionName=next.name; editedRegionOriginal=next
+        draftWalkablePolygon.clear(); draftWalkablePolygon.addAll(com.turn.fieldtest.data.repository.decodePolygon(next.polygonJson).vertices.map { Offset(it.x.toFloat(),it.y.toFloat()) })
+        pendingWallStart=null; editorTool=EditorTool.SELECT
+    }
     var headingChoiceConfirmed by mutableStateOf(false)
     var pickingHeading by mutableStateOf(false)
     var realHeadingAligned by mutableStateOf(false)
@@ -70,7 +90,7 @@ class TurnAppState {
         val context = requireNotNull(activeProject)
         val polygon = MetricPolygon(draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) })
         validateSimpleWalkablePolygon(polygon)
-        val floor = MapFloor(context.floorId, listOf(polygon), draftWalls.mapIndexed { index, pair ->
+        val floor = MapFloor(context.floorId, listOf(polygon)+otherWalkableRegions.map { com.turn.fieldtest.data.repository.decodePolygon(it.polygonJson) }, draftWalls.mapIndexed { index, pair ->
             WallSegment("draft-$index", MetricPoint(pair.first.x.toDouble(), pair.first.y.toDouble()), MetricPoint(pair.second.x.toDouble(), pair.second.y.toDouble()))
         })
         return NavigationGraph(floor, navigationNodes.map { it.core() }, navigationEdges.map { it.core() })
@@ -150,7 +170,7 @@ class TurnAppState {
     private fun draftSnapshot(): List<Any?> = listOf(venueName, floorName, floorLevel,
         floorWidthMetres, floorHeightMetres, floorPlanContentUri, floorPlanMimeType,
         floorPlanPixelWidth, floorPlanPixelHeight, floorPlanMetresPerPixel,
-        calibrationPoints.toList(), draftWalkablePolygon.toList(), draftWalls.toList(),
+        calibrationPoints.toList(), (listOf((editedRegionId ?: "PRIMARY") to draftWalkablePolygon.toList())+otherWalkableRegions.map { it.id to com.turn.fieldtest.data.repository.decodePolygon(it.polygonJson).vertices.map { p->Offset(p.x.toFloat(),p.y.toFloat()) } }).sortedBy { it.first }, draftWalls.toList(),
         referencePoints.toList(), qrAnchors.toList(), navigationNodes.toList(), navigationEdges.toList(), destinations.toList())
     val hasUnsavedMapChanges get() = mode == DataMode.REAL_DEVICE && realMapReady &&
         savedDraft != null && savedDraft != draftSnapshot()
@@ -351,7 +371,9 @@ class TurnAppState {
 
     fun clearMapDraft(force: Boolean = false) {
         if (!force && !requireMapEditing()) return
+        editedRegionOriginal=null
         navigationNodes.clear(); navigationEdges.clear(); destinations.clear(); selectedNodeId = null
+        otherWalkableRegions.clear(); editedRegionId=null; editedRegionName="Walkable area"
         draftWalkablePolygon.clear()
         draftWalls.clear()
         referencePoints.clear()
@@ -364,6 +386,8 @@ class TurnAppState {
     }
 
     fun loadDemoMap() {
+        editedRegionOriginal=null
+        otherWalkableRegions.clear(); editedRegionId=null; editedRegionName="Walkable area"
         venueName = "Computing Block Pilot"
         floorName = "Ground floor"
         floorLevel = 0
@@ -490,6 +514,8 @@ class TurnAppState {
         val points = referencePoints.map { it.copy(metres = scaled(it.metres), floor = floorName) }
         val anchors = qrAnchors.map { it.copy(metres = scaled(it.metres), floor = floorName) }
         val calibration = calibrationPoints.map(::scaled)
+        val scaledRegions=otherWalkableRegions.map { r->r.copy(polygonJson=polygonJson(com.turn.fieldtest.data.repository.decodePolygon(r.polygonJson).vertices.map { scaled(Offset(it.x.toFloat(),it.y.toFloat())) })) }
+        otherWalkableRegions.clear(); otherWalkableRegions.addAll(scaledRegions)
         draftWalkablePolygon.clear(); draftWalkablePolygon.addAll(polygon)
         draftWalls.clear(); draftWalls.addAll(walls)
         referencePoints.clear(); referencePoints.addAll(points)

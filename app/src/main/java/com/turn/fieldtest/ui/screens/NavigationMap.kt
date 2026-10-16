@@ -68,6 +68,11 @@ internal fun NavigationMap(
                         .size(with(density) { imageWidth.toDp() }, with(density) { imageHeight.toDp() }), alpha = 0.82f)
                 }
                 Canvas(Modifier.fillMaxSize()) {
+                    state.otherWalkableRegions.forEach { region ->
+                        val vertices=com.turn.fieldtest.data.repository.decodePolygon(region.polygonJson).vertices.map { project(Offset(it.x.toFloat(),it.y.toFloat())) }
+                        val outline=Path().apply { vertices.forEachIndexed { i,p->if(i==0) moveTo(p.x,p.y) else lineTo(p.x,p.y) }; close() }
+                        drawPath(outline,TurnCyan.copy(alpha=0.08f)); drawPath(outline,TurnCyan.copy(alpha=0.4f),style=Stroke(1.5f/zoom))
+                    }
                     fun line(points: List<Offset>, color: Color, stroke: Float) {
                         if (points.size < 2) return
                         val path = Path().apply { val first = project(points.first()); moveTo(first.x, first.y)

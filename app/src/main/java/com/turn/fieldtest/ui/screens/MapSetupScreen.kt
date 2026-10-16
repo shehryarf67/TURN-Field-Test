@@ -54,6 +54,8 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                 "Scale" -> {
                     Text("Import a plan, then set its measured size or calibrate two points.", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = actions.onFloorPlanImportRequested, enabled = state.canEditMap) { Text(if (state.floorPlanContentUri == null) "Import floor plan" else "Replace floor plan") }
+                    OutlinedButton(onClick=actions.onWalkMapperRequested,enabled=state.canEditMap && state.mode==com.turn.fieldtest.ui.model.DataMode.REAL_DEVICE && state.activeProject!=null && !state.hasUnsavedMapChanges) { Text("Scan building with phone") }
+                    Text("No plan? Create one with guided AR or measured drawing. Save current edits before opening the mapper.",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(width, { width = it }, label = { Text("Width (m)") }, enabled = state.canChangeScale, modifier = Modifier.weight(1f), singleLine = true)
                         OutlinedTextField(height, { height = it }, label = { Text("Height (m)") }, enabled = state.canChangeScale, modifier = Modifier.weight(1f), singleLine = true)
@@ -65,6 +67,12 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                     if (!state.canChangeScale) Text("Scale is locked while busy, after measurements, or after path nodes are added.", style = MaterialTheme.typography.bodySmall)
                 }
                 "Layout" -> {
+                    if(state.otherWalkableRegions.isNotEmpty()) {
+                        Text("Room: ${state.editedRegionName}",style=MaterialTheme.typography.labelLarge)
+                        Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            state.otherWalkableRegions.toList().forEach { region->OutlinedButton(onClick={state.selectWalkableRegion(region.id)},enabled=state.canEditMap) {Text("Edit ${region.name}")} }
+                        }
+                    }
                     Text("Draw corridor boundaries and walls. Leave openings at doors.", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(EditorTool.WALKABLE, EditorTool.WALL).forEach { tool -> FilterChip(state.editorTool == tool,

@@ -52,6 +52,7 @@ ksp {
 }
 
 dependencies {
+    implementation("com.google.ar:core:1.57.0")
     val composeBom = platform("androidx.compose:compose-bom:2025.01.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)

@@ -440,6 +440,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val asset = savedMap.asset
         val points = savedMap.points
         val regions = savedMap.regions
+        appState.editedRegionId=regions.firstOrNull { it.enabled }?.id
+        appState.editedRegionOriginal=regions.firstOrNull {it.enabled}
+        appState.editedRegionName=regions.firstOrNull { it.enabled }?.name ?: "Walkable area"
+        appState.otherWalkableRegions.clear(); appState.otherWalkableRegions.addAll(regions.filter { it.enabled }.drop(1))
         val walls = savedMap.walls
         val anchors = savedMap.anchors
         val restoredPolygon = regions.firstOrNull { it.enabled }?.let { region ->
@@ -511,7 +515,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.clearRoute(); appState.liveEstimateEpochMillis = null
         savedNavigationGraph = runCatching { NavigationGraph(savedMap.metricMap().floors.getValue(context.floorId), savedMap.nodes.map { it.core() }, savedMap.edges.map { it.core() }) }.getOrNull()
         appState.mapHasMeasurements = savedMap.hasMeasurements
-        appState.mapEditorSupported = regions.count { it.enabled } <= 1 && floor.originXMetres == 0.0 && floor.originYMetres == 0.0
+        appState.mapEditorSupported = floor.originXMetres == 0.0 && floor.originYMetres == 0.0
         appState.markMapSaved()
         appState.surveyAcceptedSnapshots = 0
         appState.surveyCachedIgnored = 0
@@ -1255,11 +1259,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val polygon = appState.draftWalkablePolygon.takeIf { it.isNotEmpty() }?.let { vertices -> MetricPolygon(vertices.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) }) }
         require(appState.mapEditorSupported) { "This saved map uses geometry the editor cannot safely modify" }
         polygon?.let { com.turn.fieldtest.core.validateSimpleWalkablePolygon(it) }
+        val allPolygons=listOfNotNull(polygon)+appState.otherWalkableRegions.map { decodePolygon(it.polygonJson).also { p->com.turn.fieldtest.core.validateSimpleWalkablePolygon(p) } }
         require(appState.referencePoints.map { it.id }.distinct().size == appState.referencePoints.size) {
             "Duplicate reference-point IDs"
         }
         appState.referencePoints.forEach { point ->
-            require(polygon?.contains(MetricPoint(point.metres.x.toDouble(), point.metres.y.toDouble())) == true) {
+            require(allPolygons.any { it.contains(MetricPoint(point.metres.x.toDouble(), point.metres.y.toDouble())) }) {
                 "${point.id} is outside walkable space"
             }
         }
@@ -1357,17 +1362,20 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 yMetres = if (anchor.yMetres.toFloat() == point.metres.y) anchor.yMetres else point.metres.y.toDouble()))
         }
         val regions = repositories.floorPlans.observeWalkableRegions(context.floorId).first().filter { it.enabled }
-        require(regions.size <= 1) { "Multiple saved walkable regions must be preserved" }
-        if (appState.draftWalkablePolygon.isEmpty()) regions.forEach { repositories.floorPlans.delete(it) }
+        val editedId=appState.editedRegionId ?: "REGION-${context.floorId}"
+        val retainedRegionIds=appState.otherWalkableRegions.map {it.id}.toSet()+if(appState.draftWalkablePolygon.isNotEmpty()) setOf(editedId) else emptySet()
+        regions.filter {it.id !in retainedRegionIds}.forEach {repositories.floorPlans.delete(it)}
+        if (appState.draftWalkablePolygon.isEmpty()) regions.filter { it.id==editedId }.forEach { repositories.floorPlans.delete(it) }
         else repositories.floorPlans.save(WalkableRegionEntity(
-            id = regions.firstOrNull()?.id ?: "REGION-${context.floorId}", floorId = context.floorId,
-            name = regions.firstOrNull()?.name ?: "Walkable area",
-            polygonJson = regions.firstOrNull()?.takeIf { previous ->
+            id = editedId, floorId = context.floorId,
+            name = appState.editedRegionName,
+            polygonJson = regions.firstOrNull { it.id==editedId }?.takeIf { previous ->
                 decodePolygon(previous.polygonJson).vertices.map { Offset(it.x.toFloat(), it.y.toFloat()) } == appState.draftWalkablePolygon.toList()
             }?.polygonJson ?: JsonArray(appState.draftWalkablePolygon.map {
                 JsonObject(mapOf("x" to JsonPrimitive(it.x.toDouble()), "y" to JsonPrimitive(it.y.toDouble())))
             }).toString(), updatedAtEpochMillis = now,
         ))
+        appState.otherWalkableRegions.forEach { require(it.floorId==context.floorId); repositories.floorPlans.save(it) }
         val savedWalls = repositories.floorPlans.observeWalls(context.floorId).first().filter { it.enabled }
         val retained = mutableSetOf<String>()
         appState.draftWalls.forEachIndexed { index, (start, end) ->

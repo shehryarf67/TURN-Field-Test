@@ -34,6 +34,7 @@ data class TurnDatabaseExport(
     val beaconDefinitions: List<BeaconDefinitionEntity> = emptyList(),
     val bleObservations: List<BleObservationEntity> = emptyList(),
     val aggregatedBleFingerprints: List<AggregatedBleFingerprintEntity> = emptyList(),
+    val scanDrafts: List<com.turn.fieldtest.mapper.data.ScanDraftEntity> = emptyList(),
 ) {
     /** Validate identity and ownership before any repository writes occur. */
     fun validationErrors(): List<String> = buildList {
@@ -48,6 +49,13 @@ data class TurnDatabaseExport(
 
         val venueIds = venues.mapTo(hashSetOf(), VenueEntity::id)
         val floorIds = floors.mapTo(hashSetOf(), FloorEntity::id)
+        checkUnique("scan draft",scanDrafts.map { it.id })
+        scanDrafts.filter { it.floorId !in floorIds }.forEach { add("Scan draft ${it.id} references unknown floor") }
+        scanDrafts.forEach {row->
+            val doc=runCatching {kotlinx.serialization.json.Json.decodeFromString<com.turn.fieldtest.mapper.core.ScanDocument>(row.documentJson)}.getOrNull()
+            if(doc==null || doc.version!=1 || doc.id!=row.id || doc.floorId!=row.floorId || floors.firstOrNull {it.id==row.floorId}?.venueId!=doc.venueId)
+                add("Scan draft ${row.id} has invalid content or project ownership")
+        }
         checkUnique("navigation node", navigationNodes.map { it.id })
         checkUnique("navigation edge", navigationEdges.map { it.id })
         val graphNodes = navigationNodes.associateBy { it.id }
@@ -105,7 +113,7 @@ data class TurnDatabaseExport(
     }
 
     companion object {
-        const val CURRENT_EXPORT_SCHEMA = 2
+        const val CURRENT_EXPORT_SCHEMA = 3
     }
 }
 

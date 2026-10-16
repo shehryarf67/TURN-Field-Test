@@ -26,6 +26,12 @@ class MainActivity : ComponentActivity() {
     private val runtimeViewModel by viewModels<TurnRuntimeViewModel>()
     private var afterWifiPermission: (() -> Unit)? = null
     private var afterMotionPermission: (() -> Unit)? = null
+    private val mapperLauncher=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result->
+        if(result.resultCode==RESULT_OK) {
+            val venue=result.data?.getStringExtra("venueId"); val floor=result.data?.getStringExtra("floorId")
+            if(venue!=null && floor!=null) runtimeViewModel.openProject(com.turn.fieldtest.data.repository.ProjectContext(venue,floor))
+        }
+    }
     private val floorPlanLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
@@ -140,6 +146,14 @@ class MainActivity : ComponentActivity() {
                     onMapDeleted = runtimeViewModel::deleteSavedMap,
                     onFloorPlanImportRequested = {
                         floorPlanLauncher.launch(arrayOf("image/png", "image/jpeg"))
+                    },
+                    onWalkMapperRequested = {
+                        val s=runtimeViewModel.appState
+                        val context=s.activeProject
+                        if(s.mode==DataMode.REAL_DEVICE && s.canEditMap && !s.hasUnsavedMapChanges && context!=null) {
+                            mapperLauncher.launch(Intent(this,com.turn.fieldtest.mapper.WalkMapperActivity::class.java)
+                                .putExtra("venueId",context.venueId).putExtra("floorId",context.floorId))
+                        } else s.editorStatus="Open a Real Device project, save map edits and stop active sessions before scanning"
                     },
                     onCheckpointCaptured = runtimeViewModel::captureCheckpoint,
                 ),

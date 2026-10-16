@@ -10,9 +10,11 @@ Navigate shows the fused blue dot, uncertainty and route. Raw PDR, Wi-Fi fixes a
 
 Begin with the [university-floor prototype guide](docs/UNIVERSITY_FLOOR_PROTOTYPE.md) for the current Projects → Map setup → Survey → Navigate workflow. The earlier [partner setup guide](PARTNER_SETUP_AND_FIELD_GUIDE.md) remains useful for toolchain and phone setup; its screen/feature descriptions predate this revamp.
 
+No existing floor plan? [Walk Mapper](docs/WALK_MAPPER.md) adds optional native ARCore capture, guided room/door editing, measured drawing, verification and saving a new TURN floor with a real PNG and safe path proposals. Camera accuracy and wall candidates require physical testing; unsupported phones keep measured drawing and all existing TURN workflows.
+
 The [original implementation audit](IMPLEMENTATION_AUDIT.md) is historical. Image import/calibration, map and graph/destination editing, surveys, known-start or Wi-Fi initialization, tracking, A* routing, checkpoints, persistence and JSON/CSV export are connected. Physical-phone accuracy still requires testing on the selected university floor. Multi-floor runtime, QR camera workflows and backup restore are outside this prototype slice.
 
-The revamp retains [Phase 1's persistent project selection](docs/PHASE_1_PROJECT_CONTEXT.md) and adds a shared zoomable map, saved navigation graph/POIs, wall-safe A* routing, durable survey completion, and a clean live blue-dot view with optional research overlays. Room's additive 1 → 2 migration preserves existing records.
+The revamp retains [Phase 1's persistent project selection](docs/PHASE_1_PROJECT_CONTEXT.md) and adds a shared zoomable map, saved navigation graph/POIs, wall-safe A* routing, durable survey completion, and a clean live blue-dot view with optional research overlays. Room's additive 1 → 2 → 3 migrations preserve existing records; schema 3 adds Walk Mapper drafts.
 
 ## What is included
 

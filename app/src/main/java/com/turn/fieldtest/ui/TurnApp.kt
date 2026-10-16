@@ -75,6 +75,7 @@ data class TurnAppActions(
     val onMapSaved: () -> Unit = {},
     val onMapDeleted: () -> Unit = {},
     val onFloorPlanImportRequested: () -> Unit = {},
+    val onWalkMapperRequested: () -> Unit = {},
     val onCheckpointCaptured: (com.turn.fieldtest.ui.screens.CheckpointInput) -> Unit = {},
     val onModeChanged: (DataMode) -> Unit = {},
     val onDiagnosticScanRequested: () -> Unit = {},
