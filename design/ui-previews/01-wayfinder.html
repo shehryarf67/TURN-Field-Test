@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TURN · 01 Wayfinder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--brand:#1a5fd0;--brand-soft:#e7efff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#ffffff;--page:#eef2f7;
+--plan-bg:#f8fafc;--room:#ffffff;--wall:#cbd5e1;--corridor:#eaf1fd;--label:#94a3b8;--route:#1a5fd0;--dot:#1a73e8}
+*{box-sizing:border-box;margin:0}
+body{font-family:Inter,system-ui,sans-serif;background:var(--page);color:var(--ink);padding:40px 24px 80px}
+header.doc{max-width:1180px;margin:0 auto 36px}
+.doc .tag{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);background:var(--brand-soft);padding:5px 10px;border-radius:99px}
+.doc h1{font-size:40px;letter-spacing:-.03em;margin:12px 0 8px}
+.doc p{color:var(--muted);max-width:760px;line-height:1.55}
+.doc ul{margin:16px 0 0 18px;color:#334155;line-height:1.7;max-width:820px}
+.grid{display:flex;flex-wrap:wrap;gap:40px 32px;justify-content:center;max-width:1300px;margin:0 auto}
+figure{display:flex;flex-direction:column;align-items:center;gap:14px}
+figcaption{font-size:13px;color:var(--muted);max-width:320px;text-align:center;line-height:1.45}
+figcaption b{display:block;color:var(--ink);font-size:14px;margin-bottom:2px}
+.phone{width:340px;height:736px;border-radius:46px;border:10px solid #0b0f17;background:var(--bg);position:relative;overflow:hidden;box-shadow:0 30px 60px -20px rgba(15,23,42,.35)}
+.status{position:relative;z-index:3;height:34px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:12px;font-weight:600}
+.map{position:absolute;inset:0;background:var(--plan-bg)}
+.map svg{width:100%;height:100%}
+.float{position:absolute;left:14px;right:14px}
+.search{white-space:nowrap;top:44px;background:#fff;border-radius:16px;box-shadow:0 6px 20px rgba(15,23,42,.12);display:flex;align-items:center;gap:10px;padding:13px 14px;font-size:14px;color:var(--muted)}
+.search .ico{width:18px;height:18px;border-radius:50%;border:2.5px solid var(--brand);position:relative}
+.search .floor{margin-left:auto;font-size:12px;font-weight:700;color:var(--ink);background:#f1f5f9;padding:5px 9px;border-radius:9px}
+.chips{top:100px;display:flex;gap:8px;overflow:hidden}
+.chip{background:#fff;border-radius:99px;padding:7px 12px;font-size:12px;font-weight:600;box-shadow:0 2px 8px rgba(15,23,42,.1);white-space:nowrap}
+.fab{position:absolute;right:14px;width:44px;height:44px;border-radius:14px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.15);display:grid;place-items:center;font-size:18px;color:var(--brand)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:24px 24px 0 0;box-shadow:0 -10px 30px rgba(15,23,42,.12);padding:10px 18px 18px}
+.grab{width:38px;height:4px;border-radius:9px;background:#cbd5e1;margin:0 auto 12px}
+.tabs{display:flex;justify-content:space-around;border-top:1px solid var(--line);padding:9px 0 4px;margin:14px -18px -8px;font-size:11px;color:var(--muted);font-weight:600}
+.tabs span{display:flex;flex-direction:column;align-items:center;gap:4px}.tabs i{width:22px;height:4px;border-radius:9px;background:transparent}
+.tabs .on{color:var(--brand)}.tabs .on i{background:var(--brand)}
+h3{font-size:18px;letter-spacing:-.01em}
+.sub{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+.fromto{border:1px solid var(--line);border-radius:16px;margin-top:12px;position:relative}
+.fromto .row{display:flex;align-items:center;gap:12px;padding:12px 14px;font-size:14px}
+.fromto .row+.row{border-top:1px solid var(--line)}
+.pin{width:12px;height:12px;border-radius:50%;flex:none}
+.pin.a{border:3px solid var(--dot);background:#fff}.pin.b{background:#ef4444;border-radius:50% 50% 50% 0;transform:rotate(-45deg)}
+.fromto .lbl{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.fromto .val{font-weight:600}.fromto .ph{color:#94a3b8;font-weight:500}
+.swap{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;background:#f1f5f9;display:grid;place-items:center;font-size:13px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--brand);color:#fff;font-weight:700;font-size:15px;border-radius:14px;padding:14px;margin-top:14px}
+.btn.ghost{background:var(--brand-soft);color:var(--brand)}
+.btn.off{background:#e2e8f0;color:#94a3b8}
+.list{margin-top:10px}
+.item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f1f5f9}
+.item .ic{width:36px;height:36px;border-radius:11px;background:var(--brand-soft);display:grid;place-items:center;color:var(--brand);font-weight:800;font-size:12px}
+.item .t{font-weight:600;font-size:14px}.item .s{font-size:12px;color:var(--muted)}
+.item .d{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600}
+.input{border:2px solid var(--brand);border-radius:14px;padding:11px 14px;font-size:14px;display:flex;gap:10px;align-items:center;margin-top:12px}
+.caret{width:2px;height:18px;background:var(--brand)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.seg div{border:1px solid var(--line);border-radius:14px;padding:12px 6px;text-align:center;font-size:12px;font-weight:600}
+.seg div b{display:block;font-size:20px;margin-bottom:4px}
+.seg .sel{border:2px solid var(--brand);background:var(--brand-soft);color:var(--brand)}
+.compass{width:150px;height:150px;border-radius:50%;margin:14px auto 4px;background:radial-gradient(circle,#fff 55%,var(--brand-soft) 56%);border:1px solid var(--line);position:relative;display:grid;place-items:center}
+.compass .arrow{width:0;height:0;border-left:18px solid transparent;border-right:18px solid transparent;border-bottom:52px solid var(--brand);transform:translateY(-14px)}
+.compass small{position:absolute;font-size:10px;font-weight:700;color:var(--muted)}
+.navbanner{top:44px;background:var(--brand);color:#fff;border-radius:18px;padding:14px 16px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 24px rgba(26,95,208,.35)}
+.navbanner .turn{font-size:26px;font-weight:800}
+.navbanner .big{font-size:18px;font-weight:700}.navbanner .sm{font-size:12px;opacity:.85}
+.stats{display:flex;gap:10px;margin-top:2px}
+.stat{flex:1;background:#f8fafc;border-radius:12px;padding:10px}
+.stat b{font-size:20px;display:block}.stat span{font-size:11px;color:var(--muted);font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:5px 9px;border-radius:99px;background:#dcfce7;color:#166534}
+.pill:before{content:"";width:6px;height:6px;border-radius:50%;background:#16a34a}
+.page{position:absolute;inset:34px 0 0;padding:14px 18px;overflow:hidden}
+.page h2{font-size:26px;letter-spacing:-.03em;margin:6px 0 4px}
+.card{border:1px solid var(--line);border-radius:18px;padding:14px;margin-top:12px;display:flex;gap:12px;align-items:center}
+.thumb{width:64px;height:64px;border-radius:12px;background:var(--corridor);flex:none;overflow:hidden}
+.prog{height:6px;border-radius:9px;background:#f1f5f9;margin-top:8px;overflow:hidden}.prog i{display:block;height:100%;background:var(--brand);border-radius:9px}
+.mini{font-size:11px;color:var(--muted);font-weight:600}
+.dim{position:absolute;inset:0;background:rgba(15,23,42,.18)}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="cf4" viewBox="0 0 248 567">
+<rect width="248" height="567" rx="8" style="fill:var(--plan-bg)"/>
+<rect x="88" y="0" width="72" height="567" style="fill:var(--corridor)"/>
+<g style="fill:var(--room);stroke:var(--wall);stroke-width:1.5">
+<rect x="4" y="4" width="82" height="76" rx="4"/><rect x="4" y="84" width="82" height="76" rx="4"/><rect x="4" y="164" width="82" height="76" rx="4"/><rect x="4" y="244" width="82" height="76" rx="4"/><rect x="4" y="324" width="82" height="76" rx="4"/><rect x="4" y="404" width="82" height="76" rx="4"/><rect x="4" y="484" width="82" height="79" rx="4"/>
+<rect x="162" y="4" width="82" height="76" rx="4"/><rect x="162" y="84" width="82" height="76" rx="4"/><rect x="162" y="164" width="82" height="76" rx="4"/><rect x="162" y="244" width="82" height="76" rx="4"/><rect x="162" y="324" width="82" height="76" rx="4"/><rect x="162" y="404" width="82" height="76" rx="4"/><rect x="162" y="484" width="82" height="79" rx="4"/></g>
+<g style="fill:var(--label);font:600 9px Inter,sans-serif" text-anchor="middle">
+<text x="45" y="45">Ladies WR</text><text x="45" y="125">C-406</text><text x="45" y="205">C-407</text><text x="45" y="285">C-408</text><text x="45" y="365">C-409</text><text x="45" y="445">C-410</text><text x="45" y="527">Men's WR</text>
+<text x="203" y="45">Stairs</text><text x="203" y="125">C-405</text><text x="203" y="205">C-404</text><text x="203" y="285">C-403</text><text x="203" y="365">C-402</text><text x="203" y="445">C-401</text><text x="203" y="527">Stairs</text></g>
+</symbol></defs></svg>
+
+<header class="doc">
+<span class="tag">Direction 01</span>
+<h1>Wayfinder</h1>
+<p>Familiar route-planner patterns, like Google Maps indoors. The floor plan fills the screen and is turned upright to suit portrait. A single <b>From → To</b> card replaces the separate "Set start" and "Choose destination" steps.</p>
+<ul>
+<li>Start and destination sit side by side in one card, so you can't forget either one. A swap button reverses the route.</li>
+<li>Long, wide floors (like C-F4) are rotated to fill a portrait screen. Room labels sit inside the rooms, so the duplicate floating chips go away.</li>
+<li>Choosing a direction becomes one visual compass step with a large arrow, and the confirm button is labelled in plain words.</li>
+<li>Live mode uses a turn-by-turn banner at the top and a short stats strip at the bottom. Research controls move into an overflow menu.</li>
+</ul>
+</header>
+
+<div class="grid">
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 -60 276 700" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/></svg></div>
+<div class="status"><span>5:13</span><span>● ● ▮</span></div>
+<div class="float search"><span class="ico"></span>Search rooms &amp; places<span class="floor">C · F4 ▾</span></div>
+<div class="float chips"><span class="chip">🏫 Classrooms</span><span class="chip">🚻 Washrooms</span><span class="chip">🪜 Stairs</span></div>
+<div class="fab" style="bottom:300px">◎</div>
+<div class="sheet"><div class="grab"></div>
+<h3>Plan your route</h3>
+<div class="fromto">
+<div class="row"><span class="pin a"></span><div><div class="lbl">From</div><div class="val ph">Where are you?</div></div></div>
+<div class="row"><span class="pin b"></span><div><div class="lbl">To</div><div class="val ph">Choose a destination</div></div></div>
+<span class="swap">⇅</span></div>
+<div class="btn off">Start navigation</div>
+<div class="tabs"><span class="on"><i></i>Explore</span><span><i></i>Buildings</span><span><i></i>Setup</span></div>
+</div></div>
+<figcaption><b>1 · Explore</b>Full-screen map, search, category chips and one route card. Both empty fields are visible, so the next step is obvious.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 -60 276 700" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/></svg></div><div class="dim"></div>
+<div class="status"><span>5:13</span><span>● ● ▮</span></div>
+<div class="sheet" style="top:70px"><div class="grab"></div>
+<h3>Where are you now?</h3>
+<div class="input">⌕ <span>C-40</span><span class="caret"></span></div>
+<div class="list">
+<div class="item"><span class="ic">◎</span><div><div class="t">Pick on map</div><div class="s">Tap the spot you're standing on</div></div></div>
+<div class="item"><span class="ic">≋</span><div><div class="t">Detect with Wi-Fi</div><div class="s">Needs a surveyed floor · ~30 s</div></div></div>
+<div class="item"><span class="ic">407</span><div><div class="t">C-407 ClassRoom</div><div class="s">Stand at the door</div></div><span class="d">Entrance</span></div>
+<div class="item"><span class="ic">408</span><div><div class="t">C-408 ClassRoom</div><div class="s">Stand at the door</div></div><span class="d">Entrance</span></div>
+<div class="item"><span class="ic">402</span><div><div class="t">C-402 ClassRoom</div><div class="s">Stand at the door</div></div><span class="d">Entrance</span></div>
+<div class="item"><span class="ic">401</span><div><div class="t">C-401 ClassRoom</div><div class="s">Stand at the door</div></div><span class="d">Entrance</span></div>
+</div></div></div>
+<figcaption><b>2 · "From" field</b>One searchable list. The map pick and Wi-Fi options stay at the top, above the matching rooms.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 -60 276 700" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M100 202 H124 V362 H160" fill="none" stroke="var(--route)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="100" cy="202" r="9" fill="#fff" stroke="var(--dot)" stroke-width="4"/>
+<path d="M160 362 l10 -22 a12 12 0 1 0 -20 0z" fill="#ef4444"/></svg></div>
+<div class="status"><span>5:14</span><span>● ● ▮</span></div>
+<div class="fab" style="top:48px">✕</div>
+<div class="sheet"><div class="grab"></div>
+<div class="fromto">
+<div class="row"><span class="pin a"></span><div><div class="lbl">From</div><div class="val">C-407 entrance</div></div></div>
+<div class="row"><span class="pin b"></span><div><div class="lbl">To</div><div class="val">C-402 ClassRoom</div></div></div>
+<span class="swap">⇅</span></div>
+<div class="stats" style="margin-top:12px"><div class="stat"><b>24 m</b><span>Walking distance</span></div><div class="stat"><b>~30 s</b><span>At walking pace</span></div></div>
+<div class="btn">➤ Start navigation</div>
+<div class="tabs"><span class="on"><i></i>Explore</span><span><i></i>Buildings</span><span><i></i>Setup</span></div>
+</div></div>
+<figcaption><b>3 · Route preview</b>Both ends are filled, the route is drawn, and you get a distance and time. There is a single primary action.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 -60 276 700" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<circle cx="100" cy="202" r="9" fill="#fff" stroke="var(--dot)" stroke-width="4"/>
+<path d="M100 202 L100 270" stroke="var(--dot)" stroke-width="3" stroke-dasharray="5 5"/></svg></div><div class="dim"></div>
+<div class="status"><span>5:14</span><span>● ● ▮</span></div>
+<div class="sheet"><div class="grab"></div>
+<h3>Which way are you facing?</h3>
+<p class="sub">Hold the phone flat and point its top edge the way you'll walk. Then pick the matching direction on the map.</p>
+<div class="compass"><small style="top:8px">Up</small><small style="bottom:8px">Down</small><small style="left:10px">Left</small><small style="right:10px">Right</small><span class="arrow" style="transform:translateY(-14px) rotate(180deg)"></span></div>
+<div class="seg"><div>↑<br>Up</div><div class="sel"><b>↓</b>Down the corridor</div><div>⌖<br>Tap ahead</div></div>
+<div class="btn">I'm facing this way · Go</div>
+</div></div>
+<figcaption><b>4 · Face your direction</b>One question with a large visual answer. The dashed line on the map shows the direction you chose.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 -60 276 700" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M124 202 V362 H160" fill="none" stroke="#cbd5e1" stroke-width="7" stroke-linecap="round"/>
+<path d="M124 268 V362 H160" fill="none" stroke="var(--route)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="124" cy="268" r="26" fill="var(--dot)" opacity=".14"/>
+<circle cx="124" cy="268" r="9" fill="var(--dot)" stroke="#fff" stroke-width="3"/>
+<path d="M124 248 l-7 10 h14z" fill="var(--dot)"/></svg></div>
+<div class="status"><span>5:15</span><span>● ● ▮</span></div>
+<div class="float navbanner"><span class="turn">↓</span><div><div class="big">Continue 9 m</div><div class="sm">then C-402 on your left</div></div></div>
+<div class="fab" style="bottom:210px">⋯</div>
+<div class="sheet"><div class="grab"></div>
+<div style="display:flex;justify-content:space-between;align-items:center"><h3>C-402 ClassRoom</h3><span class="pill">Good signal</span></div>
+<div class="stats" style="margin-top:10px"><div class="stat"><b>14 m</b><span>Left</span></div><div class="stat"><b>±1.8 m</b><span>Accuracy</span></div><div class="stat"><b>12</b><span>Steps</span></div></div>
+<div class="btn ghost">End navigation</div>
+</div></div>
+<figcaption><b>5 · Live navigation</b>A turn-by-turn banner, the route you've already walked greyed out, an accuracy halo, and stats you can read at a glance. Research overlays live under ⋯.</figcaption></figure>
+
+<figure><div class="phone"><div class="status"><span>5:16</span><span>● ● ▮</span></div>
+<div class="page"><span class="mini">FAST-NUCES Islamabad</span><h2>Buildings</h2>
+<div class="card"><div class="thumb"><svg viewBox="0 0 248 567" style="width:100%;height:100%"><use href="#cf4" width="248" height="567"/></svg></div><div style="flex:1"><div class="t" style="font-weight:700">C Block · Floor 4</div><div class="sub">15 places · 2 survey points</div><div class="prog"><i style="width:35%"></i></div><div class="mini" style="margin-top:6px">Setup 35% · Wi-Fi survey needed</div></div></div>
+<div class="card" style="opacity:.75"><div class="thumb"></div><div style="flex:1"><div class="t" style="font-weight:700">C Block · Floor 5</div><div class="sub">Available to import</div></div><span style="color:var(--brand);font-weight:700;font-size:13px">Add</span></div>
+<div class="card" style="opacity:.75"><div class="thumb"></div><div style="flex:1"><div class="t" style="font-weight:700">A Block · Ground</div><div class="sub">Available to import</div></div><span style="color:var(--brand);font-weight:700;font-size:13px">Add</span></div>
+<div class="btn ghost">＋ Add a building</div>
+</div>
+<div class="sheet" style="padding-top:0;box-shadow:none;border-radius:0"><div class="tabs" style="margin-top:0"><span><i></i>Explore</span><span class="on"><i></i>Buildings</span><span><i></i>Setup</span></div></div>
+</div>
+<figcaption><b>6 · Buildings</b>Floors appear as cards with a thumbnail and a setup progress bar. Floors you can import are listed directly, with no dialog first. The warning about replacing data appears only when it actually applies.</figcaption></figure>
+
+</div></body></html>

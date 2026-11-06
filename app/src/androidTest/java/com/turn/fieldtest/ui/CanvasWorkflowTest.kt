@@ -15,6 +15,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.turn.fieldtest.ui.screens.NavigationMap
@@ -36,32 +37,71 @@ class CanvasWorkflowTest {
         markMapSaved()
     }
 
-    @Test fun canvasSearchKnownStartAndDirectionUseExistingActions() {
-        val state = fixture().apply { headingChoiceConfirmed = true }; var starts = 0
-        compose.setContent { TurnApp(state, TurnAppActions(
-            onDestinationSelected = { state.selectedDestinationId = it }, onRealLiveToggled = { starts++ })) }
-        compose.onNodeWithText("Find a room or facility").performClick()
-        compose.onNodeWithText("Room or facility").performTextInput("Lab")
+    private fun waitForIme() {
         // Android's IME animation runs outside Compose's clock; wait before tapping the result.
         androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().let {
             it.waitForIdleSync(); it.uiAutomation.waitForIdle(200L,5_000L)
         }
         compose.waitForIdle()
+    }
+
+    @Test fun destinationFirstSearchThenPromptsForStartAndDirection() {
+        val state = fixture(); var starts = 0
+        compose.setContent { TurnApp(state, TurnAppActions(
+            onDestinationSelected = { state.selectedDestinationId = it }, onRealLiveToggled = { starts++ })) }
+        compose.onNodeWithText("Search rooms & places").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("Lab")
+        waitForIme()
         compose.onAllNodesWithText("Lab 1").onLast().performClick()
         compose.runOnIdle { assertEquals("lab", state.selectedDestinationId) }
-        compose.onNodeWithText("Navigate here").assertIsDisplayed().performClick()
-        compose.onNodeWithText("Show saved reference points (optional)").performScrollTo().performClick()
-        compose.onNodeWithText("I am at RP-01").performScrollTo().performClick()
-        compose.onNodeWithText("12.0 m · route preview").assertExists()
-        compose.onNodeWithText("Navigate here").performClick()
-        compose.onNodeWithText("Start tracking").performScrollTo().assertIsNotEnabled()
+        // Choosing a destination without a start asks where you are next.
+        compose.onNodeWithText("Where are you now?").assertExists()
+        compose.onNodeWithText("Show survey points (1)").performScrollTo().performClick()
+        compose.onNodeWithText("RP-01").performScrollTo().performClick()
+        compose.onNodeWithText("12 m").assertExists()
+        compose.onNodeWithText("Walking distance").assertExists()
+        compose.onNodeWithText("Start navigation").performClick()
+        compose.onNodeWithText("I'm facing this way · Go").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("← Left").performScrollTo().performClick()
-        compose.onNodeWithText("Start tracking").performScrollTo().performClick()
+        compose.onNodeWithText("I'm facing this way · Go").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(1, starts); assertEquals(Offset(3f, 3f), state.manualStartPoint)
             assertEquals(180.0, state.initialHeadingDegrees, 0.001); assertTrue(state.headingChoiceConfirmed)
             assertEquals(1, state.destinations.size); assertFalse(state.hasUnsavedMapChanges)
         }
+    }
+
+    @Test fun rotatedLongFloorConvertsScreenDirectionsToMapHeadings() {
+        // A 40 × 10 m floor in a portrait window is drawn turned a quarter clockwise.
+        val state = fixture().apply {
+            clearMapDraft(force = true); floorWidthMetres = 40f; floorHeightMetres = 10f
+            draftWalkablePolygon.addAll(listOf(Offset.Zero, Offset(40f, 0f), Offset(40f, 10f), Offset(0f, 10f)))
+            destinations.add(PointOfInterestEntity("lab", "canvas-f", "Lab 1", "DESTINATION", 15.0, 3.0))
+            navigationNodes.addAll(listOf(NavigationNodeEntity("start","canvas-f",3.0,3.0),NavigationNodeEntity("end","canvas-f",15.0,3.0,"lab")))
+            navigationEdges.add(NavigationEdgeEntity("path","canvas-f","start","end",12.0))
+            selectedDestinationId = "lab"; chooseKnownStart(Offset(3f, 3f)); markMapSaved()
+        }
+        compose.setContent { androidx.compose.foundation.layout.Box(Modifier.size(360.dp, 760.dp)) { TurnApp(state) } }
+        compose.runOnIdle { assertEquals(1, state.mapQuarterTurns) }
+        compose.onNodeWithText("Start navigation").performClick()
+        compose.onNodeWithText("↑ Up").performScrollTo().performClick()
+        // Screen up on a clockwise-turned map is map −x, i.e. 180°; screen right is map +y, i.e. 90°.
+        compose.runOnIdle { assertEquals(180.0, state.initialHeadingDegrees, 0.001) }
+        compose.onNodeWithText("Right →").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(90.0, state.initialHeadingDegrees, 0.001) }
+    }
+
+    @Test fun liveNavigationShowsTurnByTurnBannerAndStats() {
+        val state = fixture().apply {
+            liveRunning = true; realLiveInitialized = true; realLivePosition = Offset(5f, 3f); selectedDestinationId = "lab"
+            routePoints = listOf(Offset(5f, 3f), Offset(15f, 3f)); remainingDistanceMetres = 10.0; realLiveUncertaintyMetres = 1.8
+        }
+        compose.setContent { TurnApp(state) }
+        compose.onNodeWithText("Continue 10 m").assertIsDisplayed()
+        compose.onNodeWithText("then arrive at Lab 1").assertIsDisplayed()
+        compose.onNodeWithText("±1.8 m").assertExists()
+        compose.onNodeWithText("Change destination").assertExists()
+        compose.onNodeWithText("End navigation").assertIsDisplayed()
     }
 
     @Test fun toolsRetainMapperAndAllResearchDestinations() {
@@ -80,48 +120,65 @@ class CanvasWorkflowTest {
     @Test fun knownStartShowsRouteBeforeTrackingWithoutCreatingLivePosition() {
         val state=fixture().apply { selectedDestinationId="lab"; chooseKnownStart(Offset(3f,3f)) }
         compose.setContent { TurnApp(state) }
-        compose.onNodeWithText("Route ready · ends at the room entrance").assertExists()
-        compose.onNodeWithText("12.0 m · route preview").assertExists()
+        compose.onNodeWithText("12 m").assertExists()
+        compose.onNodeWithText("Walking distance").assertExists()
+        compose.onNodeWithText("Start navigation").assertIsEnabled()
         compose.runOnIdle { assertFalse(state.liveRunning); assertNull(state.realLivePosition) }
     }
 
     @Test fun startFirstPromptsForDestinationThenRouteAndDirectionBeforeTracking() {
         val state=fixture();var starts=0
         compose.setContent {TurnApp(state,TurnAppActions(onDestinationSelected={state.selectedDestinationId=it},onRealLiveToggled={starts++}))}
-        compose.onNodeWithText("Set start").performClick()
-        compose.onNodeWithText("I am at RP-01").assertDoesNotExist()
-        compose.onNodeWithText("Show saved reference points (optional)").performScrollTo().performClick()
-        compose.onNodeWithText("I am at RP-01").performScrollTo().performClick()
-        compose.onNodeWithText("Choose your destination").assertExists()
-        compose.onNodeWithText("Start selected. Now choose where you want to go.").assertExists()
+        compose.onNodeWithText("Where are you?").performClick()
+        compose.onNodeWithText("RP-01").assertDoesNotExist()
+        compose.onNodeWithText("Show survey points (1)").performScrollTo().performClick()
+        compose.onNodeWithText("RP-01").performScrollTo().performClick()
+        compose.onNodeWithText("Where to?").assertExists()
+        compose.onNodeWithText("Start set. Now choose where you want to go.").assertExists()
         compose.onAllNodesWithText("Lab 1").onLast().performClick()
-        compose.onNodeWithText("12.0 m · route preview").assertExists()
-        compose.onNodeWithText("Change destination").assertExists()
-        compose.onNodeWithText("Navigate here").performClick()
-        compose.onNodeWithText("Start tracking").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("12 m").assertExists()
+        compose.onNodeWithText("RP-01").assertExists()
+        compose.onNodeWithText("Start navigation").performClick()
+        compose.onNodeWithText("I'm facing this way · Go").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("Right →").performScrollTo().performClick()
-        compose.onNodeWithText("Start tracking").performScrollTo().performClick()
+        compose.onNodeWithText("I'm facing this way · Go").performScrollTo().performClick()
         compose.runOnIdle {assertEquals(1,starts);assertEquals("lab",state.selectedDestinationId);assertEquals(Offset(3f,3f),state.manualStartPoint)}
     }
 
     @Test fun wifiStartAlsoPromptsForDestinationAndDoesNotLoopBackToStartSelection() {
         val state=fixture()
         compose.setContent {TurnApp(state,TurnAppActions(onDestinationSelected={state.selectedDestinationId=it}))}
-        compose.onNodeWithText("Set start").performClick()
-        compose.onNodeWithText("Use a confident fresh Wi-Fi fix").performScrollTo().performClick()
-        compose.onNodeWithText("Choose your destination").assertExists()
+        compose.onNodeWithText("Where are you?").performClick()
+        compose.onNodeWithText("Detect with Wi-Fi").performScrollTo().performClick()
+        compose.onNodeWithText("Where to?").assertExists()
         compose.onAllNodesWithText("Lab 1").onLast().performClick()
-        compose.onNodeWithText("The route will appear after a confident fresh Wi-Fi fix.").assertExists()
-        compose.onNodeWithText("Navigate here").performClick()
+        compose.onNodeWithText("The route appears once Wi-Fi finds you.").assertExists()
+        compose.onNodeWithText("Start navigation").performClick()
         compose.onNodeWithText("Which way are you facing?").assertExists()
         compose.runOnIdle {assertNull(state.manualStartPoint);assertNull(state.realLivePosition);assertFalse(state.liveRunning)}
+    }
+
+    @Test fun trackingWithoutDestinationStaysAvailable() {
+        val state=fixture();var starts=0
+        compose.setContent {TurnApp(state,TurnAppActions(onDestinationSelected={state.selectedDestinationId=it},onRealLiveToggled={starts++}))}
+        compose.onNodeWithText("Choose a destination").performClick()
+        compose.onNodeWithText("Just show my position").performScrollTo().performClick()
+        compose.onNodeWithText("Where are you now?").assertExists()
+        compose.onNodeWithText("Show survey points (1)").performScrollTo().performClick()
+        compose.onNodeWithText("RP-01").performScrollTo().performClick()
+        compose.onNodeWithText("Just my position").assertExists()
+        compose.onNodeWithText("Start navigation").performClick()
+        compose.onNodeWithText("↓ Down").performScrollTo().performClick()
+        compose.onNodeWithText("I'm facing this way · Go").performScrollTo().performClick()
+        compose.runOnIdle {assertEquals(1,starts);assertNull(state.selectedDestinationId);assertEquals(270.0,state.initialHeadingDegrees,0.001)}
     }
 
     @Test fun disconnectedDestinationExplainsWhyNavigationIsUnavailable() {
         val state=fixture().apply { selectedDestinationId="lab"; navigationNodes.clear(); markMapSaved() }
         compose.setContent { TurnApp(state) }
-        compose.onNodeWithText("This destination has no connected path. Connect its entrance in Map setup.").assertExists()
-        compose.onNodeWithText("Navigate here").assertIsNotEnabled()
+        compose.onNodeWithText("Lab 1 has no connected path yet. Connect its entrance in Map setup.").assertExists()
+        compose.onNodeWithText("Start navigation").assertIsNotEnabled()
+        compose.onNodeWithText("Open Map setup").assertExists()
     }
 
     @Test fun currentLocationListsRoomsAndUsesTheirEntranceWithoutInventingUnmappedStarts() {
@@ -131,27 +188,31 @@ class CanvasWorkflowTest {
             markMapSaved()
         }
         compose.setContent {TurnApp(state)}
-        compose.onNodeWithText("Navigate here").performClick()
-        compose.onNodeWithText("Search current location").performTextInput("Library")
-        compose.onNodeWithText("I am at Library entrance").performScrollTo().assertIsNotEnabled()
+        // With a destination but no start, the main button asks where you are.
+        compose.onNodeWithText("Start navigation").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("Library")
+        compose.onNodeWithText("Entrance not connected · pick on map instead").assertExists()
+        compose.onAllNodesWithText("Library").onLast().performScrollTo().performClick()
         compose.runOnIdle {assertNull(state.manualStartPoint); assertFalse(state.liveRunning)}
-        compose.onNodeWithText("Search current location").performScrollTo().performTextClearance()
-        compose.onNodeWithText("Search current location").performTextInput("Lab")
-        compose.onNodeWithText("I am at Lab 1 entrance").performScrollTo().assertIsEnabled().performClick()
+        compose.onNode(hasSetTextAction()).performTextClearance()
+        compose.onNode(hasSetTextAction()).performTextInput("Lab")
+        compose.onAllNodesWithText("Lab 1").onLast().performScrollTo().performClick()
         compose.runOnIdle {assertEquals(Offset(15f,3f),state.manualStartPoint); assertFalse(state.liveRunning)}
+        compose.onNodeWithText("Lab 1 entrance").assertExists()
     }
 
     @Test fun labelledRoomWithoutEntranceIsSearchableAndExplainsMissingRoute() {
         val state=fixture().apply {destinations.add(PointOfInterestEntity("library","canvas-f","Library","ROOM",10.0,15.0)); markMapSaved()}
         compose.setContent {TurnApp(state,TurnAppActions(onDestinationSelected={state.selectedDestinationId=it}))}
-        compose.onNodeWithText("Find a room or facility").performClick()
-        compose.onNodeWithText("Room or facility").performTextInput("Library")
-        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().let {
-            it.waitForIdleSync();it.uiAutomation.waitForIdle(200L,5_000L)
-        }
+        compose.onNodeWithText("Search rooms & places").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("Library")
+        waitForIme()
         compose.onAllNodesWithText("Library").onLast().performClick()
-        compose.onNodeWithText("This destination has no connected path. Connect its entrance in Map setup.").assertExists()
-        compose.onNodeWithText("Navigate here").assertIsNotEnabled()
+        // No start yet: the start sheet opens; dismiss it to read the route card.
+        compose.onNodeWithText("Where are you now?").assertExists()
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        compose.onNodeWithText("Library has no connected path yet. Connect its entrance in Map setup.").assertExists()
+        compose.onNodeWithText("Start navigation").assertIsNotEnabled()
     }
 
     @Test fun existingRoomCanBeLinkedToVerifiedEntranceWithoutCreatingDuplicate() {
@@ -227,7 +288,7 @@ class CanvasWorkflowTest {
         val state=fixture().apply {liveRunning=true;realLiveInitialized=true;realLivePosition=Offset(3f,3f)}
         compose.setContent { TurnApp(state) }
         compose.onNodeWithText("Buildings").assertDoesNotExist()
-        compose.onNodeWithText("Stop tracking").assertIsDisplayed()
+        compose.onNodeWithText("End navigation").assertIsDisplayed()
         compose.runOnIdle {state.liveRunning=false}
         compose.onNodeWithText("Buildings").assertIsDisplayed()
     }
@@ -252,7 +313,7 @@ class CanvasWorkflowTest {
     @Test fun unsavedMapCannotStartOrLaunchAr() {
         val state = fixture().apply { draftWalkablePolygon[0] = Offset(1f, 1f) }
         compose.setContent { TurnApp(state) }
-        compose.onNodeWithText("Choose destination").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithText("Start navigation").assertIsDisplayed().assertIsNotEnabled()
         compose.onNodeWithText("Tools", useUnmergedTree = true).performClick()
         compose.onNodeWithText("Create a map with your phone").performScrollTo().assertIsNotEnabled()
     }
@@ -279,7 +340,7 @@ class CanvasWorkflowTest {
     @Test fun blankFloorOffersSetupInsteadOfStartingUnusableTracking() {
         val state = fixture().apply { draftWalkablePolygon.clear(); markMapSaved() }
         compose.setContent { TurnApp(state) }
-        compose.onNodeWithText("Choose destination").assertDoesNotExist()
+        compose.onNodeWithText("Start navigation").assertDoesNotExist()
         compose.onNodeWithText("Prepare this floor").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(TurnDestination.FLOOR_EDITOR, state.destination) }
     }

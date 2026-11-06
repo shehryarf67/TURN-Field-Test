@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TURN · 04 Campus</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700;9..40,800&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#ffffff;--ink:#0d2b2a;--muted:#5b7473;--line:#e3ecea;--teal:#0f766e;--teal-soft:#e6f4f1;--coral:#f26b4f;--sun:#f6c453;
+--plan-bg:#f3f8f7;--room:#ffffff;--wall:#c7d9d6;--corridor:#dff0ec;--label:#8aa5a2;--page:#e9f1ef}
+*{box-sizing:border-box;margin:0}
+body{font-family:"DM Sans",system-ui,sans-serif;background:var(--page);color:var(--ink);padding:40px 24px 80px}
+header.doc{max-width:1180px;margin:0 auto 36px}
+.tag{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:var(--teal);padding:5px 10px;border-radius:99px}
+.doc h1{font-family:"DM Serif Display",serif;font-weight:400;font-size:48px;letter-spacing:-.01em;margin:12px 0 8px}
+.doc p{color:var(--muted);max-width:760px;line-height:1.6}
+.doc ul{margin:16px 0 0 18px;color:#24403e;line-height:1.75;max-width:820px}
+.grid{display:flex;flex-wrap:wrap;gap:40px 32px;justify-content:center;max-width:1300px;margin:0 auto}
+figure{display:flex;flex-direction:column;align-items:center;gap:14px}
+figcaption{font-size:13px;color:var(--muted);max-width:320px;text-align:center;line-height:1.5}
+figcaption b{display:block;color:var(--ink);font-size:14px;margin-bottom:2px}
+.phone{width:340px;height:736px;border-radius:46px;border:10px solid #0d2b2a;background:var(--bg);position:relative;overflow:hidden;box-shadow:0 30px 60px -24px rgba(13,43,42,.45)}
+.status{height:34px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:12px;font-weight:700;position:relative;z-index:2}
+.hero{background:var(--teal);color:#fff;padding:8px 18px 54px;position:relative}
+.hero .hi{font-size:13px;opacity:.85;font-weight:500}
+.hero h2{font-family:"DM Serif Display",serif;font-weight:400;font-size:30px;line-height:1.1;margin:4px 0 0}
+.hero .loc{display:inline-flex;gap:6px;align-items:center;background:rgba(255,255,255,.16);border-radius:99px;padding:6px 10px;font-size:12px;font-weight:700;margin-top:12px}
+.searchc{margin:-30px 16px 0;position:relative;background:#fff;border-radius:18px;box-shadow:0 12px 28px rgba(13,43,42,.15);padding:14px 16px;display:flex;gap:10px;align-items:center;color:var(--muted);font-size:14px}
+.searchc .mic{margin-left:auto;width:30px;height:30px;border-radius:10px;background:var(--teal-soft);display:grid;place-items:center;color:var(--teal)}
+.sec{padding:16px 18px 0}
+.sec h4{font-size:13px;font-weight:800;display:flex;justify-content:space-between}.sec h4 span{color:var(--teal)}
+.cats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.cat{border-radius:16px;padding:12px 4px;text-align:center;font-size:11px;font-weight:700;background:var(--teal-soft)}
+.cat b{display:block;font-size:20px;margin-bottom:4px}
+.cat.c2{background:#fdeee9}.cat.c3{background:#fdf5df}.cat.c4{background:#eceffd}
+.hscroll{display:flex;gap:10px;margin-top:10px;overflow:hidden}
+.room{min-width:132px;border-radius:18px;border:1px solid var(--line);padding:12px}
+.room .n{font-family:"DM Serif Display",serif;font-size:24px}.room .k{font-size:11.5px;color:var(--muted);font-weight:600}
+.room .go{margin-top:10px;font-size:12px;font-weight:800;color:var(--teal)}
+.tabbar{position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0 14px;font-size:11px;font-weight:700;color:var(--muted)}
+.tabbar span{display:flex;flex-direction:column;align-items:center;gap:3px}.tabbar b{font-size:18px}.tabbar .on{color:var(--teal)}
+.map{position:absolute;inset:0;background:var(--plan-bg)}.map svg{width:100%;height:100%}
+.detail{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:28px 28px 0 0;padding:12px 18px 18px;box-shadow:0 -12px 30px rgba(13,43,42,.12)}
+.grab{width:40px;height:4px;border-radius:9px;background:var(--line);margin:0 auto 12px}
+.dname{font-family:"DM Serif Display",serif;font-size:30px;line-height:1}
+.dsub{font-size:13px;color:var(--muted);margin-top:4px}
+.chips{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}.chip{font-size:11.5px;font-weight:700;padding:6px 10px;border-radius:99px;background:var(--teal-soft);color:var(--teal)}
+.chip.o{background:#fdeee9;color:#b5432b}
+.btn{border-radius:16px;padding:15px;text-align:center;font-weight:800;font-size:15px;background:var(--coral);color:#fff;margin-top:14px;box-shadow:0 10px 22px -8px rgba(242,107,79,.7)}
+.btn.t{background:var(--teal);box-shadow:none}.btn.l{background:var(--teal-soft);color:var(--teal);box-shadow:none}
+.back{position:absolute;top:44px;left:14px;width:40px;height:40px;border-radius:14px;background:#fff;box-shadow:0 4px 14px rgba(13,43,42,.15);display:grid;place-items:center;font-weight:800;z-index:2}
+.startq{border:1.5px dashed #9cc7c0;border-radius:18px;padding:12px 14px;margin-top:14px;display:flex;gap:12px;align-items:center;background:#f7fbfa}
+.startq .t{font-weight:800;font-size:14px}.startq .s{font-size:12px;color:var(--muted)}
+.opts{display:flex;gap:8px;margin-top:10px}
+.o{flex:1;border:1px solid var(--line);border-radius:14px;padding:10px 6px;text-align:center;font-size:11.5px;font-weight:700}
+.o b{display:block;font-size:18px;margin-bottom:3px}.o.sel{border:2px solid var(--teal);background:var(--teal-soft);color:var(--teal)}
+.dirs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.dirs div{aspect-ratio:1;border-radius:16px;border:1px solid var(--line);display:grid;place-items:center;font-size:22px;font-weight:800}
+.dirs .sel{background:var(--teal);color:#fff;border-color:var(--teal)}
+.banner{position:absolute;top:44px;left:14px;right:14px;border-radius:20px;background:var(--ink);color:#fff;padding:14px 16px;display:flex;gap:12px;align-items:center;z-index:2}
+.banner .a{font-size:28px;font-weight:800;color:var(--sun)}.banner .m{font-size:19px;font-weight:800}.banner .n{font-size:12px;opacity:.75}
+.kv{display:flex;gap:18px;margin-top:10px}.kv div{font-size:11.5px;color:var(--muted);font-weight:700}.kv b{display:block;font-size:20px;color:var(--ink);font-family:"DM Serif Display",serif;font-weight:400}
+.page{position:absolute;inset:34px 0 60px;padding:10px 18px;overflow:hidden}
+.page h2{font-family:"DM Serif Display",serif;font-weight:400;font-size:32px}
+.campus{border-radius:22px;overflow:hidden;border:1px solid var(--line);margin-top:12px}
+.campus .img{overflow:hidden;height:92px;background:linear-gradient(135deg,var(--teal),#14a39a);position:relative}
+.campus .img svg{position:absolute;right:60px;top:-120px;width:110px;opacity:.35;transform:rotate(90deg)}
+.campus .body{padding:12px 14px}
+.flrs{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.flrs span{font-size:11.5px;font-weight:800;padding:6px 10px;border-radius:10px;border:1px solid var(--line)}
+.flrs .on{background:var(--teal);color:#fff;border-color:var(--teal)}.flrs .dl{color:var(--muted);border-style:dashed}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="cf4" viewBox="0 0 248 567">
+<rect width="248" height="567" rx="10" style="fill:var(--plan-bg)"/>
+<rect x="88" y="0" width="72" height="567" style="fill:var(--corridor)"/>
+<g style="fill:var(--room);stroke:var(--wall);stroke-width:1.5">
+<rect x="4" y="4" width="82" height="76" rx="8"/><rect x="4" y="84" width="82" height="76" rx="8"/><rect x="4" y="164" width="82" height="76" rx="8"/><rect x="4" y="244" width="82" height="76" rx="8"/><rect x="4" y="324" width="82" height="76" rx="8"/><rect x="4" y="404" width="82" height="76" rx="8"/><rect x="4" y="484" width="82" height="79" rx="8"/>
+<rect x="162" y="4" width="82" height="76" rx="8"/><rect x="162" y="84" width="82" height="76" rx="8"/><rect x="162" y="164" width="82" height="76" rx="8"/><rect x="162" y="244" width="82" height="76" rx="8"/><rect x="162" y="324" width="82" height="76" rx="8" style="fill:#fdeee9;stroke:var(--coral)"/><rect x="162" y="404" width="82" height="76" rx="8"/><rect x="162" y="484" width="82" height="79" rx="8"/></g>
+<g style="fill:var(--label);font:700 9px 'DM Sans',sans-serif" text-anchor="middle">
+<text x="45" y="45">Ladies WR</text><text x="45" y="125">C-406</text><text x="45" y="205">C-407</text><text x="45" y="285">C-408</text><text x="45" y="365">C-409</text><text x="45" y="445">C-410</text><text x="45" y="527">Men's WR</text>
+<text x="203" y="45">Stairs</text><text x="203" y="125">C-405</text><text x="203" y="205">C-404</text><text x="203" y="285">C-403</text><text x="203" y="365" style="fill:#b5432b">C-402</text><text x="203" y="445">C-401</text><text x="203" y="527">Stairs</text></g>
+</symbol></defs></svg>
+
+<header class="doc">
+<span class="tag">Direction 04</span>
+<h1>Campus</h1>
+<p>A destination-first design with a friendly university look. Students think "I need C-402" before "where am I?", so the app starts with search, categories and rooms. Your location is asked for once you've chosen where to go. Deep teal, with coral for actions and editorial serif headings.</p>
+<ul>
+<li>A home page with categories (Classes, Washrooms, Labs, Stairs), plus recent and nearby rooms as large cards.</li>
+<li>Each room has a detail sheet (name, side of the corridor, accessibility tags) with a single "Directions" button.</li>
+<li>"Where are you?" appears inside the directions sheet as one dashed card with three compact choices, so it can't be skipped.</li>
+<li>Buildings page: a campus card with floor pills. Floors you've downloaded are filled in; floors you can import have dashed outlines.</li>
+</ul>
+</header>
+
+<div class="grid">
+
+<figure><div class="phone"><div class="status" style="background:var(--teal);color:#fff"><span>5:13</span><span>●● ▮</span></div>
+<div class="hero"><div class="hi">Good afternoon</div><h2>Find your way<br>around C Block</h2><span class="loc">📍 Floor 4 · change</span></div>
+<div class="searchc">⌕ Search a room, lab or facility<span class="mic">↗</span></div>
+<div class="sec"><h4>Browse</h4><div class="cats"><div class="cat"><b>🏫</b>Classes</div><div class="cat c2"><b>🚻</b>Washrooms</div><div class="cat c3"><b>🧪</b>Labs</div><div class="cat c4"><b>🪜</b>Stairs</div></div></div>
+<div class="sec"><h4>Recent <span>See all 15</span></h4><div class="hscroll">
+<div class="room"><div class="n">C-402</div><div class="k">ClassRoom · right side</div><div class="go">Directions →</div></div>
+<div class="room"><div class="n">C-408</div><div class="k">ClassRoom · left side</div><div class="go">Directions →</div></div>
+<div class="room"><div class="n">WR</div><div class="k">Men's washroom</div><div class="go">Directions →</div></div></div></div>
+<div class="tabbar"><span class="on"><b>⌂</b>Home</span><span><b>▦</b>Map</span><span><b>🏛</b>Campus</span><span><b>⚙</b>Setup</span></div>
+</div><figcaption><b>1 · Home</b>A welcoming start page that answers the question students actually have: "where is my class?"</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 180 276 470" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M203 340 l10 -20 a13 13 0 1 0 -20 0z" fill="var(--coral)"/></svg></div>
+<div class="status"><span>5:13</span><span>●● ▮</span></div><span class="back">←</span>
+<div class="detail"><div class="grab"></div><div class="dname">C-402</div><div class="dsub">ClassRoom · C Block, Floor 4 · right side of the main corridor</div>
+<div class="chips"><span class="chip">♿ Step-free</span><span class="chip">🚪 1 entrance</span><span class="chip o">Classroom</span></div>
+<div class="btn">Directions</div><div class="btn l" style="margin-top:8px">★ Save place</div></div>
+</div><figcaption><b>2 · Place detail</b>Choosing a room highlights it on the map and opens a rich detail sheet with one main action.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 180 276 470" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M203 340 l10 -20 a13 13 0 1 0 -20 0z" fill="var(--coral)"/></svg></div>
+<div class="status"><span>5:13</span><span>●● ▮</span></div><span class="back">←</span>
+<div class="detail"><div class="grab"></div><div class="dsub" style="margin:0;font-weight:700">Directions to</div><div class="dname" style="font-size:26px">C-402 ClassRoom</div>
+<div class="startq"><span style="font-size:22px">📍</span><div><div class="t">Where are you starting?</div><div class="s">We need this before we can draw the route</div></div></div>
+<div class="opts"><div class="o sel"><b>⌖</b>On map</div><div class="o"><b>🚪</b>Room door</div><div class="o"><b>≋</b>Wi-Fi</div></div>
+<div class="btn t">Continue</div></div>
+</div><figcaption><b>3 · Start inside directions</b>The start question sits in the same sheet as the destination. It feels like part of getting directions, not a separate chore.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 180 276 470" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M100 202 H124 V362 H160" fill="none" stroke="var(--teal)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="100" cy="202" r="8" fill="#fff" stroke="var(--teal)" stroke-width="4"/>
+<path d="M203 340 l10 -20 a13 13 0 1 0 -20 0z" fill="var(--coral)"/></svg></div>
+<div class="status"><span>5:14</span><span>●● ▮</span></div><span class="back">←</span>
+<div class="detail"><div class="grab"></div>
+<div class="kv" style="margin:0"><div><b>24 m</b>distance</div><div><b>~30 s</b>walk</div><div><b>C-407</b>from</div></div>
+<div style="font-weight:800;margin-top:14px">Which way are you facing on the map?</div>
+<div class="dirs"><div>↑</div><div class="sel">↓</div><div>←</div><div>→</div></div>
+<div class="btn">Let's go</div></div>
+</div><figcaption><b>4 · Route &amp; facing</b>The route preview and the direction question share one sheet. Key facts are shown in a large serif.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 120 276 380" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M124 268 V362 H160" fill="none" stroke="var(--teal)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="124" cy="268" r="24" fill="var(--teal)" opacity=".15"/><circle cx="124" cy="268" r="8" fill="var(--teal)" stroke="#fff" stroke-width="3"/>
+<path d="M203 340 l10 -20 a13 13 0 1 0 -20 0z" fill="var(--coral)"/></svg></div>
+<div class="status"><span>5:15</span><span>●● ▮</span></div>
+<div class="banner"><span class="a">↓</span><div><div class="m">Straight for 9 m</div><div class="n">C-402 will be on your left</div></div></div>
+<div class="detail"><div style="display:flex;justify-content:space-between;align-items:center"><div class="dname" style="font-size:24px">C-402</div><span class="chip">● Locked on</span></div>
+<div class="kv"><div><b>14 m</b>to go</div><div><b>0:18</b>arrival</div><div><b>±1.8 m</b>accuracy</div></div>
+<div class="btn l">End directions</div></div>
+</div><figcaption><b>5 · Live</b>A high-contrast instruction banner with a sunny accent arrow. Status is a single friendly chip.</figcaption></figure>
+
+<figure><div class="phone"><div class="status"><span>5:16</span><span>●● ▮</span></div>
+<div class="page"><h2>Campus</h2><div class="dsub">FAST-NUCES Islamabad</div>
+<div class="campus"><div class="img"><svg viewBox="0 0 248 567"><use href="#cf4" width="248" height="567"/></svg></div><div class="body"><div style="font-weight:800">C Block</div><div class="dsub" style="margin-top:2px">Pick a floor</div>
+<div class="flrs"><span class="dl">F3 ↓</span><span class="on">F4 ✓</span><span class="dl">F5 ↓</span></div></div></div>
+<div class="campus"><div class="img" style="background:linear-gradient(135deg,#f26b4f,#f6a05a)"></div><div class="body"><div style="font-weight:800">A Block</div>
+<div class="flrs"><span class="dl">G ↓</span><span class="dl">F1 ↓</span><span class="dl">F2 ↓</span></div></div></div>
+<div class="btn l">＋ Add another building</div></div>
+<div class="tabbar"><span><b>⌂</b>Home</span><span><b>▦</b>Map</span><span class="on"><b>🏛</b>Campus</span><span><b>⚙</b>Setup</span></div>
+</div><figcaption><b>6 · Campus</b>Buildings are grouped by block. Filled pills are floors you've downloaded; dashed pills are floors you can import with one tap.</figcaption></figure>
+
+</div></body></html>

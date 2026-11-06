@@ -14,7 +14,8 @@ class MapperImportUiTest {
   val state=TurnAppState().apply {mode=DataMode.REAL_DEVICE;destination=TurnDestination.VENUES}
   var selected="";var replace=false
   compose.setContent {TurnApp(state,TurnAppActions(onBundledMapperImport={f,r->selected=f;replace=r}))}
-  compose.onNodeWithText("Import university mapper floor").performClick()
+  // The bundled floors are listed directly; the first row is C-F4.
+  compose.onAllNodesWithText("Add").onFirst().performScrollTo().performClick()
   compose.onNodeWithText("This also deletes linked survey/positioning recordings and AR drafts on this device. Export anything you want to keep first.").assertIsDisplayed()
   compose.onNodeWithText("Import C-F4").performClick()
   compose.runOnIdle {assertEquals("C-F4",selected);assertTrue(replace)}

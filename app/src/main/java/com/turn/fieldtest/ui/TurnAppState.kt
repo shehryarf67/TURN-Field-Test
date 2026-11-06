@@ -84,6 +84,8 @@ class TurnAppState {
         pickingHeading = false
     }
     var pickingStart by mutableStateOf(false)
+    /** Quarter turns clockwise the Explore map is drawn with; screen directions must be converted to map headings. */
+    var mapQuarterTurns by mutableIntStateOf(0)
     var initialHeadingDegrees by mutableStateOf(0.0)
     var liveEstimateEpochMillis by mutableStateOf<Long?>(null)
     var surveyPointProgress by mutableStateOf<Map<String, SurveyPointProgress>>(emptyMap())

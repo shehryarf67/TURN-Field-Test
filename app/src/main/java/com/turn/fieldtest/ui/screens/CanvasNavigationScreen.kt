@@ -1,9 +1,12 @@
 package com.turn.fieldtest.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -14,6 +17,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -27,7 +37,48 @@ import com.turn.fieldtest.core.MetricPoint
 import com.turn.fieldtest.ui.TurnAppActions
 import com.turn.fieldtest.ui.TurnAppState
 import com.turn.fieldtest.ui.model.TurnDestination
+import com.turn.fieldtest.ui.theme.TurnAmber
+import com.turn.fieldtest.ui.theme.TurnMint
+import com.turn.fieldtest.ui.theme.TurnRed
 import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
+
+/** Room categories offered as search shortcuts; a category only appears when a place matches it. */
+private val placeCategories = listOf(
+    "Classrooms" to listOf("class"), "Labs" to listOf("lab"), "Washrooms" to listOf("wash", "toilet", "wr"),
+    "Stairs" to listOf("stair"), "Offices" to listOf("office"),
+)
+
+private fun inCategory(name: String, category: String?): Boolean =
+    category == null || placeCategories.first { it.first == category }.second.any { name.lowercase().contains(it) }
+
+/** Next guidance line from a metric route (+x right, +y up). Pure, so turn wording never depends on the screen. */
+internal data class RouteInstruction(val mapHeadingDegrees: Double, val distanceMetres: Double, val then: String)
+
+internal fun nextInstruction(route: List<Offset>, destinationName: String): RouteInstruction? {
+    val legs = route.zipWithNext().filter { (a, b) -> (b - a).getDistance() > 0.3f }
+    if (legs.isEmpty()) return null
+    fun heading(leg: Pair<Offset, Offset>) = Math.toDegrees(atan2((leg.second.y - leg.first.y).toDouble(), (leg.second.x - leg.first.x).toDouble()))
+    fun turn(from: Double, to: Double) = ((to - from + 540.0) % 360.0) - 180.0
+    val first = heading(legs.first())
+    var distance = 0.0
+    var index = 0
+    while (index < legs.size && abs(turn(first, heading(legs[index]))) < 30.0) {
+        distance += (legs[index].second - legs[index].first).getDistance(); index++
+    }
+    val then = if (index >= legs.size) "then arrive at $destinationName"
+        else if (turn(first, heading(legs[index])) > 0) "then turn left" else "then turn right"
+    return RouteInstruction(first, distance, then)
+}
+
+private fun walkingTime(metres: Double): String {
+    val seconds = (metres / 1.2).roundToInt()
+    return if (seconds < 60) "~${seconds.coerceAtLeast(1)} s" else "~${(seconds + 30) / 60} min"
+}
 
 /** Canvas is a presentation of the existing real-device session, never a second positioning engine. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,18 +86,24 @@ import kotlinx.coroutines.delay
 fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
     var sheet by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
     var query by rememberSaveable(state.activeProject) { mutableStateOf("") }
+    var category by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
     var startQuery by rememberSaveable(state.activeProject) { mutableStateOf("") }
     var showReferences by rememberSaveable(state.activeProject) { mutableStateOf(false) }
     var wifiStartChosen by rememberSaveable(state.activeProject) { mutableStateOf(false) }
+    var startLabel by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
+    var startPlaceId by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
     var positionOnly by rememberSaveable(state.activeProject) { mutableStateOf(false) }
     var details by rememberSaveable { mutableStateOf(false) }
     var startAttempted by rememberSaveable(state.activeProject) { mutableStateOf(false) }
+    var cardHeightPx by remember { mutableIntStateOf(0) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state.liveRunning) { while (state.liveRunning) { now = System.currentTimeMillis(); delay(1000) } }
     val age = state.liveEstimateEpochMillis?.let { (now - it).coerceAtLeast(0) / 1000 }
     val confidence = navigationConfidence(state, age, now)
     val selected = state.destinations.firstOrNull { it.id == state.selectedDestinationId }
-    LaunchedEffect(selected?.id) {if(selected!=null) positionOnly=false}
+    LaunchedEffect(selected?.id) { if (selected != null) positionOnly = false }
+    // A start picked on the map no longer matches the label it was given when it changes elsewhere.
+    LaunchedEffect(state.manualStartPoint) { if (state.manualStartPoint == null && !wifiStartChosen) { startLabel = null; startPlaceId = null } }
     val hasWalkableMap = state.allWalkablePolygons().any { it.size >= 3 }
     val busy = state.projectBusy || state.liveStarting || state.surveyRunning || state.surveyStarting || state.realHeadingAlignmentBusy
     val previewGraph = remember(state.activeProject, state.navigationPreviewGraph, state.hasUnsavedMapChanges, state.navigationNodes.toList(),
@@ -54,36 +111,60 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
         if(state.hasUnsavedMapChanges) null else state.navigationPreviewGraph ?: runCatching { state.draftNavigationGraph() }.getOrNull()
     }
     val previewStart = state.manualStartPoint
+    val startChosen = previewStart != null || wifiStartChosen
     val destinationNode = previewGraph?.nodes?.firstOrNull { it.poiId == selected?.id && selected != null }
     val routePreview = remember(previewGraph, previewStart, selected?.id, state.liveRunning) {
         if(state.liveRunning || previewStart==null || destinationNode==null) null else
             runCatching { previewGraph?.route(MetricPoint(previewStart.x.toDouble(),previewStart.y.toDouble()),destinationNode.id) }.getOrNull()
     }
-    val routeMessage = when {
-        state.hasUnsavedMapChanges -> "Save map changes in Map setup to preview directions."
-        selected == null -> "Select a room to see directions."
-        destinationNode == null -> "This destination has no connected path. Connect its entrance in Map setup."
-        previewStart == null && wifiStartChosen -> "The route will appear after a confident fresh Wi-Fi fix."
-        previewStart == null -> "Choose where you are standing to preview the route."
-        routePreview == null -> "No walkable route from this start. Choose another start or check paths in Map setup."
-        else -> "Route ready · ends at the room entrance"
+    val placeDistances = remember(previewGraph, previewStart) {
+        if (previewGraph == null || previewStart == null) emptyMap() else previewGraph.nodes.filter { it.poiId != null }.mapNotNull { node ->
+            runCatching { previewGraph.route(MetricPoint(previewStart.x.toDouble(), previewStart.y.toDouble()), node.id) }.getOrNull()
+                ?.let { node.poiId!! to it.distanceMetres }
+        }.toMap()
     }
-    fun prepareStart(stage: String) {
-        if(stage=="start") startQuery=""
+    val routeProblem = when {
+        state.hasUnsavedMapChanges -> "Save map changes in Map setup to preview directions."
+        selected == null -> null
+        destinationNode == null -> "${selected.name} has no connected path yet. Connect its entrance in Map setup."
+        previewStart == null && wifiStartChosen -> "The route appears once Wi-Fi finds you."
+        previewStart != null && routePreview == null -> "No walkable route from this start. Choose another start or check paths in Map setup."
+        else -> null
+    }
+    val canStart = !busy && !state.sessionLocked && !state.hasUnsavedMapChanges &&
+        (if (selected == null) positionOnly else destinationNode != null && (previewStart == null || routePreview != null))
+    // Screen directions as drawn on this map, converted to and from the map frame used for headings.
+    fun screenToMap(screenDegrees: Double) = (screenDegrees + 90.0 * state.mapQuarterTurns + 360.0) % 360.0
+    fun mapToScreen(mapDegrees: Double) = (mapDegrees - 90.0 * state.mapQuarterTurns + 360.0) % 360.0
+    fun openStart() { startQuery = ""; sheet = "start" }
+    fun openDestinations(withCategory: String? = null) { query = ""; category = withCategory; sheet = "destinations" }
+    fun openDirection() {
         state.headingChoiceConfirmed = false
         state.realHeadingStatus = "Stand still and choose the direction you are facing for this session"
-        sheet = stage
+        sheet = "direction"
     }
-    fun begin() {
-        if (state.liveRunning || state.liveCloseFailed) actions.onRealLiveToggled()
-        else if(selected==null) {positionOnly=false;query="";sheet="destinations"}
-        else prepareStart(if (state.manualStartPoint == null && !wifiStartChosen) "start" else "direction")
+    fun primaryAction() = when {
+        state.liveRunning || state.liveCloseFailed -> actions.onRealLiveToggled()
+        !startChosen -> openStart()
+        selected == null && !positionOnly -> openDestinations()
+        else -> openDirection()
     }
-    fun selectStart(point: androidx.compose.ui.geometry.Offset) {
-        wifiStartChosen=false
+    fun selectStart(point: Offset, label: String, placeId: String? = null) {
+        wifiStartChosen = false
         state.chooseKnownStart(point)
-        query=""
-        sheet=if(positionOnly) "direction" else if(selected==null) "destinations" else null
+        startLabel = label; startPlaceId = placeId
+        sheet = if (selected == null && !positionOnly) { query = ""; category = null; "destinations" } else null
+    }
+    fun chooseDestination(id: String) {
+        positionOnly = false
+        actions.onDestinationSelected(id)
+        sheet = if (!startChosen && !state.liveRunning) { startQuery = ""; "start" } else null
+    }
+    fun swap() {
+        val formerStart = startPlaceId ?: return
+        val target = destinationNode ?: return
+        selectStart(Offset(target.point.x.toFloat(), target.point.y.toFloat()), "${selected?.name} entrance", selected?.id)
+        actions.onDestinationSelected(formerStart)
     }
     fun chooseDirection(degrees: Double) {
         if (state.liveRunning) actions.onRealHeadingAligned(degrees)
@@ -105,28 +186,26 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
             }
         }
     }
+    val live = state.liveRunning || state.liveStarting || state.liveCloseFailed
+    val instruction = if (state.liveRunning && selected != null && state.routePoints.size >= 2) nextInstruction(state.routePoints, selected.name) else null
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val landscape = maxWidth > maxHeight
-        val cardWidth = if (landscape) { 310.dp } else { maxWidth.coerceAtMost(460.dp) - 24.dp }
-        val cardHeight = if (landscape) {
-            (maxHeight - if(state.liveRunning) 124.dp else 146.dp).coerceAtLeast(100.dp)
-        } else {
-            if(state.liveRunning) 190.dp else (maxHeight * 0.40f).coerceAtMost(280.dp)
-        }
-        val mapInsets = if (landscape) {
-            PaddingValues(start = cardWidth + 24.dp, top = if(state.liveRunning) 112.dp else 130.dp, end = 8.dp, bottom = 8.dp)
-        } else {
-            PaddingValues(top = if(state.liveRunning) 112.dp else 130.dp, bottom = cardHeight + 12.dp, start = 8.dp, end = 8.dp)
-        }
+        val density = LocalDensity.current
+        val cardWidth = if (landscape) 340.dp else maxWidth.coerceAtMost(480.dp)
+        val cardHeight = with(density) { cardHeightPx.toDp() }
+        val topInset = if (live) 104.dp else if (state.pickingStart || state.pickingHeading) 76.dp else 124.dp
+        val mapInsets = if (landscape) PaddingValues(start = cardWidth + 16.dp, top = topInset, end = 8.dp, bottom = 8.dp)
+            else PaddingValues(top = topInset, bottom = cardHeight + 8.dp, start = 8.dp, end = 8.dp)
         NavigationMap(state, Modifier.fillMaxSize(), showPosition = true, showGraph = state.debugOverlays,
             showReferences = state.pickingStart, viewportPadding = mapInsets, compactControls = true,
-            previewRoute = if(!state.liveRunning) routePreview?.points?.map { androidx.compose.ui.geometry.Offset(it.x.toFloat(),it.y.toFloat()) } ?: emptyList() else null,
+            previewRoute = if(!state.liveRunning) routePreview?.points?.map { Offset(it.x.toFloat(),it.y.toFloat()) } ?: emptyList() else null,
             focusDestination = !state.pickingStart && !state.pickingHeading,
-            controlsPadding = if (landscape) PaddingValues(12.dp) else PaddingValues(end = 12.dp, bottom = cardHeight + 28.dp),
+            controlsPadding = if (landscape) PaddingValues(12.dp) else PaddingValues(end = 12.dp, bottom = cardHeight + 16.dp),
+            rotateToFit = true, roomLabels = true,
             onDestinationTapped = if (state.pickingStart || state.pickingHeading) null else actions.onDestinationSelected,
             onTap = { point, _ ->
                 when {
-                    state.pickingStart && !state.sessionLocked -> selectStart(point)
+                    state.pickingStart && !state.sessionLocked -> selectStart(point, "Point on map")
                     state.pickingHeading -> {
                         val origin = if (state.liveRunning) state.realLivePosition else state.manualStartPoint
                         if (origin != null) runCatching {
@@ -138,204 +217,211 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                     }
                 }
             })
-        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
-                    Text("turn.", Modifier.padding(horizontal = 14.dp, vertical = 5.dp), style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (live) {
+                Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary, shadowElevation = 6.dp) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        if (instruction != null) Icon(Icons.Outlined.North, null, Modifier.size(30.dp)
+                            .rotate((90.0 - mapToScreen(instruction.mapHeadingDegrees)).toFloat()))
+                        else Icon(Icons.Outlined.MyLocation, null, Modifier.size(26.dp))
+                        Column(Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }) {
+                            Text(when {
+                                instruction != null -> "Continue %.0f m".format(instruction.distanceMetres)
+                                state.liveStarting -> "Starting…"
+                                !state.realLiveInitialized -> "Finding your position"
+                                selected == null -> "Showing your position"
+                                else -> state.routeStatus
+                            }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2)
+                            Text(instruction?.then ?: confidence, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                        }
+                        IconButton(onClick = { state.navigationFullscreen = true }) { Icon(Icons.Outlined.Fullscreen, "Full screen map") }
+                        IconButton(onClick = { sheet = "options" }) { Icon(Icons.Outlined.MoreHoriz, "Map options") }
+                    }
                 }
-                Surface(onClick = { state.selectDestination(TurnDestination.VENUES) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface) {
-                    Text(state.floorName, Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else if (state.pickingStart || state.pickingHeading) {
+                Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(if (state.pickingStart) Icons.Outlined.TouchApp else Icons.Outlined.Explore, null, tint = MaterialTheme.colorScheme.primary)
+                        Text(if (state.pickingStart) "Tap where you are standing" else "Tap a point ahead of you, at least 1 m away",
+                            Modifier.weight(1f).padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        TextButton(onClick = { state.pickingStart = false; state.pickingHeading = false
+                            sheet = if (state.liveRunning) "options" else if (state.pickingHeading) "direction" else "start" }) { Text("Cancel") }
+                    }
                 }
-                if(state.liveRunning) IconButton(onClick={state.navigationFullscreen=true}) { Icon(Icons.Outlined.Fullscreen,"Full screen map") }
-                IconButton(onClick = { sheet = "options" }) { Icon(Icons.Outlined.MoreVert, "Map options") }
-            }
-            if (state.liveRunning) Surface(shape=RoundedCornerShape(18.dp),color=MaterialTheme.colorScheme.primaryContainer) {
-                Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp),verticalAlignment=Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.NearMe,null,tint=MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Text(if(selected==null) "Live position · choose a room for directions" else if(state.routePoints.isEmpty()) state.routeStatus else "Follow the blue route to ${selected.name}",
-                        style=MaterialTheme.typography.bodyMedium,maxLines=2)
+            } else {
+                Surface(onClick = { openDestinations() }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Search rooms & places", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        Surface(onClick = { state.selectDestination(TurnDestination.VENUES) }, shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                            Text(state.floorName, Modifier.padding(horizontal = 10.dp, vertical = 6.dp).widthIn(max = 96.dp),
+                                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { state.navigationFullscreen = true }, Modifier.size(40.dp)) { Icon(Icons.Outlined.Fullscreen, "Full screen map") }
+                        IconButton(onClick = { sheet = "options" }, Modifier.size(40.dp)) { Icon(Icons.Outlined.MoreVert, "Map options") }
+                    }
                 }
-            }
-            if (!state.liveRunning) Surface(onClick = { query="";sheet = "destinations" },
-                shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Find a room or facility", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { state.navigationFullscreen = true }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Outlined.Fullscreen, "Full screen map")
+                val shownCategories = placeCategories.map { it.first }.filter { c -> state.destinations.any { inCategory(it.name, c) } }
+                if (shownCategories.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    shownCategories.forEach { c ->
+                        Surface(onClick = { openDestinations(c) }, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surface, shadowElevation = 3.dp) {
+                            Text(c, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
             }
         }
-        Surface(modifier = Modifier.align(if (landscape) Alignment.BottomStart else Alignment.BottomCenter)
-            .padding(12.dp).width(cardWidth).heightIn(max = cardHeight), shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface, shadowElevation = 3.dp) {
-            Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
-              Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-                  verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (state.pickingStart || state.pickingHeading) {
-                    Text(if (state.pickingStart) "Tap where you are standing" else "Tap a point ahead of you",
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(if (state.pickingStart) "Choose your known location on this floor." else
-                        "Face your walking direction and tap at least 1 m ahead on the map.", style = MaterialTheme.typography.bodySmall)
-                    if (state.pickingHeading) Text(state.realHeadingStatus, style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { state.pickingStart = false; state.pickingHeading = false; sheet = if (state.liveRunning) "options" else "start" }) { Text("Cancel map selection") }
-                } else if (state.liveRunning || state.liveStarting || state.liveCloseFailed) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Outlined.MyLocation, null, tint = MaterialTheme.colorScheme.primary)
-                        Column(Modifier.weight(1f)) {
-                            Text(selected?.name ?: "Live position", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(confidence, style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                        }
-                        state.realLiveUncertaintyMetres?.let { Text("± %.1f m".format(it), style = MaterialTheme.typography.labelMedium) }
+        if (!state.pickingStart && !state.pickingHeading) Surface(
+            modifier = Modifier.align(if (landscape) Alignment.BottomStart else Alignment.BottomCenter).width(cardWidth)
+                .then(if (landscape) Modifier.padding(12.dp) else Modifier).onSizeChanged { cardHeightPx = it.height },
+            shape = if (landscape) RoundedCornerShape(24.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
+            Column(Modifier.padding(horizontal = 18.dp).padding(top = 10.dp, bottom = 14.dp).heightIn(max = if (landscape) maxHeight - 24.dp else maxHeight * 0.55f)
+                .verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (!landscape) Box(Modifier.align(Alignment.CenterHorizontally).size(36.dp, 4.dp)
+                    .then(Modifier).padding(0.dp)) { Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.outlineVariant) {} }
+                if (live) LiveCard(state, selected?.name, confidence, age, busy, onDirection = { sheet = "direction" },
+                    onDestination = { openDestinations() }, onStop = actions.onRealLiveToggled)
+                else {
+                    Text("Plan your route", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    FromToCard(
+                        from = when { previewStart != null -> startLabel ?: "Point on map"; wifiStartChosen -> "Detect with Wi-Fi"; else -> null },
+                        to = selected?.name ?: if (positionOnly) "Just my position" else null,
+                        onFrom = { openStart() }, onTo = { openDestinations() },
+                        onSwap = if (startPlaceId != null && destinationNode != null) ({ swap() }) else null,
+                        enabled = !busy && !state.sessionLocked,
+                    )
+                    if (routePreview != null) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        RouteStat("%.0f m".format(routePreview.distanceMetres), "Walking distance", Modifier.weight(1f))
+                        RouteStat(walkingTime(routePreview.distanceMetres), "At walking pace", Modifier.weight(1f))
                     }
-                    if (selected != null) {
-                        Text(if (age != null && age > 20) "Route based on last known position" else state.routeStatus,
-                            style = MaterialTheme.typography.bodySmall)
-                        state.remainingDistanceMetres?.let { Text("%.1f m remaining".format(it), style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-                    } else TextButton(onClick = { query="";sheet = "destinations" }) { Text("Choose destination") }
-                    if (!state.realLiveInitialized || state.realWifiIssue != null || state.liveCloseFailed)
-                        Text(state.realWifiIssue ?: state.realLiveStatus, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error)
-                } else {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(selected?.name ?: "Where to?", style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        TextButton(onClick = { prepareStart("start") }, enabled = !busy && !state.sessionLocked) {
-                            Text(if (state.manualStartPoint == null && !wifiStartChosen) "Set start" else "Change start")
-                        }
-                    }
-                    if (selected == null) {
-                        Text("Set your start, then choose a destination. You can also tap a room on the map.",style=MaterialTheme.typography.bodySmall)
-                        if (state.destinations.isEmpty()) Text(if (hasWalkableMap) "Add places and paths in Map setup to get directions."
-                            else "Import a floor plan or create one with your phone, then define walkable space.", style = MaterialTheme.typography.bodySmall)
-                        if(state.destinations.isNotEmpty()) TextButton(onClick={query="";sheet="destinations"},contentPadding=PaddingValues(0.dp)) {
-                            Text("Browse all ${state.destinations.size} places on ${state.floorName}")
-                        }
-                    } else {
-                        Row {
-                            Text(routeMessage, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                            IconButton(onClick = { actions.onDestinationSelected(null) }) { Icon(Icons.Outlined.Close, "Clear destination") }
-                        }
-                        routePreview?.let { Text("%.1f m · route preview".format(it.distanceMetres),style=MaterialTheme.typography.titleLarge,color=MaterialTheme.colorScheme.primary) }
-                        TextButton(onClick={query="";sheet="destinations"}) {Text("Change destination")}
-                        if(destinationNode==null || (previewStart!=null && routePreview==null)) TextButton(onClick={state.selectDestination(TurnDestination.FLOOR_EDITOR)}) { Text("Open Map setup") }
-                    }
-                    if(state.manualStartPoint!=null) Text("Start location selected · ${state.floorName}",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.primary)
-                    else if(wifiStartChosen) Text("Start: fresh Wi-Fi fix",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.primary)
-                    if (state.hasUnsavedMapChanges) Text("Save map changes in Tools before tracking.", color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall)
+                    routeProblem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    if (selected != null && (destinationNode == null || (previewStart != null && routePreview == null)))
+                        TextButton(onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Open Map setup") }
                     if (startAttempted || state.realWifiIssue != null) Text(state.realWifiIssue ?: state.realLiveStatus,
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (state.realLivePosition != null) "Last known position · tracking stopped" else "Real device · ${state.venueName}", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-              }
-              if (!state.pickingStart && !state.pickingHeading) {
-                if (state.liveRunning || state.liveStarting || state.liveCloseFailed) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { sheet = "direction" }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Adjust direction") }
-                        Button(onClick = actions.onRealLiveToggled, enabled = !busy, modifier = Modifier.weight(1f)) {
-                            Text(if (state.liveCloseFailed) "Retry saving" else if (state.liveStarting) "Starting…" else "Stop tracking")
-                        }
+                    Button(onClick = { if (hasWalkableMap) primaryAction() else state.selectDestination(TurnDestination.FLOOR_EDITOR) },
+                        enabled = !busy && !state.sessionLocked && (!hasWalkableMap || !state.hasUnsavedMapChanges) &&
+                            (selected == null || destinationNode != null && (previewStart == null || routePreview != null)),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)) {
+                        Icon(Icons.Outlined.NearMe, null); Spacer(Modifier.width(8.dp))
+                        Text(if (!hasWalkableMap) "Prepare this floor" else "Start navigation", fontWeight = FontWeight.Bold)
                     }
-                } else Button(onClick = { if (hasWalkableMap) begin() else state.selectDestination(TurnDestination.FLOOR_EDITOR) },
-                    enabled = !busy && !state.sessionLocked && (!hasWalkableMap || !state.hasUnsavedMapChanges) &&
-                        (selected==null || destinationNode!=null && (previewStart==null || routePreview!=null)),
-                    modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
-                    Icon(Icons.Outlined.NearMe, null); Spacer(Modifier.width(8.dp))
-                    Text(if (!hasWalkableMap) "Prepare this floor" else if (selected == null) "Choose destination" else "Navigate here")
+                    if (state.realLivePosition != null) Text("Grey dot: last known position · tracking stopped", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (state.destinations.isEmpty()) Text(if (hasWalkableMap) "Add places and paths in Map setup to get directions."
+                        else "Import a floor plan or create one with your phone, then define walkable space.", style = MaterialTheme.typography.bodySmall)
                 }
-              }
             }
         }
     }
     if (sheet != null) ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).imePadding()
-            .padding(start = 22.dp, end = 22.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 600.dp).verticalScroll(rememberScrollState()).imePadding()
+            .padding(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when (sheet) {
                 "destinations" -> {
-                    Text("Choose your destination", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    if(state.manualStartPoint!=null || wifiStartChosen) Text("Start selected. Now choose where you want to go.",style=MaterialTheme.typography.bodyMedium)
-                    OutlinedTextField(query, { query = it }, label = { Text("Room or facility") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    val filtered = state.destinations.filter { it.name.contains(query.trim(), ignoreCase = true) }
-                    if (filtered.isEmpty()) {
-                        Text(if (state.destinations.isEmpty()) "There are no destinations on this floor yet." else "No places match your search.")
-                        TextButton(onClick = { sheet = null; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add destinations in Map setup") }
+                    Text("Where to?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    if (startChosen) Text("Start set. Now choose where you want to go.", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(query, { query = it }, placeholder = { Text("Search rooms & places") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp))
+                    val shownCategories = placeCategories.map { it.first }.filter { c -> state.destinations.any { inCategory(it.name, c) } }
+                    if (shownCategories.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        shownCategories.forEach { c -> FilterChip(category == c, { category = if (category == c) null else c }, { Text(c) }) }
                     }
-                    filtered.forEach { poi -> PlaceRow(poi.name,
-                        if(state.navigationNodes.any {it.poiId==poi.id}) state.floorName else "${state.floorName} · entrance not connected",
-                        poi.id == state.selectedDestinationId) {
-                        positionOnly=false;actions.onDestinationSelected(poi.id); sheet = null
-                    } }
-                    TextButton(onClick={actions.onDestinationSelected(null);positionOnly=true;prepareStart(if(state.manualStartPoint==null && !wifiStartChosen) "start" else "direction")},enabled=!busy && !state.sessionLocked && hasWalkableMap && !state.hasUnsavedMapChanges) {
-                        Text("Track position without a destination")
+                    val filtered = state.destinations.filter { it.id != startPlaceId && it.name.contains(query.trim(), ignoreCase = true) && inCategory(it.name, category) }
+                        .sortedWith(compareBy({ placeDistances[it.id] ?: Double.MAX_VALUE }, { it.name }))
+                    if (filtered.isEmpty()) {
+                        Text(if (state.destinations.isEmpty()) "There are no places on this floor yet." else "No places match your search.")
+                        TextButton(onClick = { sheet = null; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add places in Map setup") }
+                    }
+                    filtered.forEach { poi ->
+                        val connected = state.navigationNodes.any { it.poiId == poi.id }
+                        PlaceRow(poi.name, if (!connected) "Entrance not connected" else state.floorName,
+                            trailing = placeDistances[poi.id]?.let { "%.0f m".format(it) }, selected = poi.id == state.selectedDestinationId,
+                            badge = poi.name.filter { it.isDigit() }.takeLast(3).ifEmpty { null }) { chooseDestination(poi.id) }
+                    }
+                    TextButton(onClick = {
+                        actions.onDestinationSelected(null); positionOnly = true
+                        sheet = if (startChosen) null else { startQuery = ""; "start" }
+                    }, enabled = !busy && !state.sessionLocked && hasWalkableMap && !state.hasUnsavedMapChanges) {
+                        Icon(Icons.Outlined.MyLocation, null); Spacer(Modifier.width(8.dp)); Text("Just show my position")
                     }
                 }
                 "start" -> {
-                    Text("1 · Where are you standing?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Choose a reference point or a room only when you are at its mapped entrance. Otherwise, pick a known walkable location on the map.", style = MaterialTheme.typography.bodyMedium)
-                    OutlinedTextField(startQuery,{startQuery=it},label={Text("Search current location")},singleLine=true,
-                        leadingIcon={Icon(Icons.Outlined.Search,null)},modifier=Modifier.fillMaxWidth())
-                    Button(onClick = { state.pickingStart = true; state.pickingHeading = false; sheet = null },
-                        enabled = !busy && !state.sessionLocked, modifier = Modifier.fillMaxWidth()) { Text("Pick my location on the map") }
-                    val starts=state.referencePoints.filter {it.label.contains(startQuery.trim(),ignoreCase=true)}
-                    val places=state.destinations.filter {it.name.contains(startQuery.trim(),ignoreCase=true)}
-                    TextButton(onClick={showReferences=!showReferences}) {Text(if(showReferences) "Hide saved reference points" else "Show saved reference points (optional)")}
-                    if(showReferences) Text("Known points for starting a session or Wi-Fi surveying. Choose one only if you can identify its exact physical location.",style=MaterialTheme.typography.bodySmall)
-                    starts.filter {showReferences || startQuery.isNotBlank()}.forEach { point -> OutlinedButton(onClick = {
-                        selectStart(point.metres)
-                    }, enabled = !busy && !state.sessionLocked, modifier = Modifier.fillMaxWidth()) { Text("I am at ${point.label}") } }
-                    if(places.isNotEmpty()) Text("Rooms & places · ${state.floorName}",style=MaterialTheme.typography.titleSmall)
-                    places.forEach {place ->
-                        val node=previewGraph?.nodes?.firstOrNull {it.poiId==place.id}
-                        val valid=node!=null && previewGraph?.floor?.isWalkable(node.point)==true
-                        OutlinedButton(onClick={node?.let {
-                            selectStart(androidx.compose.ui.geometry.Offset(it.point.x.toFloat(),it.point.y.toFloat()))
-                        }},enabled=valid && !busy && !state.sessionLocked,modifier=Modifier.fillMaxWidth()) {
-                            Column(Modifier.fillMaxWidth()) {
-                                Text("I am at ${place.name} entrance")
-                                if(!valid) Text("Entrance not connected · pick your location on the map",style=MaterialTheme.typography.bodySmall)
-                            }
+                    Text("Where are you now?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(startQuery, { startQuery = it }, placeholder = { Text("Search rooms & survey points") }, singleLine = true,
+                        leadingIcon = { Icon(Icons.Outlined.Search, null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp))
+                    val enabled = !busy && !state.sessionLocked
+                    if (startQuery.isBlank()) {
+                        ActionRow(Icons.Outlined.TouchApp, "Pick on map", "Tap the spot you're standing on", enabled) {
+                            state.pickingStart = true; state.pickingHeading = false; sheet = null
+                        }
+                        ActionRow(Icons.Outlined.Wifi, "Detect with Wi-Fi", "Needs a surveyed floor · waits for a confident fix", enabled) {
+                            state.chooseKnownStart(null); wifiStartChosen = true; startLabel = null; startPlaceId = null
+                            sheet = if (positionOnly || selected != null) null else { query = ""; category = null; "destinations" }
                         }
                     }
-                    if(starts.isEmpty() && places.isEmpty()) Text("No locations match your search.")
-                    TextButton(onClick = { state.chooseKnownStart(null); wifiStartChosen=true; query="";sheet=if(positionOnly || selected!=null) "direction" else "destinations" }, enabled = !busy && !state.sessionLocked) {
-                        Text("Use a confident fresh Wi-Fi fix")
+                    val places = state.destinations.filter { it.name.contains(startQuery.trim(), ignoreCase = true) }
+                    if (places.isNotEmpty()) Text("Stand at a room's door", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    places.forEach { place ->
+                        val node = previewGraph?.nodes?.firstOrNull { it.poiId == place.id }
+                        val valid = node != null && previewGraph.floor.isWalkable(node.point)
+                        PlaceRow(place.name, if (valid) "Entrance" else "Entrance not connected · pick on map instead", trailing = null,
+                            selected = place.id == startPlaceId, badge = place.name.filter { it.isDigit() }.takeLast(3).ifEmpty { null },
+                            enabled = valid && enabled) {
+                            node?.let { selectStart(Offset(it.point.x.toFloat(), it.point.y.toFloat()), "${place.name} entrance", place.id) }
+                        }
                     }
-                    Text("Automatic initialization needs surveyed points and a reliable fresh match. An uncertain match will wait.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val points = state.referencePoints.filter { it.label.contains(startQuery.trim(), ignoreCase = true) }
+                    if (points.isNotEmpty()) {
+                        if (startQuery.isBlank()) TextButton(onClick = { showReferences = !showReferences }) {
+                            Text(if (showReferences) "Hide survey points" else "Show survey points (${points.size})")
+                        }
+                        if (showReferences || startQuery.isNotBlank()) points.forEach { point ->
+                            PlaceRow(point.label, "Survey point · stand exactly on its floor label", trailing = null, selected = false,
+                                badge = null, enabled = enabled) { selectStart(point.metres, point.label) }
+                        }
+                    }
+                    if (startQuery.isNotBlank() && places.isEmpty() && points.isEmpty()) Text("No locations match your search.")
                 }
                 "direction" -> {
                     Text(if (state.liveRunning) "Adjust your direction" else "Which way are you facing?",
-                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Stand still. Hold the phone level with the top of the visible screen pointing where you will walk. Directions refer to this drawing.")
-                    listOf(listOf("← Left" to 180.0, "Right →" to 0.0), listOf("↑ Up" to 90.0, "↓ Down" to 270.0)).forEach { row ->
+                        style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("Hold the phone flat and point its top edge the way you'll walk. Then pick the matching direction on the map.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val chosenScreen = if (state.headingChoiceConfirmed || state.liveRunning)
+                        mapToScreen(if (state.liveRunning) state.realLiveHeadingDegrees else state.initialHeadingDegrees) else null
+                    DirectionDial(chosenScreen, Modifier.align(Alignment.CenterHorizontally))
+                    listOf(listOf("↑ Up" to 90.0, "↓ Down" to 270.0), listOf("← Left" to 180.0, "Right →" to 0.0)).forEach { row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            row.forEach { (name, degrees) -> OutlinedButton(onClick = { chooseDirection(degrees) },
-                                enabled = !busy, modifier = Modifier.weight(1f)) { Text(name) } }
+                            row.forEach { (name, screenDegrees) ->
+                                val on = !state.liveRunning && state.headingChoiceConfirmed && chosenScreen != null && abs(chosenScreen - screenDegrees) < 0.5
+                                if (on) Button(onClick = { chooseDirection(screenToMap(screenDegrees)) }, enabled = !busy, modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp)) { Text(name) }
+                                else OutlinedButton(onClick = { chooseDirection(screenToMap(screenDegrees)) }, enabled = !busy, modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp)) { Text(name) }
+                            }
                         }
                     }
                     OutlinedButton(onClick = { state.pickingHeading = true; state.pickingStart = false; sheet = null },
                         enabled = !busy && (if (state.liveRunning) state.realLivePosition != null else state.manualStartPoint != null),
-                        modifier = Modifier.fillMaxWidth()) { Text("Point ahead on the map") }
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                        Icon(Icons.Outlined.Explore, null); Spacer(Modifier.width(8.dp)); Text("Tap a point ahead on the map")
+                    }
                     Text(state.realHeadingStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                    if(selected!=null && !state.liveRunning) Text(routeMessage,style=MaterialTheme.typography.bodySmall)
+                    routeProblem?.takeIf { !state.liveRunning }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     if (!state.liveRunning) Button(onClick = { startAttempted = true; sheet = null; actions.onRealLiveToggled() },
-                        enabled = !busy && state.headingChoiceConfirmed && !state.hasUnsavedMapChanges && !state.sessionLocked &&
-                            (if(selected==null) positionOnly else destinationNode!=null && (previewStart==null || routePreview!=null)),
-                        modifier = Modifier.fillMaxWidth()) { Text("Start tracking") }
-                    else Button(onClick = { sheet = null }, modifier = Modifier.fillMaxWidth()) { Text("Return to map") }
+                        enabled = canStart && state.headingChoiceConfirmed, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                        shape = RoundedCornerShape(16.dp)) { Text("I'm facing this way · Go", fontWeight = FontWeight.Bold) }
+                    else Button(onClick = { sheet = null }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("Done") }
                     TextButton(onClick = { sheet = null; details = true }) { Text("Advanced direction controls") }
                 }
                 "options" -> {
@@ -352,6 +438,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         }
                         Text(state.realWifiEvidenceStatus, style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = actions.onRealLiveRelocalizationRequested, enabled = !busy) { Text("Relocalize with next Wi-Fi scan") }
+                        TextButton(onClick = { sheet = "direction" }, enabled = !busy) { Text("Adjust direction") }
                         Text(state.realLiveRecordingStatus, style = MaterialTheme.typography.bodySmall)
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -371,6 +458,137 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
 }
 
 @Composable
+private fun LiveCard(state: TurnAppState, destination: String?, confidence: String, age: Long?, busy: Boolean,
+    onDirection: () -> Unit, onDestination: () -> Unit, onStop: () -> Unit) {
+    val (pill, pillColor) = when {
+        state.liveStarting -> "Starting" to TurnAmber
+        !state.realLiveInitialized -> "Locating" to TurnAmber
+        age != null && age > 20 -> "Signal lost" to TurnRed
+        confidence.contains("paused") -> "Heading paused" to TurnAmber
+        state.realLiveConfidence >= 0.65 -> "Good signal" to TurnMint
+        else -> "Low accuracy" to TurnAmber
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(destination ?: "Live position", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Surface(shape = RoundedCornerShape(50), color = pillColor.copy(alpha = 0.16f)) {
+            Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(Modifier.size(7.dp), shape = CircleShape, color = pillColor) {}
+                Text(pill, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (destination != null) RouteStat(state.remainingDistanceMetres?.let { "%.0f m".format(it) } ?: "–",
+            if (age != null && age > 20) "Last known" else "Left", Modifier.weight(1f))
+        RouteStat(state.realLiveUncertaintyMetres?.let { "±%.1f m".format(it) } ?: "–", "Accuracy", Modifier.weight(1f))
+        RouteStat("${state.realLiveStepCount}", "Steps", Modifier.weight(1f))
+    }
+    TextButton(onClick = onDestination, contentPadding = PaddingValues(0.dp)) {
+        Icon(Icons.Outlined.Place, null); Spacer(Modifier.width(6.dp)); Text(if (destination == null) "Choose destination" else "Change destination")
+    }
+    if (state.destinationReached) Text("You have arrived", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.Bold)
+    if (!state.realLiveInitialized || state.realWifiIssue != null || state.liveCloseFailed)
+        Text(state.realWifiIssue ?: state.realLiveStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(onClick = onDirection, enabled = !busy && state.liveRunning, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) {
+            Text("Adjust direction")
+        }
+        FilledTonalButton(onClick = onStop, enabled = !busy || state.liveCloseFailed, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) {
+            Text(if (state.liveCloseFailed) "Retry saving" else if (state.liveStarting) "Starting…" else "End navigation")
+        }
+    }
+}
+
+@Composable
+private fun FromToCard(from: String?, to: String?, onFrom: () -> Unit, onTo: () -> Unit, onSwap: (() -> Unit)?, enabled: Boolean) {
+    Surface(shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Box {
+            Column {
+                FromToRow(true, "From", from, "Where are you?", enabled, onFrom)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                FromToRow(false, "To", to, "Choose a destination", enabled, onTo)
+            }
+            if (onSwap != null) FilledTonalIconButton(onClick = onSwap, enabled = enabled,
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp).size(36.dp)) {
+                Icon(Icons.Outlined.SwapVert, "Swap start and destination")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FromToRow(start: Boolean, label: String, value: String?, placeholder: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (start) Surface(Modifier.size(14.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surface,
+            border = androidx.compose.foundation.BorderStroke(3.5.dp, MaterialTheme.colorScheme.primary)) {}
+        else Icon(Icons.Outlined.Place, null, tint = TurnRed, modifier = Modifier.size(18.dp).offset(x = (-2).dp))
+        Column(Modifier.weight(1f).padding(end = 40.dp)) {
+            Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Bold)
+            Text(value ?: placeholder, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontWeight = if (value != null) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (value != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun RouteStat(value: String, label: String, modifier: Modifier = Modifier) {
+    Surface(modifier, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun DirectionDial(screenDegrees: Double?, modifier: Modifier = Modifier) {
+    val ring = MaterialTheme.colorScheme.outlineVariant
+    val fill = MaterialTheme.colorScheme.primaryContainer
+    val arrow = MaterialTheme.colorScheme.primary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(modifier.size(150.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val r = size.minDimension / 2
+            drawCircle(fill.copy(alpha = 0.5f), r)
+            drawCircle(ring, r, style = Stroke(1.dp.toPx()))
+            drawCircle(Color.White, r * 0.62f)
+            if (screenDegrees != null) {
+                val a = Math.toRadians(screenDegrees)
+                val tip = center + Offset(cos(a).toFloat(), -sin(a).toFloat()) * (r * 0.5f)
+                drawLine(arrow, center, tip, 7.dp.toPx(), StrokeCap.Round)
+                drawCircle(arrow, 9.dp.toPx(), tip)
+            }
+            drawCircle(arrow, 6.dp.toPx(), center)
+        }
+        Text("Up", Modifier.align(Alignment.TopCenter).padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = muted)
+        Text("Down", Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp), style = MaterialTheme.typography.labelSmall, color = muted)
+        Text("Left", Modifier.align(Alignment.CenterStart).padding(start = 6.dp), style = MaterialTheme.typography.labelSmall, color = muted)
+        Text("Right", Modifier.align(Alignment.CenterEnd).padding(end = 6.dp), style = MaterialTheme.typography.labelSmall, color = muted)
+    }
+}
+
+@Composable
+private fun ActionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+            Icon(icon, null, Modifier.padding(9.dp), tint = MaterialTheme.colorScheme.primary)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
 private fun OverlayChoice(name: String, selected: Boolean, change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(name, Modifier.weight(1f)); Switch(selected, change)
@@ -378,16 +596,24 @@ private fun OverlayChoice(name: String, selected: Boolean, change: (Boolean) -> 
 }
 
 @Composable
-private fun PlaceRow(name: String, floor: String, selected: Boolean, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-            Icon(Icons.Outlined.Place, null, Modifier.padding(9.dp), tint = MaterialTheme.colorScheme.primary)
+private fun PlaceRow(name: String, subtitle: String, trailing: String?, selected: Boolean, badge: String?,
+    enabled: Boolean = true, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp),
+            color = if (enabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh) {
+            Box(contentAlignment = Alignment.Center) {
+                if (badge != null) Text(badge, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary)
+                else Icon(Icons.Outlined.Place, null, tint = MaterialTheme.colorScheme.primary)
+            }
         }
         Column(Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            Text(floor, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(if (selected) Icons.Outlined.Check else Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.primary)
+        if (selected) Icon(Icons.Outlined.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
+        else if (trailing != null) Text(trailing, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

@@ -45,6 +45,8 @@ internal fun NavigationMap(
     previewRoute: List<Offset>? = null,
     followRequested: Boolean = showPosition,
     focusDestination: Boolean = false,
+    rotateToFit: Boolean = false,
+    roomLabels: Boolean = false,
 ) {
     var zoom by remember(state.activeProject) { mutableFloatStateOf(1f) }
     var pan by remember(state.activeProject) { mutableStateOf(Offset.Zero) }
@@ -61,12 +63,25 @@ internal fun NavigationMap(
         val bottom = with(density) { viewportPadding.calculateBottomPadding().toPx() }
         val availableWidth = (width - left - right).coerceAtLeast(1f)
         val availableHeight = (height - top - bottom).coerceAtLeast(1f)
-        val scale = min(availableWidth / state.floorWidthMetres, availableHeight / state.floorHeightMetres) * 0.92f
+        // A long floor drawn across a tall screen wastes most of it; turn it a quarter clockwise instead.
+        // Decided from the whole map box, not the padded area, so opening a card never flips the map mid-route.
+        val turns = if (rotateToFit && state.floorWidthMetres > state.floorHeightMetres * 1.2f && height > width * 1.1f) 1 else 0
+        if (rotateToFit) SideEffect { state.mapQuarterTurns = turns }
+        val drawnWidthMetres = if (turns == 1) state.floorHeightMetres else state.floorWidthMetres
+        val drawnHeightMetres = if (turns == 1) state.floorWidthMetres else state.floorHeightMetres
+        val scale = min(availableWidth / drawnWidthMetres, availableHeight / drawnHeightMetres) * 0.92f
         val imageWidth = scale * state.floorWidthMetres; val imageHeight = scale * state.floorHeightMetres
-        val origin = Offset(left + (availableWidth - imageWidth) / 2, top + (availableHeight + imageHeight) / 2)
+        val topLeft = Offset(left + (availableWidth - drawnWidthMetres * scale) / 2, top + (availableHeight - drawnHeightMetres * scale) / 2)
         val centre = Offset(width / 2, height / 2)
         val viewportCentre = Offset(left + availableWidth / 2, top + availableHeight / 2)
-        fun project(p: Offset) = Offset(origin.x + p.x * scale, origin.y - p.y * scale)
+        // Unturned: +x right, +y up. One turn clockwise: +x down, +y right.
+        fun project(p: Offset) = if (turns == 1) Offset(topLeft.x + p.y * scale, topLeft.y + p.x * scale)
+            else Offset(topLeft.x + p.x * scale, topLeft.y + drawnHeightMetres * scale - p.y * scale)
+        fun unproject(s: Offset) = if (turns == 1) Offset((s.y - topLeft.y) / scale, (s.x - topLeft.x) / scale)
+            else Offset((s.x - topLeft.x) / scale, (topLeft.y + drawnHeightMetres * scale - s.y) / scale)
+        /** Map-frame degrees (0 = +x, counter-clockwise) to the angle as drawn on screen. */
+        fun screenDegrees(mapDegrees: Double) = mapDegrees - 90.0 * turns
+        val vectorRooms = roomLabels && state.destinationAreas.isNotEmpty()
         val liveFocus = state.realLivePosition?.takeIf { state.liveRunning && state.realLiveInitialized }
         LaunchedEffect(followRequested, state.liveRunning, liveFocus != null, width, height) {
             if (followRequested && state.liveRunning && liveFocus != null) {
@@ -74,7 +89,7 @@ internal fun NavigationMap(
                 zoom = (min(availableWidth, availableHeight) / 18f / scale).coerceIn(1f, 12f)
             } else following = false
         }
-        LaunchedEffect(state.selectedDestinationId, focusDestination, previewRoute, width, height) {
+        LaunchedEffect(state.selectedDestinationId, focusDestination, previewRoute, width, height, top, bottom, turns) {
             if (focusDestination && !state.liveRunning) state.destinations.firstOrNull { it.id == state.selectedDestinationId }?.let {
                 val destination = Offset(it.xMetres.toFloat(), it.yMetres.toFloat())
                 val points = previewRoute.orEmpty().ifEmpty { listOf(destination) }
@@ -99,10 +114,10 @@ internal fun NavigationMap(
                     zoom = next
                 }
             }
-            .pointerInput(state.activeProject, scale, origin, width, height) {
+            .pointerInput(state.activeProject, scale, topLeft, turns, width, height) {
                 detectTapGestures { screen ->
                     val base = (screen - centre - latestCameraPan) / zoom + centre
-                    val point = Offset((base.x - origin.x) / scale, (origin.y - base.y) / scale)
+                    val point = unproject(base)
                     if (point.x in 0f..state.floorWidthMetres && point.y in 0f..state.floorHeightMetres) {
                         val tolerance = 22f / (scale * zoom)
                         val area = if (destinationHandler == null) null else state.destinationAreas.firstOrNull {
@@ -120,12 +135,22 @@ internal fun NavigationMap(
             Box(Modifier.fillMaxSize().graphicsLayer {
                 scaleX = zoom; scaleY = zoom; translationX = cameraPan.x; translationY = cameraPan.y
             }) {
-                state.floorPlanContentUri?.takeIf { state.mapLayerVisible }?.let { uri ->
-                    FloorPlanImage(uri, Modifier.offset(x = with(density) { origin.x.toDp() },
-                        y = with(density) { (origin.y - imageHeight).toDp() })
-                        .size(with(density) { imageWidth.toDp() }, with(density) { imageHeight.toDp() }), alpha = 1f)
+                state.floorPlanContentUri?.takeIf { state.mapLayerVisible && !vectorRooms }?.let { uri ->
+                    val middle = project(Offset(state.floorWidthMetres / 2, state.floorHeightMetres / 2))
+                    FloorPlanImage(uri, Modifier.offset(x = with(density) { (middle.x - imageWidth / 2).toDp() },
+                        y = with(density) { (middle.y - imageHeight / 2).toDp() })
+                        .size(with(density) { imageWidth.toDp() }, with(density) { imageHeight.toDp() })
+                        .graphicsLayer { rotationZ = 90f * turns }, alpha = 1f)
                 }
                 Canvas(Modifier.fillMaxSize()) {
+                    if (vectorRooms) state.destinationAreas.forEach { area ->
+                        val path = Path().apply { area.polygon.vertices.forEachIndexed { i, v ->
+                            val p = project(Offset(v.x.toFloat(), v.y.toFloat()))
+                            if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y)
+                        }; close() }
+                        drawPath(path, palette.surface)
+                        drawPath(path, palette.outlineVariant, style = Stroke(1.2f / zoom))
+                    }
                     state.destinationAreas.filter { it.destinationId == state.selectedDestinationId }.forEach { area ->
                         val path = Path().apply { area.polygon.vertices.forEachIndexed { i,v ->
                             val p = project(Offset(v.x.toFloat(),v.y.toFloat()))
@@ -210,11 +235,30 @@ internal fun NavigationMap(
                         drawContext.canvas.nativeCanvas.drawRoundRect(rect, pad, pad, background)
                         drawContext.canvas.nativeCanvas.drawText(displayed, x, y, paint)
                     }
+                    val labelledRooms = if (vectorRooms && state.labelsLayerVisible) state.destinationAreas.mapNotNull { area ->
+                        val name = state.destinations.firstOrNull { it.id == area.destinationId }?.name ?: return@mapNotNull null
+                        val corners = area.polygon.vertices.map { project(Offset(it.x.toFloat(), it.y.toFloat())) }
+                        val c = area.polygon.centroid().let { project(Offset(it.x.toFloat(), it.y.toFloat())) }
+                        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                            color = (if (area.destinationId == state.selectedDestinationId) TurnBlue else palette.onSurfaceVariant).toArgb()
+                            textSize = 10f * density.density / zoom
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isFakeBoldText = area.destinationId == state.selectedDestinationId
+                        }
+                        val roomWidth = corners.maxOf { it.x } - corners.minOf { it.x }
+                        // Long names lose their generic suffix before they are shortened.
+                        val shown = listOf(name, name.substringBefore(' ')).firstOrNull { paint.measureText(it) <= roomWidth * 0.9f }
+                        shown?.let { drawContext.canvas.nativeCanvas.drawText(it, c.x, c.y - (paint.fontMetrics.ascent + paint.fontMetrics.descent) / 2, paint) }
+                        area.destinationId
+                    }.toSet() else emptySet()
                     state.destinations.sortedByDescending { it.id == state.selectedDestinationId }.forEach { poi ->
                         val p = project(Offset(poi.xMetres.toFloat(), poi.yMetres.toFloat()))
-                        drawCircle(Color.White, 8f / zoom, p)
-                        drawCircle(if (poi.id == state.selectedDestinationId) TurnBlue else palette.primary, 6f / zoom, p)
-                        label(poi.name, p, Color.White, priority = poi.id == state.selectedDestinationId)
+                        val selected = poi.id == state.selectedDestinationId
+                        // Entrance dots: sized in dp on the vector map, in pixels on the older research maps.
+                        val unit = if (vectorRooms) density.density * 0.6f else 1f
+                        drawCircle(Color.White, (if (selected) 8f else 6f) * unit / zoom, p)
+                        drawCircle(if (selected) TurnBlue else palette.primary, (if (selected) 6f else 4f) * unit / zoom, p)
+                        if (poi.id !in labelledRooms) label(poi.name, p, Color.White, priority = selected)
                     }
                     if (showReferences) {
                       state.referencePoints.forEach { point ->
@@ -246,10 +290,10 @@ internal fun NavigationMap(
                             drawCircle(TurnBlue.copy(alpha = 0.15f), it.toFloat() * scale, p)
                             drawCircle(TurnBlue.copy(alpha = 0.5f), it.toFloat() * scale, p, style = Stroke(1.5f / zoom))
                         }
-                        val angle = Math.toRadians(state.realLiveHeadingDegrees)
+                        val angle = Math.toRadians(screenDegrees(state.realLiveHeadingDegrees))
                         if (state.liveRunning) {
                             val radius = 48f * density.density / zoom
-                            drawArc(TurnBlue.copy(alpha=.16f),(-state.realLiveHeadingDegrees-32).toFloat(),64f,true,
+                            drawArc(TurnBlue.copy(alpha=.16f),(-screenDegrees(state.realLiveHeadingDegrees)-32).toFloat(),64f,true,
                                 topLeft=p-Offset(radius,radius),size=Size(radius*2,radius*2))
                             drawLine(TurnBlue, p, p + Offset(cos(angle).toFloat(), -sin(angle).toFloat()) * (24f * density.density / zoom), 3f * density.density / zoom, StrokeCap.Round)
                         }
@@ -263,10 +307,10 @@ internal fun NavigationMap(
                         val p = project(it)
                         drawCircle(TurnBlue, 9f / zoom, p, style = Stroke(3f / zoom))
                         if (state.headingChoiceConfirmed) {
-                            val angle = Math.toRadians(state.initialHeadingDegrees)
+                            val angle = Math.toRadians(screenDegrees(state.initialHeadingDegrees))
                             val tip = p + Offset(cos(angle).toFloat(), -sin(angle).toFloat()) * (36f / zoom)
                             drawLine(TurnAmber, p, tip, 4f / zoom, StrokeCap.Round)
-                            label("Starting direction", tip, TurnAmber, priority = true)
+                            if (!roomLabels) label("Starting direction", tip, TurnAmber, priority = true)
                         }
                       }
                     }
