@@ -4,8 +4,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.Shapes
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 val TurnNavy = Color(0xFF071522)
 val TurnNavyRaised = Color(0xFF102536)
@@ -18,10 +21,10 @@ val TurnInk = Color(0xFF142432)
 val TurnPaper = Color(0xFFF5F8FA)
 
 private val DarkColors = darkColorScheme(
-    primary = TurnCyan,
-    onPrimary = Color(0xFF002F36),
-    primaryContainer = Color(0xFF0A4651),
-    onPrimaryContainer = Color(0xFF9EF0FA),
+    primary = Color(0xFFA9C7FF),
+    onPrimary = Color(0xFF062C64),
+    primaryContainer = Color(0xFF163F7A),
+    onPrimaryContainer = Color(0xFFDCE8FF),
     secondary = TurnBlue,
     onSecondary = Color.White,
     secondaryContainer = Color(0xFF173D74),
@@ -43,10 +46,10 @@ private val DarkColors = darkColorScheme(
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF006777),
+    primary = Color(0xFF1760D4),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFA4EFF8),
-    onPrimaryContainer = Color(0xFF002F37),
+    primaryContainer = Color(0xFFE1ECFF),
+    onPrimaryContainer = Color(0xFF12396E),
     secondary = Color(0xFF245DA8),
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFD8E6FF),
@@ -58,6 +61,11 @@ private val LightColors = lightColorScheme(
     surface = Color.White,
     onSurface = TurnInk,
     surfaceVariant = Color(0xFFE6EEF2),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF1F5FC),
+    surfaceContainer = Color(0xFFEBF1FA),
+    surfaceContainerHigh = Color(0xFFE5EDF8),
+    surfaceContainerHighest = Color(0xFFDEE8F5),
     onSurfaceVariant = Color(0xFF465A66),
     error = Color(0xFFBA1A1A)
 )
@@ -69,6 +77,8 @@ fun TurnTheme(
 ) {
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColors else LightColors,
+        shapes = Shapes(extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp),
+            medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(30.dp)),
         content = content
     )
 }

@@ -11,10 +11,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.turn.fieldtest.ui.*
 import com.turn.fieldtest.ui.model.EditorTool
+import com.turn.fieldtest.ui.model.TurnDestination
 
 @Composable
 fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
-    var section by remember(state.activeProject) { mutableStateOf("Scale") }
+    var section by remember(state.activeProject) { mutableStateOf(state.mapSetupSection) }
+    LaunchedEffect(section) { state.mapSetupSection = section }
     var width by remember(state.activeProject, state.floorWidthMetres) { mutableStateOf(state.floorWidthMetres.toString()) }
     var height by remember(state.activeProject, state.floorHeightMetres) { mutableStateOf(state.floorHeightMetres.toString()) }
     var measured by remember { mutableStateOf("") }
@@ -26,7 +28,11 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
             FloorEditorScreen(state, true, actions.onMapSaved, actions.onFloorPlanImportRequested, actions.onMapDeleted)
         }; return
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val shortWindow = maxHeight < 420.dp
+    val panelHeight = (maxHeight * 0.42f).coerceAtMost(280.dp)
+    Column(Modifier.fillMaxSize().then(if (shortWindow) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+        .padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text(state.floorName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -35,7 +41,13 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
             }
             Button(onClick = actions.onMapSaved, enabled = state.canEditMap) { Text(if (state.projectBusy) "Saving…" else "Save map") }
         }
-        NavigationMap(state, Modifier.fillMaxWidth().weight(1f).heightIn(min = 230.dp), showGraph = section == "Paths", showReferences = section == "Points",
+        Text(when (section) {
+            "Scale" -> "1 of 4 · Import or scan, then calibrate"
+            "Layout" -> "2 of 4 · Define where people can walk"
+            "Paths" -> "3 of 4 · Connect paths and name destinations"
+            else -> "4 of 4 · Place your Wi-Fi survey points"
+        }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(230.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showGraph = section == "Paths", showReferences = section == "Points", showCalibration = section == "Scale",
             onTap = { point, tolerance ->
                 if (section == "Paths") state.graphTap(point, tolerance)
                 else if (section == "Points" || section == "Layout" || state.editorTool == EditorTool.CALIBRATION) state.addMapPoint(point)
@@ -49,11 +61,16 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                 }, label = { Text(title) })
             }
         }
-        Column(Modifier.fillMaxWidth().height(240.dp).verticalScroll(rememberScrollState()).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Short windows use the page's scroll container; nesting another vertical viewport
+        // here can leave controls outside the visible window after scrolling them into view.
+        Column(Modifier.fillMaxWidth().then(if (shortWindow) Modifier else Modifier.height(panelHeight).verticalScroll(rememberScrollState()))
+            .padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (section) {
                 "Scale" -> {
-                    Text("Import a plan, then set its measured size or calibrate two points.", style = MaterialTheme.typography.bodySmall)
+                    Text("Have a floor plan? Import it. Otherwise, create one with your phone.", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = actions.onFloorPlanImportRequested, enabled = state.canEditMap) { Text(if (state.floorPlanContentUri == null) "Import floor plan" else "Replace floor plan") }
+                    OutlinedButton(onClick=actions.onWalkMapperRequested,enabled=state.canEditMap && state.mode==com.turn.fieldtest.ui.model.DataMode.REAL_DEVICE && state.activeProject!=null && !state.hasUnsavedMapChanges) { Text("Scan building with phone") }
+                    Text("AR capture is guided and needs measured verification. Save edits before opening the mapper.",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(width, { width = it }, label = { Text("Width (m)") }, enabled = state.canChangeScale, modifier = Modifier.weight(1f), singleLine = true)
                         OutlinedTextField(height, { height = it }, label = { Text("Height (m)") }, enabled = state.canChangeScale, modifier = Modifier.weight(1f), singleLine = true)
@@ -65,6 +82,12 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                     if (!state.canChangeScale) Text("Scale is locked while busy, after measurements, or after path nodes are added.", style = MaterialTheme.typography.bodySmall)
                 }
                 "Layout" -> {
+                    if(state.otherWalkableRegions.isNotEmpty()) {
+                        Text("Room: ${state.editedRegionName}",style=MaterialTheme.typography.labelLarge)
+                        Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            state.otherWalkableRegions.toList().forEach { region->OutlinedButton(onClick={state.selectWalkableRegion(region.id)},enabled=state.canEditMap) {Text("Edit ${region.name}")} }
+                        }
+                    }
                     Text("Draw corridor boundaries and walls. Leave openings at doors.", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(EditorTool.WALKABLE, EditorTool.WALL).forEach { tool -> FilterChip(state.editorTool == tool,
@@ -84,7 +107,20 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                         }, label = { Text(tool) }, enabled = state.canEditMap) }
                     }
                     Text("${state.navigationNodes.size} nodes · ${state.navigationEdges.size} paths · ${state.destinations.size} destinations", style = MaterialTheme.typography.labelMedium)
+                    val unlinked=state.destinations.filter {place->state.navigationNodes.none {it.poiId==place.id}}
+                    if(unlinked.isNotEmpty()) Text("${unlinked.size} places need entrances. Select a path node at a verified room entrance to link it.",style=MaterialTheme.typography.bodySmall)
                     if (state.selectedNodeId != null) {
+                        if(unlinked.isNotEmpty() && state.navigationNodes.firstOrNull {it.id==state.selectedNodeId}?.poiId==null) {
+                            var roomMenu by remember(state.selectedNodeId) {mutableStateOf(false)}
+                            Box {
+                                OutlinedButton(onClick={roomMenu=true},enabled=state.canEditMap) {Text("Link an existing room")}
+                                DropdownMenu(roomMenu,{roomMenu=false}) {
+                                    unlinked.forEach {room -> DropdownMenuItem(text={Text(room.name)},onClick={
+                                        state.linkSelectedDestination(room.id);poiName=room.name;roomMenu=false
+                                    })}
+                                }
+                            }
+                        }
                         OutlinedTextField(poiName, { poiName = it }, label = { Text("Destination name, e.g. Lab 1") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         Button(onClick = { state.nameSelectedDestination(poiName) }, enabled = state.canEditMap && poiName.isNotBlank()) { Text("Save destination in draft") }
                         OutlinedButton(onClick = state::removeSelectedNode, enabled = state.canEditMap) { Text("Remove selected node") }
@@ -101,7 +137,23 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                     } }
                 }
             }
+            if (section != "Points") Button(enabled = state.canEditMap && when (section) {
+                "Layout" -> state.draftWalkablePolygon.size >= 3
+                "Paths" -> state.destinations.isNotEmpty() && state.navigationEdges.isNotEmpty()
+                else -> true
+            }, onClick = {
+                section = when (section) { "Scale" -> "Layout"; "Layout" -> "Paths"; else -> "Points" }
+                state.editorTool = when (section) { "Layout" -> EditorTool.WALKABLE; "Points" -> EditorTool.REFERENCE_POINT; else -> EditorTool.SELECT }
+                state.selectedNodeId = null
+            }, modifier = Modifier.fillMaxWidth()) { Text(when (section) { "Scale" -> "Next: walkable layout"; "Layout" -> "Next: paths & places"; else -> "Next: survey points" }) }
+            else {
+                Button(onClick = { state.selectDestination(TurnDestination.SURVEY) },
+                    enabled = !state.hasUnsavedMapChanges && state.referencePoints.isNotEmpty() && !state.projectBusy,
+                    modifier = Modifier.fillMaxWidth()) { Text("Continue to Wi-Fi survey") }
+                if (state.hasUnsavedMapChanges) Text("Save your map above to continue.", style = MaterialTheme.typography.bodySmall)
+            }
             TextButton(onClick = { advanced = true }) { Text("Advanced map tools") }
         }
+    }
     }
 }

@@ -10,6 +10,7 @@ import com.turn.fieldtest.data.export.BackupDao
 
 @Database(
     entities = [
+        com.turn.fieldtest.mapper.data.ScanDraftEntity::class,
         NavigationNodeEntity::class,
         NavigationEdgeEntity::class,
         VenueEntity::class,
@@ -42,6 +43,7 @@ import com.turn.fieldtest.data.export.BackupDao
 )
 @TypeConverters(RoomConverters::class)
 abstract class TurnDatabase : RoomDatabase() {
+    abstract fun scanDraftDao(): com.turn.fieldtest.mapper.data.ScanDraftDao
     abstract fun navigationDao(): NavigationDao
     abstract fun venueDao(): VenueDao
     abstract fun floorPlanDao(): FloorPlanDao
@@ -52,7 +54,7 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun backupDao(): BackupDao
 
     companion object {
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val DATABASE_NAME = "turn-field-test.db"
 
         fun build(context: Context, databaseName: String = DATABASE_NAME): TurnDatabase =
@@ -80,5 +82,11 @@ object TurnDatabaseMigrations {
             db.execSQL("ALTER TABLE survey_sessions ADD COLUMN completionStatus TEXT NOT NULL DEFAULT 'LEGACY'")
         }
     }
-    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2)
+    val FROM_2_TO_3 = object : Migration(2,3) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS walk_scan_drafts (id TEXT NOT NULL, floorId TEXT NOT NULL, documentJson TEXT NOT NULL, status TEXT NOT NULL, updatedAtEpochMillis INTEGER NOT NULL, PRIMARY KEY(id), FOREIGN KEY(floorId) REFERENCES floors(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_walk_scan_drafts_floorId ON walk_scan_drafts(floorId)")
+        }
+    }
+    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3)
 }

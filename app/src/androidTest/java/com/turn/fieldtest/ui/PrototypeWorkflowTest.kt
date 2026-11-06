@@ -209,7 +209,7 @@ class PrototypeWorkflowTest {
         repeat(4) { sliders[it].assertIsNotEnabled() }
         compose.onNodeWithText("Device-offset normalization").performScrollTo()
         compose.onAllNodes(isToggleable())[0].assertIsNotEnabled()
-        compose.onNodeWithText("Dark field theme").performScrollTo()
+        compose.onNodeWithText("Dark mode").performScrollTo()
         compose.onAllNodes(isToggleable())[1].assertIsEnabled()
     }
 

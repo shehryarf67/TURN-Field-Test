@@ -123,6 +123,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var sessionGraph: NavigationGraph? = null
     private var sessionInitialHeadingRadians = 0.0
     private var savedNavigationGraph: NavigationGraph? = null
+        set(value) { field=value; appState.navigationPreviewGraph=value }
     private val liveWifiEvidence = com.turn.fieldtest.platform.wifi.LiveWifiEvidenceGate()
     private val activeContext get() = requireNotNull(appState.activeProject) { "Open a saved project first" }
     private val captureService = WifiSurveyCaptureService(repositories.surveys)
@@ -251,7 +252,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.darkTheme = saved.darkTheme
             appState.mode = DataMode.valueOf(saved.dataMode.name)
             try {
-                if (appState.mode == DataMode.REAL_DEVICE) restoreSelectedProject() else appState.loadDemoMap()
+                if (appState.mode == DataMode.REAL_DEVICE) {
+                    restoreSelectedProject()
+                    if (appState.realMapReady) appState.selectDestination(
+                        if (appState.allWalkablePolygons().any { it.size >= 3 }) com.turn.fieldtest.ui.model.TurnDestination.LIVE_LOCATE
+                        else com.turn.fieldtest.ui.model.TurnDestination.FLOOR_EDITOR)
+                } else appState.loadDemoMap()
             } catch (error: Exception) { appState.projectStatus = "Could not restore project: ${error.message}" }
             finally { appState.startupLoading = false }
             refreshWifiPermissionStatus()
@@ -406,6 +412,36 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun importMapperPackage(asset: String? = null, uri: Uri? = null, replace: Boolean = false) {
+        if(appState.mode != DataMode.REAL_DEVICE || appState.projectBusy || appState.sessionLocked || appState.liveRunning ||
+            appState.surveyRunning || appState.liveStarting || appState.surveyStarting || appState.liveCloseFailed || appState.surveyCloseFailed ||
+            appState.diagnosticWalkRunning || appState.startupLoading || appState.realEvaluationBusy || appState.hasUnsavedMapChanges) return
+        appState.projectBusy=true
+        viewModelScope.launch {
+            var committed=false
+            try {
+                val context=withContext(Dispatchers.IO) {
+                    val stream=if(asset!=null) app.assets.open(asset) else app.contentResolver.openInputStream(requireNotNull(uri))!!
+                    val bytes=stream.use { input ->
+                        val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
+                        while(true) {val count=input.read(buffer);if(count<0)break;require(output.size()+count<=10_000_000) {"Map package is too large"};output.write(buffer,0,count)}
+                        output.toByteArray()
+                    }
+                    val text=bytes.toString(Charsets.UTF_8)
+                    val parsed=MapperPackage.parse(text)
+                    MapperImporter(app.database,app).install(parsed,text,replace).also {committed=true}
+                }
+                loadProject(context)
+                appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.LIVE_LOCATE)
+                appState.projectStatus="Mapper floor imported · supplied metric scale · collect new Wi-Fi fingerprints"
+            } catch(e: Exception) {
+                if(e is kotlinx.coroutines.CancellationException) throw e
+                appState.projectStatus=if(committed) "Mapper floor saved, but opening failed: ${e.message}. Reopen it from Buildings."
+                    else "Mapper import rejected: ${e.message}. Existing data was not replaced."
+            } finally {appState.projectBusy=false}
+        }
+    }
+
     fun openProject(context: ProjectContext, discardDraft: Boolean = false) {
         if (appState.mode != DataMode.REAL_DEVICE) return
         if (discardDraft) {
@@ -435,11 +471,16 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun loadProject(context: ProjectContext) {
         val savedMap = projects.load(context)
+        if (appState.activeProject != context) appState.mapSetupSection = "Scale"
         val venue = savedMap.venue
         val floor = savedMap.floor
         val asset = savedMap.asset
         val points = savedMap.points
         val regions = savedMap.regions
+        appState.editedRegionId=regions.firstOrNull { it.enabled }?.id
+        appState.editedRegionOriginal=regions.firstOrNull {it.enabled}
+        appState.editedRegionName=regions.firstOrNull { it.enabled }?.name ?: "Walkable area"
+        appState.otherWalkableRegions.clear(); appState.otherWalkableRegions.addAll(regions.filter { it.enabled }.drop(1))
         val walls = savedMap.walls
         val anchors = savedMap.anchors
         val restoredPolygon = regions.firstOrNull { it.enabled }?.let { region ->
@@ -506,12 +547,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.navigationNodes.clear(); appState.navigationNodes.addAll(savedMap.nodes)
         appState.navigationEdges.clear(); appState.navigationEdges.addAll(savedMap.edges)
         appState.destinations.clear(); appState.destinations.addAll(savedMap.destinations)
+        appState.destinationAreas.clear(); appState.destinationAreas.addAll(savedMap.destinationAreas())
         appState.selectedNodeId = null; appState.selectedDestinationId = null
         appState.manualStartPoint = null; appState.pickingStart = false
         appState.clearRoute(); appState.liveEstimateEpochMillis = null
         savedNavigationGraph = runCatching { NavigationGraph(savedMap.metricMap().floors.getValue(context.floorId), savedMap.nodes.map { it.core() }, savedMap.edges.map { it.core() }) }.getOrNull()
         appState.mapHasMeasurements = savedMap.hasMeasurements
-        appState.mapEditorSupported = regions.count { it.enabled } <= 1 && floor.originXMetres == 0.0 && floor.originYMetres == 0.0
+        appState.mapEditorSupported = floor.originXMetres == 0.0 && floor.originYMetres == 0.0
         appState.markMapSaved()
         appState.surveyAcceptedSnapshots = 0
         appState.surveyCachedIgnored = 0
@@ -1255,11 +1297,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val polygon = appState.draftWalkablePolygon.takeIf { it.isNotEmpty() }?.let { vertices -> MetricPolygon(vertices.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) }) }
         require(appState.mapEditorSupported) { "This saved map uses geometry the editor cannot safely modify" }
         polygon?.let { com.turn.fieldtest.core.validateSimpleWalkablePolygon(it) }
+        val allPolygons=listOfNotNull(polygon)+appState.otherWalkableRegions.map { decodePolygon(it.polygonJson).also { p->com.turn.fieldtest.core.validateSimpleWalkablePolygon(p) } }
         require(appState.referencePoints.map { it.id }.distinct().size == appState.referencePoints.size) {
             "Duplicate reference-point IDs"
         }
         appState.referencePoints.forEach { point ->
-            require(polygon?.contains(MetricPoint(point.metres.x.toDouble(), point.metres.y.toDouble())) == true) {
+            require(allPolygons.any { it.contains(MetricPoint(point.metres.x.toDouble(), point.metres.y.toDouble())) }) {
                 "${point.id} is outside walkable space"
             }
         }
@@ -1357,17 +1400,20 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 yMetres = if (anchor.yMetres.toFloat() == point.metres.y) anchor.yMetres else point.metres.y.toDouble()))
         }
         val regions = repositories.floorPlans.observeWalkableRegions(context.floorId).first().filter { it.enabled }
-        require(regions.size <= 1) { "Multiple saved walkable regions must be preserved" }
-        if (appState.draftWalkablePolygon.isEmpty()) regions.forEach { repositories.floorPlans.delete(it) }
+        val editedId=appState.editedRegionId ?: "REGION-${context.floorId}"
+        val retainedRegionIds=appState.otherWalkableRegions.map {it.id}.toSet()+if(appState.draftWalkablePolygon.isNotEmpty()) setOf(editedId) else emptySet()
+        regions.filter {it.id !in retainedRegionIds}.forEach {repositories.floorPlans.delete(it)}
+        if (appState.draftWalkablePolygon.isEmpty()) regions.filter { it.id==editedId }.forEach { repositories.floorPlans.delete(it) }
         else repositories.floorPlans.save(WalkableRegionEntity(
-            id = regions.firstOrNull()?.id ?: "REGION-${context.floorId}", floorId = context.floorId,
-            name = regions.firstOrNull()?.name ?: "Walkable area",
-            polygonJson = regions.firstOrNull()?.takeIf { previous ->
+            id = editedId, floorId = context.floorId,
+            name = appState.editedRegionName,
+            polygonJson = regions.firstOrNull { it.id==editedId }?.takeIf { previous ->
                 decodePolygon(previous.polygonJson).vertices.map { Offset(it.x.toFloat(), it.y.toFloat()) } == appState.draftWalkablePolygon.toList()
             }?.polygonJson ?: JsonArray(appState.draftWalkablePolygon.map {
                 JsonObject(mapOf("x" to JsonPrimitive(it.x.toDouble()), "y" to JsonPrimitive(it.y.toDouble())))
             }).toString(), updatedAtEpochMillis = now,
         ))
+        appState.otherWalkableRegions.forEach { require(it.floorId==context.floorId); repositories.floorPlans.save(it) }
         val savedWalls = repositories.floorPlans.observeWalls(context.floorId).first().filter { it.enabled }
         val retained = mutableSetOf<String>()
         appState.draftWalls.forEachIndexed { index, (start, end) ->

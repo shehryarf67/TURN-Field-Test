@@ -508,7 +508,7 @@ private fun MetricFloorCanvas(
                 if (showBackground && state.mode == DataMode.DEMO) drawPlanBackground(imageInk, floorWidth, floorHeight)
                 if (showGrid) drawMetricGrid(gridColor, floorWidth, floorHeight)
                 if (state.geometryLayerVisible) {
-                    drawWalkable(state.draftWalkablePolygon, floorWidth, floorHeight)
+                    state.allWalkablePolygons().forEach { drawWalkable(it, floorWidth, floorHeight) }
                     state.draftWalls.forEach { (start, end) ->
                         drawLine(wallColor, metricToCanvas(start, floorWidth, floorHeight), metricToCanvas(end, floorWidth, floorHeight), strokeWidth = 4f, cap = StrokeCap.Round)
                     }

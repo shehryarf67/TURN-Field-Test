@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TURN · 05 Field Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fafafa;--ink:#18181b;--muted:#71717a;--line:#e4e4e7;--acc:#f97316;--acc-soft:#fff1e6;--dot:#2563eb;--ok:#16a34a;--warn:#d97706;
+--plan-bg:#f4f4f5;--room:#ffffff;--wall:#a1a1aa;--corridor:#ececee;--label:#a1a1aa;--page:#e4e4e7}
+*{box-sizing:border-box;margin:0}
+body{font-family:"IBM Plex Sans",system-ui,sans-serif;background:var(--page);color:var(--ink);padding:40px 24px 80px}
+.mono{font-family:"IBM Plex Mono",monospace}
+header.doc{max-width:1180px;margin:0 auto 36px}
+.tag{display:inline-block;font:600 12px "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--acc);border:1px solid var(--acc);padding:4px 8px;border-radius:4px}
+.doc h1{font-size:42px;letter-spacing:-.03em;margin:12px 0 8px}
+.doc p{color:var(--muted);max-width:760px;line-height:1.6}
+.doc ul{margin:16px 0 0 18px;color:#3f3f46;line-height:1.75;max-width:840px}
+.grid{display:flex;flex-wrap:wrap;gap:40px 32px;justify-content:center;max-width:1300px;margin:0 auto}
+figure{display:flex;flex-direction:column;align-items:center;gap:14px}
+figcaption{font-size:13px;color:var(--muted);max-width:320px;text-align:center;line-height:1.5}
+figcaption b{display:block;color:var(--ink);font-size:14px;margin-bottom:2px}
+.phone{width:340px;height:736px;border-radius:44px;border:10px solid #18181b;background:var(--bg);position:relative;overflow:hidden;box-shadow:0 30px 60px -24px rgba(24,24,27,.45)}
+.status{height:34px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:12px;font-weight:600;position:relative;z-index:3}
+.map{position:absolute;inset:0;background:var(--plan-bg)}.map svg{width:100%;height:100%}
+.bar{position:absolute;top:40px;left:12px;right:12px;display:flex;gap:8px;z-index:2}
+.box{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+.mode{display:flex;padding:3px;gap:2px}.mode span{padding:7px 10px;border-radius:9px;font-size:12px;font-weight:600;color:var(--muted)}.mode .on{background:var(--ink);color:#fff}
+.flr{padding:8px 10px;font-size:12px;font-weight:700;margin-left:auto}
+.panel{position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);border-radius:20px 20px 0 0;padding:14px 16px 16px;z-index:2}
+.h{font-size:16px;font-weight:700}
+.s{font-size:12px;color:var(--muted)}
+.route{display:grid;grid-template-columns:18px 1fr auto;gap:6px 10px;align-items:center;margin-top:12px;font-size:14px}
+.route .k{font:600 10px "IBM Plex Mono",monospace;color:var(--muted)}
+.dotA{width:12px;height:12px;border-radius:50%;border:3px solid var(--dot)}.dotB{width:12px;height:12px;border-radius:3px;background:var(--acc)}
+.line{width:2px;height:16px;background:var(--line);margin-left:5px}
+.field{border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-weight:600}
+.field.ph{color:var(--muted);font-weight:500}
+.chg{font-size:12px;font-weight:600;color:var(--acc)}
+.btn{border-radius:12px;padding:13px;text-align:center;font-weight:700;font-size:14px;background:var(--ink);color:#fff;margin-top:12px}
+.btn.acc{background:var(--acc)}.btn.out{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.readiness{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.rd{border:1px solid var(--line);border-radius:10px;padding:7px 6px;font-size:10.5px;font-weight:600;color:var(--muted)}
+.rd b{display:block;font:600 12px "IBM Plex Mono",monospace;color:var(--ink);margin-top:2px}
+.rd.ok b{color:var(--ok)}.rd.w b{color:var(--warn)}
+.hud{position:absolute;top:84px;left:12px;width:150px;padding:10px;z-index:2}
+.hud .r{display:flex;justify-content:space-between;font:500 11px "IBM Plex Mono",monospace;padding:3px 0}
+.hud .r span:first-child{color:var(--muted)}
+.hud .t{font:600 10px "IBM Plex Mono",monospace;color:var(--acc);margin-bottom:4px;letter-spacing:.06em}
+.spark{height:26px;display:flex;align-items:flex-end;gap:2px;margin-top:6px}.spark i{flex:1;background:#fdba74;border-radius:2px}
+.legend{position:absolute;right:12px;top:84px;padding:8px 10px;z-index:2;font-size:10.5px;font-weight:600}
+.legend div{display:flex;align-items:center;gap:6px;padding:2px 0}.legend i{width:14px;height:3px;border-radius:2px}
+.navrow{display:flex;align-items:center;gap:12px}
+.big{font:600 26px "IBM Plex Mono",monospace;letter-spacing:-.02em}
+.kv{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.kv div{background:var(--plan-bg);border-radius:10px;padding:8px}.kv b{display:block;font:600 14px "IBM Plex Mono",monospace}.kv span{font-size:10px;color:var(--muted);font-weight:600}
+.toggles{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}.tg{font-size:11px;font-weight:600;padding:6px 9px;border-radius:8px;border:1px solid var(--line)}.tg.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.page{position:absolute;inset:34px 0 0;padding:10px 16px}
+.page h2{font-size:24px;letter-spacing:-.02em;margin-top:6px}
+.tbl{margin-top:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+.tr{display:grid;grid-template-columns:1fr 70px 64px;gap:6px;padding:10px 12px;font-size:12.5px;border-top:1px solid var(--line);align-items:center}
+.tr:first-child{border-top:0;background:var(--plan-bg);font:600 10px "IBM Plex Mono",monospace;color:var(--muted)}
+.tr .m{font-family:"IBM Plex Mono",monospace;font-size:12px}
+.st{font:600 10px "IBM Plex Mono",monospace;padding:3px 6px;border-radius:6px;text-align:center}.st.d{background:#dcfce7;color:var(--ok)}.st.p{background:#fef3c7;color:var(--warn)}.st.n{background:#f4f4f5;color:var(--muted)}
+.meter{height:10px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:8px}.meter i{display:block;height:100%;background:var(--acc)}
+.tabbar{position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0 14px;font-size:11px;font-weight:600;color:var(--muted)}.tabbar .on{color:var(--ink)}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="cf4" viewBox="0 0 248 567">
+<rect width="248" height="567" style="fill:var(--plan-bg)"/>
+<rect x="88" y="0" width="72" height="567" style="fill:var(--corridor)"/>
+<g style="fill:var(--room);stroke:var(--wall);stroke-width:1.2">
+<rect x="4" y="4" width="82" height="76"/><rect x="4" y="84" width="82" height="76"/><rect x="4" y="164" width="82" height="76"/><rect x="4" y="244" width="82" height="76"/><rect x="4" y="324" width="82" height="76"/><rect x="4" y="404" width="82" height="76"/><rect x="4" y="484" width="82" height="79"/>
+<rect x="162" y="4" width="82" height="76"/><rect x="162" y="84" width="82" height="76"/><rect x="162" y="164" width="82" height="76"/><rect x="162" y="244" width="82" height="76"/><rect x="162" y="324" width="82" height="76"/><rect x="162" y="404" width="82" height="76"/><rect x="162" y="484" width="82" height="79"/></g>
+<g style="fill:var(--label);font:500 9px 'IBM Plex Mono',monospace" text-anchor="middle">
+<text x="45" y="45">LADIES WR</text><text x="45" y="125">C-406</text><text x="45" y="205">C-407</text><text x="45" y="285">C-408</text><text x="45" y="365">C-409</text><text x="45" y="445">C-410</text><text x="45" y="527">MEN'S WR</text>
+<text x="203" y="45">STAIRS</text><text x="203" y="125">C-405</text><text x="203" y="205">C-404</text><text x="203" y="285">C-403</text><text x="203" y="365">C-402</text><text x="203" y="445">C-401</text><text x="203" y="527">STAIRS</text></g>
+</symbol>
+<g id="rps"><g fill="var(--acc)"><circle cx="124" cy="120" r="4"/><circle cx="124" cy="240" r="4"/><circle cx="124" cy="360" r="4"/><circle cx="124" cy="480" r="4"/></g></g>
+</defs></svg>
+
+<header class="doc">
+<span class="tag">Direction 05</span>
+<h1>Field Pro</h1>
+<p>A design for TURN as it really is today: a research prototype that a field team uses. It keeps a clean navigation view, plus a <b>Research</b> mode switch that layers live diagnostics over the same map. It looks precise and instrument-like, with monospaced numbers, neutral greys and an orange signal accent.</p>
+<ul>
+<li>A "Navigate / Research" switch at the top replaces "Research details" dialogs that open three levels deep. It's one map with two levels of detail.</li>
+<li>A readiness strip (steps, heading, Wi-Fi, map) shows whether tracking can start, so field testers aren't left guessing why it won't.</li>
+<li>Research mode adds a heads-up panel (step count, Wi-Fi age, particle spread, confidence trend) and overlay toggles for raw PDR, Wi-Fi fixes and particles.</li>
+<li>Survey becomes a table of points with status and progress meters, making it quick to see coverage on site.</li>
+</ul>
+</header>
+
+<div class="grid">
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 -40 276 520" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/></svg></div>
+<div class="status"><span>5:13</span><span>▮▮▮ ▮</span></div>
+<div class="bar"><div class="box mode"><span class="on">Navigate</span><span>Research</span></div><div class="box flr">C · F4 ▾</div></div>
+<div class="panel"><div class="h">New route</div>
+<div class="route"><span class="dotA"></span><span class="field ph">Set start · map, door or Wi-Fi</span><span></span>
+<span class="line"></span><span></span><span></span>
+<span class="dotB"></span><span class="field ph">Search 15 places</span><span></span></div>
+<div class="readiness"><div class="rd ok">Steps<b>OK</b></div><div class="rd ok">Heading<b>GRV</b></div><div class="rd w">Wi-Fi<b>0/2 pts</b></div><div class="rd ok">Map<b>Saved</b></div></div>
+<div class="btn" style="background:#d4d4d8">Start navigation</div></div>
+</div><figcaption><b>1 · Navigate</b>A compact from/to form and a readiness strip, so you know before you start whether the sensors and survey data are ready.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 -40 276 520" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M100 202 H124 V362 H160" fill="none" stroke="var(--dot)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="100" cy="202" r="6" fill="#fff" stroke="var(--dot)" stroke-width="3"/><rect x="155" y="356" width="10" height="10" rx="2" fill="var(--acc)"/></svg></div>
+<div class="status"><span>5:14</span><span>▮▮▮ ▮</span></div>
+<div class="bar"><div class="box mode"><span class="on">Navigate</span><span>Research</span></div><div class="box flr">C · F4 ▾</div></div>
+<div class="panel"><div class="h">C-407 → C-402</div><div class="s">24.0 m · 4 path nodes · start from map pick</div>
+<div class="route"><span class="dotA"></span><span class="field">C-407 entrance</span><span class="chg">Edit</span>
+<span class="line"></span><span></span><span></span>
+<span class="dotB"></span><span class="field">C-402 ClassRoom</span><span class="chg">Edit</span></div>
+<div style="font-size:12px;font-weight:700;margin-top:12px">Initial heading (map frame)</div>
+<div class="toggles"><span class="tg">0° →</span><span class="tg">90° ↑</span><span class="tg">180° ←</span><span class="tg on">270° ↓</span><span class="tg">Tap ahead</span></div>
+<div class="btn acc">Start · record session</div></div>
+</div><figcaption><b>2 · Route ready</b>The heading is labelled in degrees and arrows, matching how the code already models it. Start makes clear that the session is being recorded.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 90 276 430" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M124 268 V362 H160" fill="none" stroke="var(--dot)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="124" cy="268" r="20" fill="var(--dot)" opacity=".14"/><circle cx="124" cy="268" r="7" fill="var(--dot)" stroke="#fff" stroke-width="3"/></svg></div>
+<div class="status"><span>5:15</span><span>▮▮▮ ▮</span></div>
+<div class="bar"><div class="box mode"><span class="on">Navigate</span><span>Research</span></div><div class="box flr">C · F4 ▾</div></div>
+<div class="panel"><div class="navrow"><span class="big">↓ 9 m</span><div><div class="h" style="font-size:14px">then C-402 on left</div><div class="s">14.0 m remaining</div></div></div>
+<div class="kv"><div><b>±1.8</b><span>m acc.</span></div><div><b>0.78</b><span>conf.</span></div><div><b>12/12</b><span>steps</span></div><div><b>6 s</b><span>Wi-Fi age</span></div></div>
+<div style="display:flex;gap:8px"><div class="btn out" style="flex:1">Re-align</div><div class="btn out" style="flex:1">Wi-Fi fix</div><div class="btn" style="flex:1">Stop</div></div></div>
+</div><figcaption><b>3 · Live, Navigate mode</b>Clean guidance plus four key numbers. Re-align and Wi-Fi fix are always one tap away.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map"><svg viewBox="-14 90 276 430" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/>
+<path d="M100 202 H118 V262" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-dasharray="4 3"/>
+<path d="M100 202 H124 V268" fill="none" stroke="var(--dot)" stroke-width="3"/>
+<g fill="var(--acc)" opacity=".55"><circle cx="120" cy="262" r="1.6"/><circle cx="127" cy="270" r="1.6"/><circle cx="122" cy="275" r="1.6"/><circle cx="129" cy="263" r="1.6"/><circle cx="118" cy="269" r="1.6"/><circle cx="125" cy="258" r="1.6"/><circle cx="131" cy="272" r="1.6"/><circle cx="116" cy="264" r="1.6"/><circle cx="123" cy="281" r="1.6"/><circle cx="128" cy="279" r="1.6"/><circle cx="133" cy="266" r="1.6"/><circle cx="119" cy="256" r="1.6"/></g>
+<rect x="128" y="290" width="9" height="9" fill="none" stroke="#16a34a" stroke-width="2"/>
+<circle cx="124" cy="268" r="6" fill="var(--dot)" stroke="#fff" stroke-width="2.5"/></svg></div>
+<div class="status"><span>5:15</span><span>▮▮▮ ▮</span></div>
+<div class="bar"><div class="box mode"><span>Navigate</span><span class="on">Research</span></div><div class="box flr">REC ●</div></div>
+<div class="hud box"><div class="t">LIVE ESTIMATOR</div>
+<div class="r"><span>steps det/used</span><span>12/12</span></div><div class="r"><span>heading src</span><span>GRV</span></div><div class="r"><span>heading age</span><span>40ms</span></div><div class="r"><span>wifi age</span><span>6s</span></div><div class="r"><span>kNN conf</span><span>0.71</span></div><div class="r"><span>spread</span><span>0.84m</span></div><div class="r"><span>rejected</span><span>3%</span></div>
+<div class="spark"><i style="height:30%"></i><i style="height:45%"></i><i style="height:40%"></i><i style="height:62%"></i><i style="height:70%"></i><i style="height:66%"></i><i style="height:78%"></i><i style="height:80%"></i></div></div>
+<div class="legend box"><div><i style="background:var(--dot)"></i>Fused</div><div><i style="background:#a1a1aa"></i>Raw PDR</div><div><i style="background:#16a34a"></i>Wi-Fi fix</div><div><i style="background:var(--acc)"></i>Particles</div></div>
+<div class="panel"><div class="h" style="font-size:14px">Overlays</div>
+<div class="toggles"><span class="tg on">Particles</span><span class="tg on">Raw PDR</span><span class="tg on">Wi-Fi fixes</span><span class="tg">Graph</span><span class="tg">Ref points</span></div>
+<div style="display:flex;gap:8px"><div class="btn out" style="flex:1">Checkpoint</div><div class="btn out" style="flex:1">Relocalize</div><div class="btn" style="flex:1">Stop</div></div></div>
+</div><figcaption><b>4 · Live, Research mode</b>The same session with the diagnostics layer on. It replaces the separate NavigationScreen and RealLiveLocate screens.</figcaption></figure>
+
+<figure><div class="phone">
+<div class="map" style="bottom:390px"><svg viewBox="40 60 170 520" preserveAspectRatio="xMidYMid meet"><use href="#cf4" width="248" height="567"/><use href="#rps"/>
+<circle cx="124" cy="240" r="9" fill="none" stroke="var(--acc)" stroke-width="2.5"/></svg></div>
+<div class="status"><span>5:20</span><span>▮▮▮ ▮</span></div>
+<div class="bar"><div class="box mode" style="padding:8px 10px;font-size:12px;font-weight:700">Wi-Fi survey</div><div class="box flr">1 / 3 done</div></div>
+<div class="panel" style="top:auto;height:400px"><div class="h">RP-02 · corridor middle</div><div class="s">Stand on the floor label · keep the phone still</div>
+<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px"><span class="big">7/10</span><span class="s mono">next scan in 18 s</span></div>
+<div class="meter"><i style="width:70%"></i></div>
+<div class="tbl"><div class="tr"><span>POINT</span><span>SCANS</span><span>STATUS</span></div>
+<div class="tr"><span>RP-01 · C-407 door</span><span class="m">10/10</span><span class="st d">DONE</span></div>
+<div class="tr"><span>RP-02 · mid</span><span class="m">7/10</span><span class="st p">LIVE</span></div>
+<div class="tr"><span>RP-03 · C-402 door</span><span class="m">0/10</span><span class="st n">TODO</span></div></div></div>
+</div><figcaption><b>5 · Survey</b>Points appear on the map and in a table, with a scan counter and the honest throttle countdown front and centre.</figcaption></figure>
+
+<figure><div class="phone"><div class="status"><span>5:22</span><span>▮▮▮ ▮</span></div>
+<div class="page"><div class="s mono">FAST-NUCES / C-BLOCK</div><h2>Floor F4</h2>
+<div class="tbl"><div class="tr"><span>PIPELINE</span><span>STATE</span><span></span></div>
+<div class="tr"><span>Floor plan · 56.7 × 24.8 m</span><span class="st d">READY</span><span class="chg">Edit</span></div>
+<div class="tr"><span>Paths · 91 nodes · 15 places</span><span class="st d">READY</span><span class="chg">Edit</span></div>
+<div class="tr"><span>Wi-Fi survey · 1 / 3 pts</span><span class="st p">PARTIAL</span><span class="chg">Go</span></div>
+<div class="tr"><span>Evaluation · 0 checkpoints</span><span class="st n">TODO</span><span class="chg">Go</span></div></div>
+<div class="tbl"><div class="tr"><span>DATA</span><span></span><span></span></div>
+<div class="tr"><span>Sessions recorded</span><span class="m">14</span><span class="chg">View</span></div>
+<div class="tr"><span>Export JSON / CSV</span><span></span><span class="chg">Export</span></div>
+<div class="tr"><span>Diagnostics &amp; sensors</span><span></span><span class="chg">Open</span></div></div></div>
+<div class="tabbar"><span>Navigate</span><span>Buildings</span><span class="on">Floor</span></div>
+</div><figcaption><b>6 · Floor pipeline</b>Tools becomes a status table: plan → paths → survey → evaluation, plus data and diagnostics, all on one screen.</figcaption></figure>
+
+</div></body></html>

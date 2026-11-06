@@ -28,7 +28,7 @@ data class TurnSettings(
     val accelerometerFallbackEnabled: Boolean = false,
     val absoluteRotationVectorEnabled: Boolean = false,
     val bleFeatureEnabled: Boolean = BuildConfig.BLE_DEFAULT_ENABLED,
-    val darkTheme: Boolean = true,
+    val darkTheme: Boolean = false,
 ) {
     fun normalized(): TurnSettings = copy(
         wifiK = wifiK.coerceIn(1, 20),
@@ -83,7 +83,7 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         accelerometerFallbackEnabled = preferences[Keys.ACCELEROMETER_FALLBACK] ?: false,
         absoluteRotationVectorEnabled = preferences[Keys.ABSOLUTE_ROTATION_VECTOR] ?: false,
         bleFeatureEnabled = preferences[Keys.BLE_FEATURE_ENABLED] ?: BuildConfig.BLE_DEFAULT_ENABLED,
-        darkTheme = preferences[Keys.DARK_THEME] ?: true,
+        darkTheme = preferences[Keys.DARK_THEME] ?: false,
     ).normalized()
 
     private fun write(preferences: androidx.datastore.preferences.core.MutablePreferences, value: TurnSettings) {
