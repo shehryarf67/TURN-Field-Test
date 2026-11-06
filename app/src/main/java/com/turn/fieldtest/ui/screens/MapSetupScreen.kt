@@ -47,9 +47,11 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
             "Paths" -> "3 of 4 · Connect paths and name destinations"
             else -> "4 of 4 · Place your Wi-Fi survey points"
         }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(230.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showGraph = section == "Paths", showReferences = section == "Points", showCalibration = section == "Scale",
+        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(230.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showGraph = section == "Paths", showReferences = section == "Points", showCalibration = section == "Scale", roomLabels = section == "Points",
             onTap = { point, tolerance ->
                 if (section == "Paths") state.graphTap(point, tolerance)
+                // Arriving here from the survey screen skips the chip that normally selects the point tool.
+                else if (section == "Points") { state.editorTool = EditorTool.REFERENCE_POINT; state.addMapPoint(point) }
                 else if (section == "Points" || section == "Layout" || state.editorTool == EditorTool.CALIBRATION) state.addMapPoint(point)
             })
         Text(state.editorStatus, style = MaterialTheme.typography.bodySmall, maxLines = 3)
@@ -130,9 +132,33 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                     }
                 }
                 "Points" -> {
-                    Text("Tap known physical markers to add survey points. Calibrate before collecting.", style = MaterialTheme.typography.bodySmall)
-                    state.referencePoints.forEach { point -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("${point.label} · %.1f, %.1f m".format(point.metres.x, point.metres.y))
+                    Text("Tap the map to add a survey point, or let TURN suggest points along your paths. Place a removable label on the floor at each one.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("Spacing between suggested points", style = MaterialTheme.typography.labelLarge)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(2.0, 3.0, 5.0).forEach { s ->
+                            FilterChip(selected = state.surveySpacingMetres == s, onClick = { state.surveySpacingMetres = s },
+                                label = { Text("%.0f m".format(s) + if (s == 3.0) " · default" else "") })
+                        }
+                    }
+                    Button(onClick = { state.suggestSurveyPoints(state.surveySpacingMetres) }, enabled = state.canEditMap,
+                        modifier = Modifier.fillMaxWidth()) { Text(if (state.suggestedSurveyPoints.isEmpty()) "Suggest survey points" else "Suggest again") }
+                    if (state.suggestedSurveyPoints.isNotEmpty()) {
+                        Text("${state.suggestedSurveyPoints.size} suggestions shown as dashed circles. Tap one to add it.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = state::acceptAllSuggestedSurveyPoints, enabled = state.canEditMap,
+                                modifier = Modifier.weight(1f)) { Text("Add all ${state.suggestedSurveyPoints.size}") }
+                            OutlinedButton(onClick = { state.suggestedSurveyPoints.clear() }, modifier = Modifier.weight(1f)) { Text("Clear suggestions") }
+                        }
+                    }
+                    val completed = state.referencePoints.count { state.surveyPointProgress[it.id]?.status in setOf("COMPLETED", "LEGACY") }
+                    Text("${state.referencePoints.size} survey points · $completed surveyed", style = MaterialTheme.typography.labelLarge)
+                    state.referencePoints.forEach { point -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        val status = state.surveyPointProgress[point.id]?.status
+                        Text("${point.label} · %.1f, %.1f m".format(point.metres.x, point.metres.y) +
+                            if (status == "COMPLETED" || status == "LEGACY") " · surveyed" else "", modifier = Modifier.weight(1f))
                         TextButton(onClick = { state.removeReferencePoint(point.id) }, enabled = state.canEditMap) { Text("Remove") }
                     } }
                 }

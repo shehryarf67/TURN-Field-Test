@@ -492,7 +492,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         app.settings.update { it.copy(activeVenueId = context.venueId, activeFloorId = context.floorId) }
         appState.draftWalkablePolygon.clear()
         appState.draftWalls.clear()
-        appState.referencePoints.clear()
+        appState.referencePoints.clear(); appState.suggestedSurveyPoints.clear()
         appState.selectedSurveyReferencePointId = ""
         appState.qrAnchors.clear()
         appState.calibrationPoints.clear()
@@ -1457,6 +1457,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             WifiMatcherConfig(
                 k = appState.knnK,
                 minimumSharedBssids = 3,
+                ignoreUnknownLiveBssids = true,
                 missingRssiDbm = appState.missingRssi.toDouble(),
                 normalization = if (appState.deviceOffsetNormalization) {
                     WifiNormalization.DEVICE_OFFSET

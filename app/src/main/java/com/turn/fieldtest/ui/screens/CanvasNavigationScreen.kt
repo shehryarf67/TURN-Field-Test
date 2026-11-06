@@ -256,7 +256,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.primary)
-                        Text("Search rooms & places", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
+                        Text("Search places", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         Surface(onClick = { state.selectDestination(TurnDestination.VENUES) }, shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh) {

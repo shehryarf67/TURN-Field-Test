@@ -46,6 +46,9 @@ data class ParticleFilterConfig(
     val minimumRelocalizationStdMetres: Double = 0.35,
     val maximumRelocalizationStdMetres: Double = 4.0,
     val clusterRadiusMetres: Double = 3.0,
+    /** Share of particles re-drawn around each confident fresh Wi-Fi fix before reweighting. */
+    val wifiInjectionFraction: Double = 0.1,
+    val wifiInjectionMinimumConfidence: Double = 0.4,
 ) {
     init {
         require(particleCount > 0)
@@ -65,6 +68,8 @@ data class ParticleFilterConfig(
         require(minimumRelocalizationStdMetres >= 0.0)
         require(maximumRelocalizationStdMetres >= minimumRelocalizationStdMetres)
         require(clusterRadiusMetres > 0.0)
+        require(wifiInjectionFraction in 0.0..0.5)
+        require(wifiInjectionMinimumConfidence in 0.0..1.0)
     }
 }
 
@@ -277,6 +282,7 @@ class ParticleFilter(
         }
 
         val evidenceStrength = match.confidence.coerceIn(0.05, 1.0)
+        injectAroundWifi(match, wifiPosition, wifiFloor)
         val corrected = mutableParticles.map { particle ->
             val likelihood = match.neighbours.sumOf { neighbour ->
                 val sigma = config.correctionSpatialSigmaMetres * (1.0 + neighbour.distance / 25.0)
@@ -483,6 +489,33 @@ class ParticleFilter(
             )
         }
         mutableParticles = normalizeWeights(generated)
+    }
+
+    /**
+     * Reweighting alone cannot move a cloud whose every particle lags the truth (e.g. a short PDR stride).
+     * Replace the weakest few particles with hypotheses around the fix; likelihood weighting then decides
+     * whether they survive, so one noisy fix cannot drag the estimate but consistent fixes can.
+     */
+    private fun injectAroundWifi(match: WifiMatchResult, position: MetricPoint, floorId: String) {
+        val count = (config.particleCount * config.wifiInjectionFraction).toInt()
+        if (count == 0 || match.confidence < config.wifiInjectionMinimumConfidence || mutableParticles.size < 2) return
+        val floor = metricMap.floors[floorId] ?: return
+        val std = (match.uncertaintyRadiusMetres / 2.0).coerceIn(config.minimumRelocalizationStdMetres, config.maximumRelocalizationStdMetres)
+        val ranked = mutableParticles.sortedBy { it.weight }
+        val donors = ranked.drop(count).ifEmpty { ranked }
+        val meanWeight = mutableParticles.sumOf { it.weight } / mutableParticles.size
+        val injected = mutableListOf<Particle>()
+        var attempts = 0
+        while (injected.size < count && attempts < count * 50) {
+            attempts++
+            val candidate = MetricPoint(position.x + gaussian(std), position.y + gaussian(std))
+            if (!floor.isWalkable(candidate)) continue
+            // Keep a surviving particle's heading and stride calibration; only the location is new.
+            val donor = donors[random.nextInt(donors.size)]
+            injected += donor.copy(x = candidate.x, y = candidate.y, floorId = floorId, weight = meanWeight)
+        }
+        if (injected.isEmpty()) return
+        mutableParticles = ranked.drop(injected.size) + injected
     }
 
     private fun relocateFromWifi(match: WifiMatchResult) {

@@ -23,6 +23,10 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
     val freshCount = if (collecting) state.surveyAcceptedSnapshots else savedProgress?.freshCount ?: 0
     val targetCount = if (collecting) state.surveyTargetSnapshots else savedProgress?.target ?: state.surveyTargetSnapshots
     val apCount = if (collecting) state.surveyDistinctBssidCount else savedProgress?.accessPointCount ?: 0
+    val surveyed = state.referencePoints.filter { state.surveyPointProgress[it.id]?.status in setOf("COMPLETED", "LEGACY") }.map { it.id }.toSet()
+    // Nearest point still to survey, so the walk between points stays short.
+    val next = state.referencePoints.filter { it.id !in surveyed && it.id != selected?.id }
+        .minByOrNull { p -> selected?.let { (it.metres - p.metres).getDistance() } ?: 0f }
     if (details) {
         Column {
             TextButton(onClick = { details = false }) { Text("Back to survey") }
@@ -37,7 +41,11 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
         Text("Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("Select a point · Stand still · Collect · Save", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Text("${state.venueName} · ${state.floorName}", style = MaterialTheme.typography.bodySmall)
-        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(220.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showReferences = true, onTap = { p, tolerance ->
+        if (state.referencePoints.isNotEmpty()) {
+            Text("${surveyed.size} of ${state.referencePoints.size} points surveyed", style = MaterialTheme.typography.labelLarge)
+            LinearProgressIndicator(progress = { surveyed.size / state.referencePoints.size.toFloat() }, modifier = Modifier.fillMaxWidth())
+        }
+        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(220.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showReferences = true, roomLabels = true, onTap = { p, tolerance ->
             if (!state.sessionLocked) state.referencePoints.minByOrNull { (it.metres - p).getDistance() }
                 ?.takeIf { (it.metres - p).getDistance() < tolerance * 2 }?.let { state.selectedSurveyReferencePointId = it.id }
         })
@@ -81,6 +89,19 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
                     if (state.surveyRunning || state.surveyCloseFailed) actions.onRealSurveyFinished()
                     else selected?.let { actions.onRealSurveyStarted(SurveyCaptureMetadata(it.id, null, null, notes)) }
                 }) { Text(if (state.surveyStarting) "Starting…" else if (state.surveyCloseFailed) "Retry saving" else if (state.surveyRunning) "Finish and save" else "Begin collection") }
+            if (!collecting && next != null && (selected == null || selected.id in surveyed)) {
+                val away = selected?.let { (it.metres - next.metres).getDistance() }
+                Text(if (selected != null) "${selected.label} done. Next: ${next.label}" + (away?.let { " · %.1f m away".format(it) } ?: "")
+                    else "Start with ${next.label}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                FilledTonalButton(onClick = { state.selectedSurveyReferencePointId = next.id }, enabled = !state.sessionLocked,
+                    modifier = Modifier.fillMaxWidth()) { Text("Go to ${next.label}") }
+            } else if (!collecting && next != null) TextButton(onClick = { state.selectedSurveyReferencePointId = next.id },
+                enabled = !state.sessionLocked) { Text("Skip to nearest unsurveyed point (${next.label})") }
+            if (!collecting && state.referencePoints.isNotEmpty() && next == null && selected?.id in surveyed)
+                Text("All ${state.referencePoints.size} points surveyed. Add more points for denser coverage, or continue to Explore.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) },
+                enabled = !collecting) { Text("Add or suggest more points") }
             TextButton(onClick = { details = true }) { Text("Research details & RSSI aggregation") }
             if (!collecting && state.surveyPointProgress.values.any { it.status == "COMPLETED" || it.status == "LEGACY" }) {
                 OutlinedButton(onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) }, enabled = !state.sessionLocked,

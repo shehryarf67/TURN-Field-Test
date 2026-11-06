@@ -381,11 +381,14 @@ class TurnAppState {
                 }
             }
             EditorTool.REFERENCE_POINT -> {
-                val label = nextReferencePointId()
-                val id = if (mode == DataMode.REAL_DEVICE) "RP-${java.util.UUID.randomUUID()}" else label
-                referencePoints.add(MapPointUi(id, floorName, metricPoint, label))
-                selectedSurveyReferencePointId = id
-                editorStatus = "$id placed at ${formatPoint(metricPoint)}"
+                // Tapping on or near a suggestion accepts it instead of adding a slightly different point.
+                val suggestion = suggestedSurveyPoints.minByOrNull { (it - metricPoint).getDistance() }
+                    ?.takeIf { (it - metricPoint).getDistance() <= 1.2f }
+                if (suggestion != null) { acceptSuggestedSurveyPoint(suggestion); return }
+                val label = addReferencePointAt(metricPoint)
+                val walkable = runCatching { draftNavigationGraph().floor.isWalkable(MetricPoint(metricPoint.x.toDouble(), metricPoint.y.toDouble())) }.getOrDefault(true)
+                editorStatus = if (walkable) "$label placed at ${formatPoint(metricPoint)}"
+                    else "$label is outside walkable space · Wi-Fi matches there cannot correct live tracking"
             }
             EditorTool.QR_ANCHOR -> {
                 val id = if (mode == DataMode.REAL_DEVICE) "QR-${java.util.UUID.randomUUID()}" else "QR-G-${qrAnchors.size + 1}"
@@ -403,7 +406,7 @@ class TurnAppState {
         otherWalkableRegions.clear(); editedRegionId=null; editedRegionName="Walkable area"
         draftWalkablePolygon.clear()
         draftWalls.clear()
-        referencePoints.clear()
+        referencePoints.clear(); suggestedSurveyPoints.clear()
         qrAnchors.clear()
         calibrationPoints.clear()
         pendingWallStart = null
@@ -495,6 +498,48 @@ class TurnAppState {
         referencePoints.add(MapPointUi(id, floorName, Offset(x, y), clean))
         selectedSurveyReferencePointId = id
         editorStatus = "$clean added at ${formatPoint(Offset(x, y))}"
+    }
+
+    /** Proposed survey locations shown on the map until accepted or cleared; never saved by themselves. */
+    val suggestedSurveyPoints = mutableStateListOf<Offset>()
+    var surveySpacingMetres by mutableStateOf(3.0)
+
+    private fun addReferencePointAt(metricPoint: Offset): String {
+        val label = nextReferencePointId()
+        val id = if (mode == DataMode.REAL_DEVICE) "RP-${java.util.UUID.randomUUID()}" else label
+        referencePoints.add(MapPointUi(id, floorName, metricPoint, label))
+        selectedSurveyReferencePointId = id
+        return label
+    }
+
+    fun suggestSurveyPoints(spacingMetres: Double) {
+        if (!requireMapEditing()) return
+        val graph = runCatching { draftNavigationGraph() }.getOrElse {
+            editorStatus = "Draw a valid walkable layout before suggesting survey points"; return
+        }
+        val proposals = SurveyPointPlanner.suggest(graph.floor, graph.nodes, graph.edges,
+            referencePoints.map { MetricPoint(it.metres.x.toDouble(), it.metres.y.toDouble()) }, spacingMetres)
+        suggestedSurveyPoints.clear()
+        suggestedSurveyPoints.addAll(proposals.map { Offset(it.position.x.toFloat(), it.position.y.toFloat()) })
+        editorStatus = if (proposals.isEmpty()) "No gaps left at %.0f m spacing · existing points already cover the paths".format(spacingMetres)
+            else "${proposals.size} suggested points · tap one to add it, or add all"
+    }
+
+    fun acceptSuggestedSurveyPoint(point: Offset) {
+        if (!requireMapEditing() || !suggestedSurveyPoints.remove(point)) return
+        val label = addReferencePointAt(point)
+        editorStatus = "$label added from suggestion · ${suggestedSurveyPoints.size} suggestions left"
+    }
+
+    fun acceptAllSuggestedSurveyPoints() {
+        if (!requireMapEditing()) return
+        val count = suggestedSurveyPoints.size
+        val firstNew = referencePoints.size
+        suggestedSurveyPoints.toList().forEach { addReferencePointAt(it) }
+        suggestedSurveyPoints.clear()
+        // Surveying starts from the first new point, not the last one added.
+        referencePoints.getOrNull(firstNew)?.let { selectedSurveyReferencePointId = it.id }
+        editorStatus = "$count survey points added · Save map to keep them"
     }
 
     fun removeReferencePoint(id: String) {

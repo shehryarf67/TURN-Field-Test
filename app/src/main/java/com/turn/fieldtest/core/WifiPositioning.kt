@@ -193,6 +193,12 @@ data class WifiMatcherConfig(
     val neighbourRelativeSlack: Double = 0.5,
     val minimumSharedBssids: Int = 1,
     val ambiguitySpreadMetres: Double = 6.0,
+    /**
+     * Drop live access points that no fingerprint on the radio map has ever heard. They add the same large
+     * error to every candidate, so they cannot change the ranking, yet inflate distances until good matches
+     * are rejected as unlike the database.
+     */
+    val ignoreUnknownLiveBssids: Boolean = false,
 ) {
     init {
         require(neighbourDistanceSlackDb.isFinite() && neighbourDistanceSlackDb >= 0.0)
@@ -253,6 +259,16 @@ class WeightedKnnWifiMatcher(private val config: WifiMatcherConfig = WifiMatcher
         fingerprints: List<WifiFingerprint>,
         freshness: WifiScanFreshness = WifiScanFreshness.FRESH,
         globallyExcludedBssids: Set<String> = emptySet(),
+    ): WifiMatchResult = matchKnown(if (!config.ignoreUnknownLiveBssids) liveRssiByBssid else {
+        val radioMap = fingerprints.flatMapTo(hashSetOf()) { it.canonicalVector().keys }
+        liveRssiByBssid.filterKeys { canonicalBssid(it) in radioMap }
+    }, fingerprints, freshness, globallyExcludedBssids)
+
+    private fun matchKnown(
+        liveRssiByBssid: Map<String, Double>,
+        fingerprints: List<WifiFingerprint>,
+        freshness: WifiScanFreshness,
+        globallyExcludedBssids: Set<String>,
     ): WifiMatchResult {
         if (liveRssiByBssid.isEmpty() || fingerprints.isEmpty()) {
             return WifiMatchResult.noEstimate(freshness)

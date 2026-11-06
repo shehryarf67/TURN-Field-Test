@@ -49,7 +49,7 @@ class CanvasWorkflowTest {
         val state = fixture(); var starts = 0
         compose.setContent { TurnApp(state, TurnAppActions(
             onDestinationSelected = { state.selectedDestinationId = it }, onRealLiveToggled = { starts++ })) }
-        compose.onNodeWithText("Search rooms & places").performClick()
+        compose.onNodeWithText("Search places").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("Lab")
         waitForIme()
         compose.onAllNodesWithText("Lab 1").onLast().performClick()
@@ -204,7 +204,7 @@ class CanvasWorkflowTest {
     @Test fun labelledRoomWithoutEntranceIsSearchableAndExplainsMissingRoute() {
         val state=fixture().apply {destinations.add(PointOfInterestEntity("library","canvas-f","Library","ROOM",10.0,15.0)); markMapSaved()}
         compose.setContent {TurnApp(state,TurnAppActions(onDestinationSelected={state.selectedDestinationId=it}))}
-        compose.onNodeWithText("Search rooms & places").performClick()
+        compose.onNodeWithText("Search places").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("Library")
         waitForIme()
         compose.onAllNodesWithText("Library").onLast().performClick()

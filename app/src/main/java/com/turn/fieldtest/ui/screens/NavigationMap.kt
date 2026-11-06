@@ -261,6 +261,13 @@ internal fun NavigationMap(
                         if (poi.id !in labelledRooms) label(poi.name, p, Color.White, priority = selected)
                     }
                     if (showReferences) {
+                      // Suggestions are hollow, dashed and unlabelled so they never read as surveyed points.
+                      val dash = PathEffect.dashPathEffect(floatArrayOf(4f * density.density / zoom, 3f * density.density / zoom))
+                      state.suggestedSurveyPoints.forEach {
+                          val p = project(it)
+                          drawCircle(Color.White.copy(alpha = 0.85f), 7f * density.density / zoom, p)
+                          drawCircle(TurnAmber, 7f * density.density / zoom, p, style = Stroke(1.6f * density.density / zoom, pathEffect = dash))
+                      }
                       state.referencePoints.forEach { point ->
                         val p = project(point.metres)
                         val color = when {
@@ -268,7 +275,9 @@ internal fun NavigationMap(
                             state.surveyPointProgress[point.id]?.status == "COMPLETED" -> TurnMint
                             else -> TurnCyan
                         }
-                        drawCircle(color, (if (point.id == state.selectedSurveyReferencePointId) 8f else 5f) / zoom, p)
+                        val radius = (if (point.id == state.selectedSurveyReferencePointId) 8f else 5.5f) * density.density * 0.8f / zoom
+                        drawCircle(Color.White, radius + 1.5f * density.density / zoom, p)
+                        drawCircle(color, radius, p)
                         label(point.label, p, Color.White)
                       }
                     }
