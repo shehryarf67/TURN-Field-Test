@@ -27,7 +27,8 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
     val selectWall by rememberUpdatedState(onWall)
     var hitPoints by remember { mutableStateOf(emptyList<Pair<String,Offset>>()) }
     var hitWalls by remember { mutableStateOf(emptyList<Triple<String,Offset,Offset>>()) }
-    Box(modifier.background(Color(0xFF101E30))) {
+    val palette = MaterialTheme.colorScheme
+    Box(modifier.background(palette.surfaceContainerLow)) {
         Canvas(Modifier.fillMaxSize().pointerInput(Unit) {
             detectTransformGestures { _,delta,scale,_ -> zoom=(zoom*scale).coerceIn(0.3f,15f); pan+=delta }
         }.pointerInput(Unit) {
@@ -50,27 +51,34 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
             d.rooms.forEach { r ->
                 if(r.corners.size>=3) {
                     val path=Path(); r.corners.forEachIndexed { i,p->val s=screen(p.p); if(i==0) path.moveTo(s.x,s.y) else path.lineTo(s.x,s.y) }; path.close()
-                    drawPath(path,if(r.confirmed) Color(0x2231D1EC) else Color(0x22FFB547))
-                    drawPath(path,if(r.confirmed) Color(0xFF51D5E8) else Color(0xFFFFB547),style=Stroke(2f))
+                    drawPath(path,if(r.confirmed) palette.primary.copy(alpha=.10f) else palette.tertiary.copy(alpha=.12f))
+                    drawPath(path,if(r.confirmed) palette.primary else palette.tertiary,style=Stroke(2f))
                     val x=r.corners.map { it.p.x }.average(); val y=r.corners.map { it.p.y }.average(); val s=screen(P2(x,y))
-                    drawContext.canvas.nativeCanvas.drawText(r.name,s.x,s.y,android.graphics.Paint().apply { color=android.graphics.Color.WHITE; textSize=13.dp.toPx(); textAlign=android.graphics.Paint.Align.CENTER })
+                    drawContext.canvas.nativeCanvas.drawText(r.name,s.x,s.y,android.graphics.Paint().apply { color=palette.onSurface.toArgb(); textSize=13.dp.toPx(); textAlign=android.graphics.Paint.Align.CENTER })
                 }
             }
             walls.forEach { w ->
                 val a=screen(w.a); val b=screen(w.b)
-                drawLine(if(w.id==selected) Color.White else if(w.status=="CONFIRMED") Color(0xFF42D9F5) else Color(0xFFFFB547),a,b,if(w.id==selected) 7f else 4f)
+                drawLine(if(w.id==selected) palette.onSurface else if(w.status=="CONFIRMED") palette.primary else palette.tertiary,a,b,if(w.id==selected) 7f else 4f)
             }
             d.doors.forEach { drawLine(if(it.walkable) Color(0xFF6EE7A1) else Color(0xFFF97F7F),screen(it.a),screen(it.b),9f) }
             if(debug) d.poses.zipWithNext().filter { it.first.segmentId==it.second.segmentId }.forEach { (a,b)->
                 if(a.mapPoint!=null && b.mapPoint!=null) drawLine(Color(0x889BA9C1),screen(a.mapPoint),screen(b.mapPoint),2f)
             }
             d.poses.lastOrNull()?.mapPoint?.let { drawCircle(Color(0xFF4D94FF),7f,screen(it)) }
-            d.points().forEach { drawCircle(if(it.id==selected) Color.White else Color(0xFF7CEAFF),if(it.id==selected) 9f else 5f,screen(it.p)) }
+            d.points().forEach { drawCircle(if(it.id==selected) palette.onSurface else palette.primary,if(it.id==selected) 9f else 5f,screen(it.p)) }
+            val cornerPaint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color=palette.onSurface.toArgb(); textSize=12.dp.toPx()
+            }
+            d.rooms.forEach { room -> room.corners.forEachIndexed { index, corner ->
+                val p=screen(corner.p)
+                drawContext.canvas.nativeCanvas.drawText("${index+1}",p.x+8.dp.toPx(),p.y-8.dp.toPx(),cornerPaint)
+            } }
             // Hit targets change with the viewport, never with a guessed conversion from screen pixels.
             hitPoints=d.points().map { it.id to screen(it.p) }
             hitWalls=walls.map { Triple(it.id,screen(it.a),screen(it.b)) }
-            val a=Offset(16.dp.toPx(),size.height-20.dp.toPx()); drawLine(Color.White,a,a+Offset(ppm,0f),3f)
-            drawContext.canvas.nativeCanvas.drawText("1 m",a.x,a.y-8,android.graphics.Paint().apply { color=android.graphics.Color.WHITE; textSize=11.dp.toPx() })
+            val a=Offset(16.dp.toPx(),size.height-20.dp.toPx()); drawLine(palette.onSurface,a,a+Offset(ppm,0f),3f)
+            drawContext.canvas.nativeCanvas.drawText("1 m",a.x,a.y-8,android.graphics.Paint().apply { color=palette.onSurface.toArgb(); textSize=11.dp.toPx() })
         }
         TextButton(onClick={ zoom=1f; pan=Offset.Zero },modifier=Modifier.align(androidx.compose.ui.Alignment.TopEnd)) { Text("Fit map") }
     }

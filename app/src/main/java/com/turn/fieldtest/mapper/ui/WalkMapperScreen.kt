@@ -5,9 +5,15 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment as ComposeAlignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.turn.fieldtest.mapper.WalkMapperViewModel
@@ -16,11 +22,13 @@ import com.turn.fieldtest.mapper.core.*
 import kotlin.math.abs
 
 @Composable
-fun WalkMapperScreen(vm: WalkMapperViewModel,camera: ArScanView?,availability: String,arSupported: Boolean,
-    onStartCamera: ()->Unit,onStopCamera: ()->Unit,onExit: ()->Unit,onPublish: ()->Unit,onJson: ()->Unit,onPng: ()->Unit,onCheckSupport: ()->Unit={}) {
+internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,availability: String,arSupported: Boolean,
+    onStartCamera: ()->Unit,onStopCamera: ()->Unit,onExit: ()->Unit,onPublish: ()->Unit,onJson: ()->Unit,onPng: ()->Unit,onCheckSupport: ()->Unit={}, initialSection: String="Capture") {
     val doc=vm.doc
-    var tab by remember { mutableStateOf("Capture") }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var tab by remember { mutableStateOf(initialSection) }
     var preview by remember { mutableStateOf(false) }; var debug by remember { mutableStateOf(false) }
+    LaunchedEffect(camera) { preview=false }
     var roomName by remember { mutableStateOf("") }
     var x by remember { mutableStateOf("") }; var y by remember { mutableStateOf("") }
     var exitDialog by remember { mutableStateOf(false) }
@@ -31,52 +39,73 @@ fun WalkMapperScreen(vm: WalkMapperViewModel,camera: ArScanView?,availability: S
         confirmButton={TextButton(onClick={ onStopCamera(); onExit(); exitDialog=false }) { Text("Save and leave") }},
         dismissButton={TextButton(onClick={exitDialog=false}) { Text("Keep editing") }})
     Surface(Modifier.fillMaxSize()) {
-        BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
+        BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
             val surfaceHeight=(maxHeight*0.38f).coerceIn(140.dp,440.dp)
             val compact=maxHeight<600.dp
-            val panelHeight=maxHeight*.8f
-            Column(Modifier.fillMaxSize().then(if(compact) Modifier.verticalScroll(rememberScrollState()) else Modifier).padding(horizontal=12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            val scrollPage=compact || camera==null
+            Column(Modifier.fillMaxSize().then(if(scrollPage) Modifier.verticalScroll(rememberScrollState()) else Modifier).padding(horizontal=12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
-                        Text("TURN Walk Mapper",style=MaterialTheme.typography.titleLarge)
+                        Text("Create a floor plan",style=MaterialTheme.typography.titleLarge)
                         Text(vm.room?.name ?: "Create a room to begin",style=MaterialTheme.typography.labelMedium)
                     }
                     TextButton(onClick={exitDialog=true}) { Text("Close") }
                 }
-                Text(if(camera!=null) vm.arStatus.text else availability,style=MaterialTheme.typography.bodySmall,maxLines=2)
+                Surface(shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.secondaryContainer) {
+                    Text(if(camera!=null) vm.arStatus.text else availability,
+                        modifier=Modifier.padding(12.dp),style=MaterialTheme.typography.bodyMedium)
+                }
                 if(camera!=null) Text(vm.arStatus.depth,style=MaterialTheme.typography.labelSmall)
                 if(doc==null) { Text(vm.status); return@Column }
-                Box(Modifier.fillMaxWidth().height(surfaceHeight)) {
+                Box(Modifier.fillMaxWidth().height(surfaceHeight).clip(MaterialTheme.shapes.extraLarge)) {
                     if(camera!=null) AndroidView(factory={camera},modifier=Modifier.fillMaxSize(),update={view->
                         view.tool=vm.tool; view.overlay=doc.allWalls()+doc.walls.filter { it.status=="CANDIDATE" }
                         view.mapAlignment=doc.segments.firstOrNull { it.id==vm.activeSegment }?.alignment ?: Alignment()
                         view.thresholds=doc.thresholds
                     })
-                    if(camera==null || preview) ScanPreview(doc,vm.selectedPointId ?: vm.selectedWallId,debug,Modifier.fillMaxSize(),
+                    if(camera==null && doc.points().isEmpty()) Surface(color=MaterialTheme.colorScheme.surfaceContainerLow,modifier=Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=ComposeAlignment.CenterHorizontally) {
+                            Text(if(arSupported) "Your floor plan starts here" else "Map with measurements",style=MaterialTheme.typography.titleLarge)
+                            Spacer(Modifier.height(12.dp))
+                            Text(if(arSupported) "Start the camera to mark the floor and room corners. Your outline appears here as you capture."
+                                else "You can map without the camera: add a room and enter measured corners below.",style=MaterialTheme.typography.bodyMedium)
+                        }
+                    } else if(camera==null || preview) ScanPreview(doc,vm.selectedPointId ?: vm.selectedWallId,debug,Modifier.fillMaxSize(),
                         onPoint={vm.selectedPointId=it; vm.selectedWallId=null},onWall={vm.selectedWallId=it; vm.selectedPointId=null})
                 }
                 if(camera!=null && vm.floorDescription.isNotEmpty()) {
                     Text(vm.floorDescription,style=MaterialTheme.typography.bodySmall)
                     ActionRow { Button(onClick={camera.confirmFloor()}) { Text("Confirm floor / origin") }; TextButton(onClick={camera.rejectFloor()}) { Text("Reject") } }
                 }
+                if(camera==null) Button(onClick=onStartCamera,enabled=arSupported && !vm.busy,
+                    modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text("Start camera") }
                 ActionRow {
                     if(camera!=null) {
                         Button(onClick=onStopCamera) { Text("Pause / review") }
                         FilterChip(preview,{preview=!preview},label={Text("2D preview")})
-                    } else OutlinedButton(onClick=onStartCamera,enabled=arSupported && vm.cameraMayStart && vm.room!=null) { Text("Start camera") }
+                    }
                     TextButton(onClick={debug=!debug}) { Text(if(debug) "Hide path" else "Show path") }
                     TextButton(onClick=vm::undo,enabled=!vm.busy) { Text("Undo") }
                 }
                 Text(vm.status,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.primary,maxLines=3)
-                ActionRow { listOf("Capture","Review","Verify & save").forEach { title->FilterChip(tab==title,{tab=title},label={Text(title)}) } }
-                Column((if(compact) Modifier.height(panelHeight) else Modifier.weight(1f)).fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom=16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                if(camera==null && arSupported) Text(
+                    if(doc.points().isEmpty()) "1 · Start camera   2 · Set floor direction   3 · Mark room corners"
+                    else if(!vm.cameraMayStart) "Before restarting: select Reference A and Reference B in Capture to align your saved map."
+                    else "Alignment ready · Start camera, then locate the same two physical corners.",
+                    style=MaterialTheme.typography.bodySmall)
+                val sections=listOf("Capture","Review","Verify & save")
+                TabRow(selectedTabIndex=sections.indexOf(tab)) {
+                    sections.forEach { title -> Tab(selected=tab==title,onClick={tab=title},text={Text(title)}) }
+                }
+                Column((if(scrollPage) Modifier else Modifier.weight(1f).verticalScroll(rememberScrollState())).fillMaxWidth().padding(bottom=16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
                     when(tab) {
                         "Capture" -> {
                             Text("AR or measured drawing",style=MaterialTheme.typography.titleMedium)
                             if(camera==null) TextButton(onClick=onCheckSupport) {Text("Check AR support again")}
                             Text("Camera and geometry stay on this phone. AR surfaces are estimates; verify dimensions with a tape. Without ARCore, enter measured corners below.",style=MaterialTheme.typography.bodySmall)
                             Choice("Current room",vm.currentRoomId,doc.rooms.map { it.id to it.name },vm::chooseRoom)
-                            OutlinedTextField(roomName,{roomName=it},label={Text("Room name")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+                            OutlinedTextField(roomName,{roomName=it},label={Text("Room name")},modifier=Modifier.fillMaxWidth(),singleLine=true,
+                                keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done), keyboardActions=KeyboardActions(onDone={keyboard?.hide()}))
                             ActionRow {
                                 Button(onClick={attempt { vm.addRoom(roomName); roomName="" }},enabled=roomName.isNotBlank() && !vm.busy) { Text("Start next room") }
                                 TextButton(onClick={vm.renameRoom(roomName)},enabled=roomName.isNotBlank() && vm.room!=null) { Text("Rename") }
@@ -219,9 +248,12 @@ fun WalkMapperScreen(vm: WalkMapperViewModel,camera: ArScanView?,availability: S
     Box {OutlinedButton(onClick={open=true},enabled=items.isNotEmpty()) {Text("$label: ${items.firstOrNull {it.first==selected}?.second ?: "Choose"}")}
         DropdownMenu(open,{open=false}) {items.forEach {(id,title)->DropdownMenuItem(text={Text(title)},onClick={open=false; onSelect(id)})}} }
 }
-@Composable private fun PointChoice(label: String,selected: String?,doc: ScanDocument,onSelect: (String)->Unit) =
+@Composable internal fun PointChoice(label: String,selected: String?,doc: ScanDocument,onSelect: (String)->Unit) =
     Choice(label,selected,doc.rooms.flatMap {r->r.corners.mapIndexed {i,p->p.id to "${r.name} ${i+1} · %.2f, %.2f m".format(p.p.x,p.p.y)}} ,onSelect)
-@Composable private fun NumberField(label: String,value: String,onChange: (String)->Unit,modifier: Modifier)=
-    OutlinedTextField(value,onChange,label={Text(label)},modifier=modifier,singleLine=true)
+@Composable private fun NumberField(label: String,value: String,onChange: (String)->Unit,modifier: Modifier) {
+    val keyboard=LocalSoftwareKeyboardController.current
+    OutlinedTextField(value,onChange,label={Text(label)},modifier=modifier,singleLine=true,
+        keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done),keyboardActions=KeyboardActions(onDone={keyboard?.hide()}))
+}
 @Composable private fun ActionRow(content: @Composable RowScope.()->Unit) =
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp),content=content)

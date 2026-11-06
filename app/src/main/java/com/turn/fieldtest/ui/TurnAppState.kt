@@ -61,6 +61,8 @@ class TurnAppState {
     val navigationNodes = mutableStateListOf<NavigationNodeEntity>()
     val navigationEdges = mutableStateListOf<NavigationEdgeEntity>()
     val destinations = mutableStateListOf<PointOfInterestEntity>()
+    val destinationAreas = mutableStateListOf<com.turn.fieldtest.data.repository.DestinationArea>()
+    var navigationPreviewGraph by mutableStateOf<NavigationGraph?>(null)
     var graphTool by mutableStateOf("Inspect")
     var selectedNodeId by mutableStateOf<String?>(null)
     var selectedDestinationId by mutableStateOf<String?>(null)
@@ -126,6 +128,20 @@ class TurnAppState {
             else -> { selectedNodeId = nearest?.id; editorStatus = if (nearest == null) "Tap a node to select it" else "Node selected" }
         }
     }
+    fun linkSelectedDestination(destinationId: String) {
+        if (!canEditMap) return
+        val node=navigationNodes.firstOrNull {it.id==selectedNodeId} ?: return
+        val place=destinations.firstOrNull {it.id==destinationId && it.floorId==node.floorId} ?: return
+        if(node.poiId!=null && node.poiId!=place.id || navigationNodes.any {it.id!=node.id && it.poiId==place.id}) {
+            editorStatus="This room or node already has an entrance. Select an unassigned path node."; return
+        }
+        if(!runCatching {draftNavigationGraph().floor.isWalkable(node.core().point)}.getOrDefault(false)) {
+            editorStatus="The entrance must be inside verified walkable space"; return
+        }
+        destinations[destinations.indexOf(place)]=place.copy(xMetres=node.xMetres,yMetres=node.yMetres)
+        navigationNodes[navigationNodes.indexOf(node)]=node.copy(poiId=place.id)
+        editorStatus="${place.name} entrance linked · Save map to keep it"
+    }
     fun nameSelectedDestination(name: String) {
         if (!canEditMap || name.isBlank()) return
         val node = navigationNodes.firstOrNull { it.id == selectedNodeId } ?: run { editorStatus = "Select a path node first"; return }
@@ -183,6 +199,8 @@ class TurnAppState {
     var destination by mutableStateOf(TurnDestination.VENUES)
     var mode by mutableStateOf(DataMode.DEMO)
     var compactMenuOpen by mutableStateOf(false)
+    var toolsHome by mutableStateOf(false)
+    var mapSetupSection by mutableStateOf("Scale")
     var selectedVenueId by mutableStateOf(TurnDemoData.venues.first().id)
     var selectedFloorId by mutableStateOf(TurnDemoData.venues.first().floors.first().id)
 
@@ -317,11 +335,18 @@ class TurnAppState {
     var deviceOffsetNormalization by mutableStateOf(false)
     var accelerometerFallback by mutableStateOf(false)
     var bleConfigured by mutableStateOf(false)
-    var darkTheme by mutableStateOf(true)
+    var darkTheme by mutableStateOf(false)
 
     fun selectDestination(value: TurnDestination) {
+        toolsHome = false
         if (value != TurnDestination.LIVE_LOCATE) navigationFullscreen = false
         destination = value
+        compactMenuOpen = false
+    }
+
+    fun openTools() {
+        toolsHome = true
+        navigationFullscreen = false
         compactMenuOpen = false
     }
 

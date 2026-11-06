@@ -79,6 +79,11 @@ fun decodePolygon(value: String): MetricPolygon = MetricPolygon(Json.parseToJson
     MetricPoint(it.jsonObject.getValue("x").jsonPrimitive.double, it.jsonObject.getValue("y").jsonPrimitive.double)
 })
 
+data class DestinationArea(val destinationId: String, val polygon: MetricPolygon)
+
+/** Recover persisted mapper room outlines without treating rooms as walkable corridors. */
+fun SavedFloorMap.destinationAreas(): List<DestinationArea> = mapperDestinationAreas()
+
 class ProjectRepository(private val database: TurnDatabase) {
     private val repositories = RoomRepositories.from(database)
     fun observeProjects() = database.floorPlanDao().observeProjects()
@@ -98,7 +103,7 @@ class ProjectRepository(private val database: TurnDatabase) {
         val venue = requireNotNull(repositories.venues.venue(context.venueId)) { "Saved venue is unavailable" }
         val floor = requireNotNull(repositories.floorPlans.floor(context.floorId)) { "Saved floor is unavailable" }
         require(floor.venueId == venue.id) { "This floor belongs to another venue" }
-        SavedFloorMap(venue, floor,
+        val saved=SavedFloorMap(venue, floor,
             repositories.floorPlans.observeAsset(floor.id).first(),
             repositories.floorPlans.observeWalkableRegions(floor.id).first(),
             repositories.floorPlans.observeWalls(floor.id).first(),
@@ -107,5 +112,11 @@ class ProjectRepository(private val database: TurnDatabase) {
             database.floorPlanDao().hasMeasurements(floor.id, venue.id),
             database.navigationDao().nodes(floor.id), database.navigationDao().edges(floor.id),
             database.navigationDao().destinations(floor.id))
+        val missing=saved.missingMapperRooms()
+        if(missing.isNotEmpty()) database.navigationDao().saveDestinations(missing)
+        val renamed=saved.descriptiveMapperReferences()
+        renamed.forEach {database.floorPlanDao().upsertReferencePoint(it)}
+        saved.copy(destinations=(saved.destinations+missing).sortedBy {it.name.lowercase(java.util.Locale.ROOT)},
+            points=saved.points.map {p->renamed.firstOrNull {it.id==p.id} ?: p})
     }
 }

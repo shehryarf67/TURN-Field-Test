@@ -47,6 +47,8 @@ class ArScanView(private val activity: Activity, val session: Session, private v
     private val depthEvidence=DepthWallAccumulator()
     private val captureGuard=CaptureGuard()
     private var texture=0; private var backgroundProgram=0; private var lineProgram=0
+    private var rendererReady=false
+    private var cameraWaitStarted=System.nanoTime()
     private var width=1; private var height=1
     private var lastStatus=0L; private var lastPose=0L; private var lastDepth=0L; private var lastRefine=0L
     @Volatile private var depthFrames=0
@@ -59,6 +61,8 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         preserveEGLContextOnPause=true; setRenderer(this); renderMode=RENDERMODE_CONTINUOUSLY
     }
     override fun onTouchEvent(event: MotionEvent): Boolean { if(event.action==MotionEvent.ACTION_UP) {val point=event.x to event.y; queueEvent { tap=point }}; return true }
+    /** The primary capture button uses the same real hit-test path as a camera tap. */
+    fun markAtCentre() = queueEvent { tap=width/2f to height/2f }
     fun confirmFloor() = queueEvent {
         val hit=pendingFloor
         if(disposed || blocked || trackingFrames<20 || hit==null || System.nanoTime()-pendingFloorAt>10_000_000_000L || hit.trackable.trackingState!=TrackingState.TRACKING) report(ArStatus("Floor reference expired; tap the floor again"))
@@ -77,6 +81,9 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         return runCatching { FloorFrame.along(a.pose.v(),b.pose.v()) }.getOrNull()
     }
     override fun onSurfaceCreated(gl: GL10?,config: EGLConfig?) {
+        rendererReady=false
+        cameraWaitStarted=System.nanoTime()
+        try {
         val ids=IntArray(1); GLES20.glGenTextures(1,ids,0); texture=ids[0]
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,texture)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,GLES20.GL_TEXTURE_MIN_FILTER,GLES20.GL_LINEAR)
@@ -88,15 +95,26 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         lineProgram=program("attribute vec3 p; uniform mat4 vp; void main(){gl_Position=vp*vec4(p,1.);}",
             "precision mediump float; uniform vec4 color; void main(){gl_FragColor=color;}")
         session.setCameraTextureNames(intArrayOf(texture))
+        rendererReady=true
+        } catch(e: Exception) {
+            report(ArStatus("Camera preview could not start (${e.javaClass.simpleName}). Pause and retry, or use measured drawing."))
+        }
     }
     override fun onSurfaceChanged(gl: GL10?,w: Int,h: Int) { width=w; height=h; GLES20.glViewport(0,0,w,h) }
     override fun onDrawFrame(gl: GL10?) {
-        if(disposed) return
+        if(disposed || !rendererReady) return
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         try {
             @Suppress("DEPRECATION") val rotation=activity.windowManager.defaultDisplay.rotation
             session.setDisplayGeometry(rotation,width,height)
-            val f=session.update(); if(f.timestamp==0L) return
+            val f=session.update(); if(f.timestamp==0L) {
+                val now=System.nanoTime()
+                if(now-cameraWaitStarted>5_000_000_000L && now-lastStatus>1_000_000_000L) {
+                    lastStatus=now
+                    report(ArStatus("Waiting for camera images. Check Android Camera access is enabled; pause and retry if the preview stays blank."))
+                }
+                return
+            }
             drawCamera(f)
             val tracked=f.camera.trackingState==TrackingState.TRACKING
             val thermal=if(Build.VERSION.SDK_INT>=29) activity.getSystemService(PowerManager::class.java).currentThermalStatus else 0

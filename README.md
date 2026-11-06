@@ -1,5 +1,9 @@
 # TURN Field Test
 
+[TURN-Mapper import](docs/MAPPER_IMPORT.md) is available under Buildings. Import the supplied C-F4 metric floor/graph, replace obsolete maps and fingerprints explicitly, and collect a new survey. Multi-floor runtime and refinement of AR-assisted mapping are the next priorities.
+
+The current [Canvas interface](docs/CANVAS_UI.md) uses **Explore · Buildings · Tools**, blue/white light mode and navy/blue dark mode. Open a saved building to explore, or use Tools for the guided map → survey → navigation workflow. Existing research screens remain available under Tools and Explore's map options.
+
 TURN is an offline-first Android indoor-navigation prototype for one real building floor, with retained research tools for Wi-Fi fingerprinting and uncertainty-aware positioning:
 
 `QR/manual/Wi-Fi fix -> PDR prediction -> map constraint -> Wi-Fi correction -> fused blue dot`

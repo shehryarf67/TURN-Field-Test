@@ -9,6 +9,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.turn.fieldtest.ui.*
+import com.turn.fieldtest.ui.model.TurnDestination
+import androidx.compose.ui.text.font.FontWeight
 
 @Composable
 fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
@@ -27,10 +29,15 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
             SurveyScreen(state, true, actions.onRealSurveyStarted, actions.onRealSurveyFinished)
         }; return
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Collect fingerprints", style = MaterialTheme.typography.titleLarge)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val shortWindow = maxHeight < 420.dp
+    val panelHeight = (maxHeight * 0.43f).coerceAtMost(300.dp)
+    Column(Modifier.fillMaxSize().then(if (shortWindow) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+        .padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Select a point · Stand still · Collect · Save", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Text("${state.venueName} · ${state.floorName}", style = MaterialTheme.typography.bodySmall)
-        NavigationMap(state, Modifier.fillMaxWidth().weight(1f).heightIn(min = 200.dp), showReferences = true, onTap = { p, tolerance ->
+        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(220.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showReferences = true, onTap = { p, tolerance ->
             if (!state.sessionLocked) state.referencePoints.minByOrNull { (it.metres - p).getDistance() }
                 ?.takeIf { (it.metres - p).getDistance() < tolerance * 2 }?.let { state.selectedSurveyReferencePointId = it.id }
         })
@@ -48,8 +55,11 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
                     label = { Text("${point.label} · $label") })
             }
         }
-        Column(Modifier.fillMaxWidth().heightIn(max = 270.dp).verticalScroll(rememberScrollState()).padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (selected == null) Text("Add reference points in Map setup before surveying.")
+        Column(Modifier.fillMaxWidth().height(if (shortWindow) 300.dp else panelHeight).verticalScroll(rememberScrollState()).padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (selected == null) {
+                Text("Add reference points in Map setup before surveying.")
+                TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add survey points") }
+            }
             else Text("${selected.label} · x %.1f m, y %.1f m".format(selected.metres.x, selected.metres.y), style = MaterialTheme.typography.titleMedium)
             if (!state.sessionLocked) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(target, { value -> target = value.filter(Char::isDigit).take(2); target.toIntOrNull()?.let { state.surveyTargetSnapshots = it.coerceIn(1, 50) } },
@@ -72,6 +82,11 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
                     else selected?.let { actions.onRealSurveyStarted(SurveyCaptureMetadata(it.id, null, null, notes)) }
                 }) { Text(if (state.surveyStarting) "Starting…" else if (state.surveyCloseFailed) "Retry saving" else if (state.surveyRunning) "Finish and save" else "Begin collection") }
             TextButton(onClick = { details = true }) { Text("Research details & RSSI aggregation") }
+            if (!collecting && state.surveyPointProgress.values.any { it.status == "COMPLETED" || it.status == "LEGACY" }) {
+                OutlinedButton(onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) }, enabled = !state.sessionLocked,
+                    modifier = Modifier.fillMaxWidth()) { Text("Continue to Explore") }
+            }
         }
+    }
     }
 }

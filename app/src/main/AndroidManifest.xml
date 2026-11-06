@@ -27,7 +27,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
         android:icon="@drawable/ic_turn"
-        android:label="TURN Field Test"
+        android:label="TURN"
         android:roundIcon="@drawable/ic_turn"
         android:supportsRtl="true"
         android:theme="@style/Theme.TurnFieldTest">

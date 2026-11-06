@@ -123,6 +123,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var sessionGraph: NavigationGraph? = null
     private var sessionInitialHeadingRadians = 0.0
     private var savedNavigationGraph: NavigationGraph? = null
+        set(value) { field=value; appState.navigationPreviewGraph=value }
     private val liveWifiEvidence = com.turn.fieldtest.platform.wifi.LiveWifiEvidenceGate()
     private val activeContext get() = requireNotNull(appState.activeProject) { "Open a saved project first" }
     private val captureService = WifiSurveyCaptureService(repositories.surveys)
@@ -251,7 +252,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.darkTheme = saved.darkTheme
             appState.mode = DataMode.valueOf(saved.dataMode.name)
             try {
-                if (appState.mode == DataMode.REAL_DEVICE) restoreSelectedProject() else appState.loadDemoMap()
+                if (appState.mode == DataMode.REAL_DEVICE) {
+                    restoreSelectedProject()
+                    if (appState.realMapReady) appState.selectDestination(
+                        if (appState.allWalkablePolygons().any { it.size >= 3 }) com.turn.fieldtest.ui.model.TurnDestination.LIVE_LOCATE
+                        else com.turn.fieldtest.ui.model.TurnDestination.FLOOR_EDITOR)
+                } else appState.loadDemoMap()
             } catch (error: Exception) { appState.projectStatus = "Could not restore project: ${error.message}" }
             finally { appState.startupLoading = false }
             refreshWifiPermissionStatus()
@@ -406,6 +412,36 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun importMapperPackage(asset: String? = null, uri: Uri? = null, replace: Boolean = false) {
+        if(appState.mode != DataMode.REAL_DEVICE || appState.projectBusy || appState.sessionLocked || appState.liveRunning ||
+            appState.surveyRunning || appState.liveStarting || appState.surveyStarting || appState.liveCloseFailed || appState.surveyCloseFailed ||
+            appState.diagnosticWalkRunning || appState.startupLoading || appState.realEvaluationBusy || appState.hasUnsavedMapChanges) return
+        appState.projectBusy=true
+        viewModelScope.launch {
+            var committed=false
+            try {
+                val context=withContext(Dispatchers.IO) {
+                    val stream=if(asset!=null) app.assets.open(asset) else app.contentResolver.openInputStream(requireNotNull(uri))!!
+                    val bytes=stream.use { input ->
+                        val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
+                        while(true) {val count=input.read(buffer);if(count<0)break;require(output.size()+count<=10_000_000) {"Map package is too large"};output.write(buffer,0,count)}
+                        output.toByteArray()
+                    }
+                    val text=bytes.toString(Charsets.UTF_8)
+                    val parsed=MapperPackage.parse(text)
+                    MapperImporter(app.database,app).install(parsed,text,replace).also {committed=true}
+                }
+                loadProject(context)
+                appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.LIVE_LOCATE)
+                appState.projectStatus="Mapper floor imported · supplied metric scale · collect new Wi-Fi fingerprints"
+            } catch(e: Exception) {
+                if(e is kotlinx.coroutines.CancellationException) throw e
+                appState.projectStatus=if(committed) "Mapper floor saved, but opening failed: ${e.message}. Reopen it from Buildings."
+                    else "Mapper import rejected: ${e.message}. Existing data was not replaced."
+            } finally {appState.projectBusy=false}
+        }
+    }
+
     fun openProject(context: ProjectContext, discardDraft: Boolean = false) {
         if (appState.mode != DataMode.REAL_DEVICE) return
         if (discardDraft) {
@@ -435,6 +471,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun loadProject(context: ProjectContext) {
         val savedMap = projects.load(context)
+        if (appState.activeProject != context) appState.mapSetupSection = "Scale"
         val venue = savedMap.venue
         val floor = savedMap.floor
         val asset = savedMap.asset
@@ -510,6 +547,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.navigationNodes.clear(); appState.navigationNodes.addAll(savedMap.nodes)
         appState.navigationEdges.clear(); appState.navigationEdges.addAll(savedMap.edges)
         appState.destinations.clear(); appState.destinations.addAll(savedMap.destinations)
+        appState.destinationAreas.clear(); appState.destinationAreas.addAll(savedMap.destinationAreas())
         appState.selectedNodeId = null; appState.selectedDestinationId = null
         appState.manualStartPoint = null; appState.pickingStart = false
         appState.clearRoute(); appState.liveEstimateEpochMillis = null

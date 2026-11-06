@@ -178,10 +178,10 @@ fun SettingsScreen(
             secondary = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SectionCard("Appearance", "Stored as a local preference") {
-                        SettingToggle("Dark field theme", "Higher contrast for on-site testing", state.darkTheme) { state.darkTheme = it }
+                        SettingToggle("Dark mode", "Blue and white by day; navy and blue by night", state.darkTheme) { state.darkTheme = it }
                     }
                     SectionCard("Build", "Reproducibility metadata") {
-                        LabelValue("Application", "TURN Field Test")
+                        LabelValue("Application", "TURN")
                         LabelValue("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                         LabelValue("Package", BuildConfig.APPLICATION_ID)
                         LabelValue("Storage", "Offline Room database")

@@ -24,6 +24,9 @@ import com.turn.fieldtest.ui.model.DataMode
 
 class MainActivity : ComponentActivity() {
     private val runtimeViewModel by viewModels<TurnRuntimeViewModel>()
+    private val mapperPackageLauncher=registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri!=null) runtimeViewModel.importMapperPackage(uri=uri)
+    }
     private var afterWifiPermission: (() -> Unit)? = null
     private var afterMotionPermission: (() -> Unit)? = null
     private val mapperLauncher=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result->
@@ -108,6 +111,8 @@ class MainActivity : ComponentActivity() {
             TurnApp(
                 state = runtimeViewModel.appState,
                 actions = TurnAppActions(
+                    onMapperImportRequested = { mapperPackageLauncher.launch(arrayOf("application/json","application/octet-stream")) },
+                    onBundledMapperImport = { floor,replace -> runtimeViewModel.importMapperPackage(asset="mapper/$floor.json",replace=replace) },
                     onModeChanged = { mode ->
                         runtimeViewModel.setMode(mode)
                         if (mode == DataMode.REAL_DEVICE && runtimeViewModel.appState.mode == mode) {
