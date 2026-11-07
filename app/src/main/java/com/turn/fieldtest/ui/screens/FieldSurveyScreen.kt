@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 @Composable
 fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
     var details by remember { mutableStateOf(false) }
+    var magneticMode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.magneticWalkRunning) { if (state.magneticWalkRunning) magneticMode = true }
     var target by remember(state.surveyTargetSnapshots) { mutableStateOf(state.surveyTargetSnapshots.toString()) }
     var notes by remember { mutableStateOf("") }
     val selected = state.referencePoints.firstOrNull { it.id == state.selectedSurveyReferencePointId }
@@ -39,17 +41,31 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
     val panelHeight = (maxHeight * 0.43f).coerceAtMost(300.dp)
     Column(Modifier.fillMaxSize().then(if (shortWindow) Modifier.verticalScroll(rememberScrollState()) else Modifier)
         .padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text("Select a point · Stand still · Collect · Save", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(!magneticMode, { magneticMode = false }, enabled = !state.sessionLocked, label = { Text("Wi-Fi points") })
+            FilterChip(magneticMode, { magneticMode = true }, enabled = !state.sessionLocked, label = { Text("Magnetic paths") })
+        }
+        Text(if (magneticMode) "Magnetic survey" else "Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(if (magneticMode) "Pick two points on one corridor · Stand at the first · Walk straight · Finish at the second"
+            else "Select a point · Stand still · Collect · Save", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Text("${state.venueName} · ${state.floorName}", style = MaterialTheme.typography.bodySmall)
-        if (state.referencePoints.isNotEmpty()) {
+        if (!magneticMode && state.referencePoints.isNotEmpty()) {
             Text("${surveyed.size} of ${state.referencePoints.size} points surveyed", style = MaterialTheme.typography.labelLarge)
             LinearProgressIndicator(progress = { surveyed.size / state.referencePoints.size.toFloat() }, modifier = Modifier.fillMaxWidth())
         }
-        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(220.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showReferences = true, roomLabels = true, onTap = { p, tolerance ->
-            if (!state.sessionLocked) state.referencePoints.minByOrNull { (it.metres - p).getDistance() }
-                ?.takeIf { (it.metres - p).getDistance() < tolerance * 2 }?.let { state.selectedSurveyReferencePointId = it.id }
+        NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(220.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showReferences = true, roomLabels = true, showMagneticCoverage = magneticMode, onTap = { p, tolerance ->
+            val point = if (state.sessionLocked) null else state.referencePoints.minByOrNull { (it.metres - p).getDistance() }
+                ?.takeIf { (it.metres - p).getDistance() < tolerance * 2 }
+            if (point != null) {
+                if (!magneticMode) state.selectedSurveyReferencePointId = point.id
+                // Magnetic mode: first tap picks the start, second the end; a third starts a new pair.
+                else if (state.magneticWalkFromId == null || state.magneticWalkToId != null) {
+                    state.magneticWalkFromId = point.id; state.magneticWalkToId = null
+                } else if (point.id != state.magneticWalkFromId) state.magneticWalkToId = point.id
+            }
         })
+        if (magneticMode) MagneticPathPanel(state, actions)
+        else {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             state.referencePoints.forEach { point ->
                 val progress = state.surveyPointProgress[point.id]
@@ -109,6 +125,54 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
                     modifier = Modifier.fillMaxWidth()) { Text("Continue to Explore") }
             }
         }
+        }
     }
+    }
+}
+
+@Composable
+private fun MagneticPathPanel(state: TurnAppState, actions: TurnAppActions) {
+    val from = state.referencePoints.firstOrNull { it.id == state.magneticWalkFromId }
+    val to = state.referencePoints.firstOrNull { it.id == state.magneticWalkToId }
+    // Bounded height: on short windows the whole survey page scrolls, and nested unbounded scrolling would crash.
+    Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(state.magneticSensorStatus, style = MaterialTheme.typography.bodySmall,
+            color = if (state.magneticSensorStatus.startsWith("Magnetometer ready")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        Text("%d cells mapped · %d walks saved".format(state.magneticCoverage.size, state.magneticWalkCount),
+            style = MaterialTheme.typography.labelLarge)
+        if (state.referencePoints.size < 2) {
+            Text("Add at least two survey points along a corridor in Map setup first.")
+            TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add survey points") }
+            return@Column
+        }
+        Text("Tap two survey points on the map: where you start, then where you stop.", style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedCard(Modifier.weight(1f)) { Column(Modifier.padding(10.dp)) {
+                Text("FROM", style = MaterialTheme.typography.labelSmall); Text(from?.label ?: "Tap a point", fontWeight = FontWeight.Bold) } }
+            OutlinedCard(Modifier.weight(1f)) { Column(Modifier.padding(10.dp)) {
+                Text("TO", style = MaterialTheme.typography.labelSmall); Text(to?.label ?: "Tap a point", fontWeight = FontWeight.Bold) } }
+        }
+        if (from != null && to != null) Text("%.1f m straight line · about %d steps".format((from.metres - to.metres).getDistance(),
+            ((from.metres - to.metres).getDistance() / 0.7f).toInt().coerceAtLeast(1)), style = MaterialTheme.typography.bodySmall)
+        if (state.magneticWalkRunning) {
+            Text("${state.magneticWalkSteps} steps", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(state.magneticWalkStatus, style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = actions.onMagneticWalkFinished, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                shape = RoundedCornerShape(16.dp)) { Text("I'm at ${to?.label ?: "the end"} · Finish") }
+            TextButton(onClick = actions.onMagneticWalkCancelled) { Text("Cancel walk") }
+        } else {
+            Text(state.magneticWalkStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            Button(onClick = { if (from != null && to != null) actions.onMagneticWalkStarted(from.id, to.id) },
+                enabled = from != null && to != null && !state.sessionLocked && !state.hasUnsavedMapChanges,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)) {
+                Text(if (from != null) "I'm at ${from.label} · Start walk" else "Start walk")
+            }
+            if (from != null && to != null) TextButton(onClick = { state.magneticWalkFromId = to.id; state.magneticWalkToId = from.id }) {
+                Text("Swap direction (walk each path both ways)")
+            }
+            Text("Hold the phone the way you will when navigating, keep away from laptops and metal trolleys, and walk at your normal pace.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

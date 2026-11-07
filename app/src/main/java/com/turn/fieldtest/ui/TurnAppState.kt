@@ -200,7 +200,7 @@ class TurnAppState {
     val canChangeAlgorithmSettings get() = !startupLoading && !projectBusy && !sessionLocked &&
         !liveStarting && !liveRunning && !surveyStarting && !surveyRunning && !diagnosticWalkRunning
     val keepScreenAwake get() = mode == DataMode.REAL_DEVICE &&
-        (liveStarting || liveRunning || surveyStarting || surveyRunning || diagnosticWalkRunning)
+        (liveStarting || liveRunning || surveyStarting || surveyRunning || diagnosticWalkRunning || magneticWalkRunning)
     private var savedDraft by mutableStateOf<List<Any?>?>(null)
     private fun draftSnapshot(): List<Any?> = listOf(venueName, floorName, floorLevel,
         floorWidthMetres, floorHeightMetres, floorPlanContentUri, floorPlanMimeType,
@@ -524,6 +524,21 @@ class TurnAppState {
         selectedSurveyReferencePointId = id
         editorStatus = "$clean added at ${formatPoint(Offset(x, y))}"
     }
+
+    // Magnetic fingerprinting: path survey walks, the floor's coverage and live correction status.
+    var magneticWalkRunning by mutableStateOf(false)
+    var magneticWalkFromId by mutableStateOf<String?>(null)
+    var magneticWalkToId by mutableStateOf<String?>(null)
+    var magneticWalkSteps by mutableIntStateOf(0)
+    var magneticWalkStatus by mutableStateOf("Choose two survey points along one corridor, stand at the first, then start")
+    /** Centres of mapped magnetic cells, in metres, for the coverage overlay. */
+    var magneticCoverage by mutableStateOf<List<Offset>>(emptyList())
+    var magneticCellSizeMetres by mutableStateOf(com.turn.fieldtest.core.MagneticFingerprintMap.CELL_SIZE_METRES.toFloat())
+    var magneticWalkCount by mutableIntStateOf(0)
+    var magneticCorrectionsEnabled by mutableStateOf(true)
+    var magneticSensorStatus by mutableStateOf("Magnetometer not checked yet")
+    var realMagneticStatus by mutableStateOf("Magnetic corrections not used yet")
+    var realMagneticAppliedSteps by mutableIntStateOf(0)
 
     /** Proposed survey locations shown on the map until accepted or cleared; never saved by themselves. */
     val suggestedSurveyPoints = mutableStateListOf<Offset>()

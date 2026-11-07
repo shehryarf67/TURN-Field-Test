@@ -102,6 +102,37 @@ class CanvasWorkflowTest {
         compose.runOnIdle { assertEquals(90.0, state.initialHeadingDegrees, 0.001) }
     }
 
+    @Test fun magneticPathSurveyStartsBetweenTheTwoChosenPoints() {
+        val state = fixture().apply {
+            referencePoints.add(MapPointUi("rp2", floorName, Offset(15f, 3f), "RP-02"))
+            destination = TurnDestination.SURVEY; magneticSensorStatus = "Magnetometer ready (uncalibrated)"
+            magneticWalkFromId = "rp"; magneticWalkToId = "rp2"; markMapSaved()
+        }
+        var walk: Pair<String, String>? = null
+        compose.setContent { TurnTheme { androidx.compose.material3.Surface(Modifier.fillMaxSize()) {
+            com.turn.fieldtest.ui.screens.FieldSurveyScreen(state, TurnAppActions(onMagneticWalkStarted = { a, b -> walk = a to b }))
+        } } }
+        compose.onNodeWithText("Magnetic paths").performClick()
+        compose.onNodeWithText("12.0 m straight line · about 17 steps").assertExists()
+        compose.onNodeWithText("I'm at RP-01 · Start walk").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("rp" to "rp2", walk) }
+        compose.runOnIdle { state.magneticWalkRunning = true; state.magneticWalkSteps = 9 }
+        compose.onNodeWithText("9 steps").assertExists()
+        compose.onNodeWithText("I'm at RP-02 · Finish").assertExists()
+    }
+
+    @Test fun magneticCorrectionSwitchIsLockedDuringTracking() {
+        val state = fixture().apply { liveRunning = true; realLiveInitialized = true; realLivePosition = Offset(3f, 3f)
+            realMagneticStatus = "Magnetic evidence applied on 4 steps" }
+        compose.setContent { TurnApp(state) }
+        compose.onNodeWithContentDescription("Map options").performClick()
+        compose.onNodeWithText("Magnetic evidence applied on 4 steps").assertExists()
+        compose.runOnIdle { assertTrue(state.magneticCorrectionsEnabled) }
+        // Dark mode and debug overlays stay available; only the magnetic switch is locked.
+        compose.onAllNodes(isToggleable() and isNotEnabled()).assertCountEquals(1)
+        compose.onAllNodes(isToggleable() and isEnabled()).assertCountEquals(2)
+    }
+
     @Test fun liveNavigationShowsTurnByTurnBannerAndStats() {
         val state = fixture().apply {
             liveRunning = true; realLiveInitialized = true; realLivePosition = Offset(5f, 3f); selectedDestinationId = "lab"

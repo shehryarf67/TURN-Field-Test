@@ -16,6 +16,9 @@ data class Particle(
     val headingOffsetRadians: Double,
     val strideScale: Double,
     val weight: Double,
+    /** Position before the latest step; magnetic evidence compares the change across that step. */
+    val previousX: Double = x,
+    val previousY: Double = y,
 ) {
     init {
         require(x.isFinite() && y.isFinite())
@@ -92,6 +95,7 @@ enum class FilterEventType {
     MAP_CONSTRAINT_APPLIED,
     WIFI_CORRECTION,
     GLOBAL_RELOCALIZED,
+    MAGNETIC_CORRECTION,
     QR_CORRECTION,
     FLOOR_TRANSITION,
     FLOOR_TRANSITION_REJECTED,
@@ -135,6 +139,24 @@ data class WifiCorrectionResult(
     val kind: WifiCorrectionKind,
     val resampled: Boolean,
     val effectiveParticleCountBeforeResampling: Double,
+    val summary: ParticleSummary?,
+)
+
+enum class MagneticCorrectionKind {
+    APPLIED,
+    /** No magnetic map for the floor the filter believes it is on. */
+    IGNORED_NO_MAP,
+    /** Most of the cloud is on unsurveyed cells, so the evidence cannot discriminate. */
+    IGNORED_UNMAPPED_AREA,
+    /** The reading is implausible for Earth's field (strong nearby interference). */
+    IGNORED_DISTURBED,
+    IGNORED_NO_PARTICLES,
+}
+
+data class MagneticCorrectionResult(
+    val kind: MagneticCorrectionKind,
+    val mappedWeight: Double,
+    val resampled: Boolean,
     val summary: ParticleSummary?,
 )
 
@@ -202,6 +224,8 @@ class ParticleFilter(
                     y = candidate.y,
                     headingOffsetRadians = headingOffset,
                     strideScale = strideScale,
+                    previousX = particle.x,
+                    previousY = particle.y,
                 )
             } else {
                 rejectedByConstraint[constraint] = rejectedByConstraint.getOrDefault(constraint, 0) + 1
@@ -324,6 +348,45 @@ class ParticleFilter(
         )
     }
 
+    /**
+     * Reweights particles by how well the magnetic map explains the latest step's reading. Particles on
+     * unsurveyed cells receive the mean likelihood of mapped ones, so gaps in the map neither reward nor
+     * punish them. Evidence is skipped when the cloud is mostly unmapped or the reading is disturbed.
+     */
+    fun correctWithMagnetic(
+        maps: Map<String, MagneticFingerprintMap>,
+        observation: MagneticObservation,
+        previousObservation: MagneticObservation?,
+        magneticConfig: MagneticCorrectionConfig = MagneticCorrectionConfig(),
+    ): MagneticCorrectionResult {
+        if (mutableParticles.isEmpty()) return MagneticCorrectionResult(MagneticCorrectionKind.IGNORED_NO_PARTICLES, 0.0, false, null)
+        if (!MagneticLikelihood.plausible(observation))
+            return MagneticCorrectionResult(MagneticCorrectionKind.IGNORED_DISTURBED, 0.0, false, summary())
+        val likelihoods = mutableParticles.map { p ->
+            val map = maps[p.floorId]?.takeUnless { it.isEmpty } ?: return@map null
+            MagneticLikelihood.evaluate(map, MetricPoint(p.previousX, p.previousY), p.position, observation,
+                previousObservation, magneticConfig)
+        }
+        if (mutableParticles.none { maps[it.floorId]?.isEmpty == false })
+            return MagneticCorrectionResult(MagneticCorrectionKind.IGNORED_NO_MAP, 0.0, false, summary())
+        val total = mutableParticles.sumOf { it.weight }
+        val mappedWeight = mutableParticles.indices.filter { likelihoods[it] != null }.sumOf { mutableParticles[it].weight } /
+            total.coerceAtLeast(1e-300)
+        if (mappedWeight < magneticConfig.minimumMappedWeight)
+            return MagneticCorrectionResult(MagneticCorrectionKind.IGNORED_UNMAPPED_AREA, mappedWeight, false, summary())
+        val known = likelihoods.filterNotNull()
+        val neutral = known.average()
+        val corrected = mutableParticles.mapIndexed { i, p ->
+            val l = (likelihoods[i] ?: neutral).coerceAtLeast(1e-12)
+            p.copy(weight = p.weight * Math.pow(l, magneticConfig.likelihoodExponent))
+        }
+        mutableParticles = normalizeWeights(corrected)
+        val resample = effectiveParticleCount() < config.resampleEffectiveSizeRatio * config.particleCount
+        if (resample) mutableParticles = systematicResample(mutableParticles, config.particleCount)
+        addEvent(FilterEventType.MAGNETIC_CORRECTION, detail = "Applied magnetic likelihood on %.0f%% mapped weight".format(mappedWeight * 100))
+        return MagneticCorrectionResult(MagneticCorrectionKind.APPLIED, mappedWeight, resample, summary())
+    }
+
     fun correctWithQr(
         floorId: String,
         position: MetricPoint,
@@ -356,6 +419,8 @@ class ParticleFilter(
                     x = destination.x,
                     y = destination.y,
                     floorId = targetFloorId,
+                    previousX = destination.x,
+                    previousY = destination.y,
                 )
             }
         }
@@ -512,7 +577,8 @@ class ParticleFilter(
             if (!floor.isWalkable(candidate)) continue
             // Keep a surviving particle's heading and stride calibration; only the location is new.
             val donor = donors[random.nextInt(donors.size)]
-            injected += donor.copy(x = candidate.x, y = candidate.y, floorId = floorId, weight = meanWeight)
+            injected += donor.copy(x = candidate.x, y = candidate.y, floorId = floorId, weight = meanWeight,
+                previousX = candidate.x + donor.previousX - donor.x, previousY = candidate.y + donor.previousY - donor.y)
         }
         if (injected.isEmpty()) return
         mutableParticles = ranked.drop(injected.size) + injected

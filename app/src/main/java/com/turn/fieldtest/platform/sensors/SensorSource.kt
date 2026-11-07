@@ -35,6 +35,8 @@ enum class TurnSensorType {
     GAME_ROTATION_VECTOR,
     ROTATION_VECTOR,
     BAROMETER,
+    MAGNETOMETER,
+    GRAVITY,
 }
 
 enum class SensorSampleKind {
@@ -45,6 +47,9 @@ enum class SensorSampleKind {
     RELATIVE_ROTATION_VECTOR,
     ROTATION_VECTOR,
     PRESSURE,
+    /** Microtesla; 6 values (raw x,y,z then estimated bias x,y,z) when uncalibrated, else 3. */
+    MAGNETIC_FIELD,
+    GRAVITY,
     ACCURACY_CHANGED,
 }
 
@@ -60,6 +65,8 @@ data class SensorSourceState(
     val running: Boolean = false,
     val selectedStepSource: TurnSensorType? = null,
     val selectedHeadingSource: TurnSensorType? = null,
+    /** "uncalibrated", "calibrated" or null when the phone has no magnetometer. */
+    val magnetometerMode: String? = null,
     val availability: List<SensorAvailability> = emptyList(),
 )
 
@@ -126,8 +133,14 @@ class AndroidSensorSource(
             if (sensor.type in listOf(Sensor.TYPE_STEP_DETECTOR, Sensor.TYPE_STEP_COUNTER) &&
                 !permissions.isGranted(TurnCapability.PDR_MOTION)) return@forEach
             val registered = runCatching {
-                val period = if (sensor.type.toTurnSensorAndKind()?.first == selectedHeadingSource())
-                    config.samplingPeriodUs else SensorManager.SENSOR_DELAY_NORMAL
+                val turnType = sensor.type.toTurnSensorAndKind()?.first
+                val period = when {
+                    turnType == selectedHeadingSource() -> config.samplingPeriodUs
+                    // Magnetic features need several readings per step; ~16 Hz is cheap even on old phones.
+                    turnType == TurnSensorType.MAGNETOMETER || turnType == TurnSensorType.GRAVITY ||
+                        (turnType == TurnSensorType.ACCELEROMETER && accelerometerIsGravitySource()) -> SensorManager.SENSOR_DELAY_UI
+                    else -> SensorManager.SENSOR_DELAY_NORMAL
+                }
                 sensorManager.registerListener(this, sensor, period)
             }.getOrDefault(false)
             if (registered) registeredTypes += sensor.type
@@ -179,7 +192,9 @@ class AndroidSensorSource(
             val sensor = sensorsByAndroidType[androidType] ?: return@forEach
             val shouldRegister = when (turnType) {
                 TurnSensorType.ACCELEROMETER ->
-                    selectedStep == TurnSensorType.ACCELEROMETER || config.enableAccelerometerFallback
+                    selectedStep == TurnSensorType.ACCELEROMETER || config.enableAccelerometerFallback || accelerometerIsGravitySource()
+                // Prefer the uncalibrated field: Android's own recalibration can otherwise jump mid-walk.
+                TurnSensorType.MAGNETOMETER -> androidType == preferredMagnetometerType()
                 else -> true
             }
             if (shouldRegister) add(sensor)
@@ -192,6 +207,16 @@ class AndroidSensorSource(
             TurnSensorType.ACCELEROMETER
         else -> null
     }
+
+    private fun preferredMagnetometerType(): Int? = when {
+        sensorsByAndroidType[Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED] != null -> Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED
+        sensorsByAndroidType[Sensor.TYPE_MAGNETIC_FIELD] != null -> Sensor.TYPE_MAGNETIC_FIELD
+        else -> null
+    }
+
+    /** Phones without a gravity sensor derive gravity from the accelerometer for magnetic features. */
+    private fun accelerometerIsGravitySource() = preferredMagnetometerType() != null &&
+        sensorsByAndroidType[Sensor.TYPE_GRAVITY] == null && sensorsByAndroidType[Sensor.TYPE_ACCELEROMETER] != null
 
     private fun selectedHeadingSource(): TurnSensorType? = when {
         sensorsByAndroidType[Sensor.TYPE_GAME_ROTATION_VECTOR] != null -> TurnSensorType.GAME_ROTATION_VECTOR
@@ -209,6 +234,12 @@ class AndroidSensorSource(
         selectedHeadingSource = selectedHeadingSource().takeIf { selected ->
             !running || sensorTypes.any { it.first == selected && it.second in registeredTypes }
         },
+        magnetometerMode = when (preferredMagnetometerType()) {
+            Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED -> "uncalibrated"
+            Sensor.TYPE_MAGNETIC_FIELD -> "calibrated"
+            else -> null
+        }?.takeIf { !running || preferredMagnetometerType() in registeredTypes },
+        // Two Android types back the magnetometer; list the one in use (or the first) once.
         availability = sensorTypes.map { (turnType, androidType) ->
             val sensor = sensorsByAndroidType[androidType]
             SensorAvailability(
@@ -218,7 +249,8 @@ class AndroidSensorSource(
                 vendor = sensor?.vendor,
                 powerMilliAmps = sensor?.power,
             )
-        },
+        }.sortedByDescending { it.available }.distinctBy { it.type }
+            .sortedBy { a -> sensorTypes.indexOfFirst { it.first == a.type } },
     )
 
     private fun Int.toTurnSensorAndKind(): Pair<TurnSensorType, SensorSampleKind>? = when (this) {
@@ -229,6 +261,8 @@ class AndroidSensorSource(
         Sensor.TYPE_GAME_ROTATION_VECTOR -> TurnSensorType.GAME_ROTATION_VECTOR to SensorSampleKind.RELATIVE_ROTATION_VECTOR
         Sensor.TYPE_ROTATION_VECTOR -> TurnSensorType.ROTATION_VECTOR to SensorSampleKind.ROTATION_VECTOR
         Sensor.TYPE_PRESSURE -> TurnSensorType.BAROMETER to SensorSampleKind.PRESSURE
+        Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED, Sensor.TYPE_MAGNETIC_FIELD -> TurnSensorType.MAGNETOMETER to SensorSampleKind.MAGNETIC_FIELD
+        Sensor.TYPE_GRAVITY -> TurnSensorType.GRAVITY to SensorSampleKind.GRAVITY
         else -> null
     }
 
@@ -241,6 +275,9 @@ class AndroidSensorSource(
             TurnSensorType.GAME_ROTATION_VECTOR to Sensor.TYPE_GAME_ROTATION_VECTOR,
             TurnSensorType.ROTATION_VECTOR to Sensor.TYPE_ROTATION_VECTOR,
             TurnSensorType.BAROMETER to Sensor.TYPE_PRESSURE,
+            TurnSensorType.MAGNETOMETER to Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED,
+            TurnSensorType.MAGNETOMETER to Sensor.TYPE_MAGNETIC_FIELD,
+            TurnSensorType.GRAVITY to Sensor.TYPE_GRAVITY,
         )
     }
 }

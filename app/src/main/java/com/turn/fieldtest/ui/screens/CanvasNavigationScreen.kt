@@ -452,6 +452,15 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         OverlayChoice("Wi-Fi fixes", state.showWifiFixes) { state.showWifiFixes = it }
                         OverlayChoice("Particles", state.showParticles) { state.showParticles = it }
                     }
+                    // Locked while tracking so a recorded session never mixes runs with and without magnetic evidence.
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Magnetic corrections")
+                            Text(if (live) state.realMagneticStatus else "${state.magneticCoverage.size} magnetic cells mapped on this floor",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(state.magneticCorrectionsEnabled, { state.magneticCorrectionsEnabled = it }, enabled = !live)
+                    }
                     TextButton(onClick = { sheet = null; details = true }) { Text("Research details & all controls") }
                     TextButton(onClick = { sheet = null; state.openTools() }) { Text("Map setup, survey & tools") }
                 }

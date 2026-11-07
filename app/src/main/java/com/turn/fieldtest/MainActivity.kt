@@ -129,6 +129,11 @@ class MainActivity : ComponentActivity() {
                         withWifiPermissions { runtimeViewModel.beginRealSurvey(metadata) }
                     },
                     onRealSurveyFinished = runtimeViewModel::finishRealSurvey,
+                    onMagneticWalkStarted = { from, to ->
+                        withMotionPermissions { runtimeViewModel.startMagneticWalk(from, to) }
+                    },
+                    onMagneticWalkFinished = runtimeViewModel::finishMagneticWalk,
+                    onMagneticWalkCancelled = runtimeViewModel::cancelMagneticWalk,
                     onRealLiveToggled = {
                         if (runtimeViewModel.appState.liveRunning || runtimeViewModel.appState.liveCloseFailed) {
                             runtimeViewModel.toggleRealLive()

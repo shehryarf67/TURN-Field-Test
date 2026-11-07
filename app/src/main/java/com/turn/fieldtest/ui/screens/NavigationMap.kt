@@ -47,6 +47,7 @@ internal fun NavigationMap(
     focusDestination: Boolean = false,
     rotateToFit: Boolean = false,
     roomLabels: Boolean = false,
+    showMagneticCoverage: Boolean = false,
 ) {
     var zoom by remember(state.activeProject) { mutableFloatStateOf(1f) }
     var pan by remember(state.activeProject) { mutableStateOf(Offset.Zero) }
@@ -259,6 +260,17 @@ internal fun NavigationMap(
                         drawCircle(Color.White, (if (selected) 8f else 6f) * unit / zoom, p)
                         drawCircle(if (selected) TurnBlue else palette.primary, (if (selected) 6f else 4f) * unit / zoom, p)
                         if (poi.id !in labelledRooms) label(poi.name, p, Color.White, priority = selected)
+                    }
+                    if (showMagneticCoverage) {
+                        // Mapped magnetic cells as translucent squares, so gaps in coverage are obvious on site.
+                        val half = state.magneticCellSizeMetres / 2f
+                        state.magneticCoverage.forEach { c ->
+                            val a = project(c - Offset(half, half)); val b = project(c + Offset(half, half))
+                            drawRect(TurnMint.copy(alpha = 0.35f), topLeft = Offset(minOf(a.x, b.x), minOf(a.y, b.y)),
+                                size = Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y)))
+                        }
+                        listOf(state.magneticWalkFromId, state.magneticWalkToId).mapNotNull { id -> state.referencePoints.firstOrNull { it.id == id } }
+                            .zipWithNext().forEach { (a, b) -> line(listOf(a.metres, b.metres), TurnAmber, 4f * density.density) }
                     }
                     if (showReferences) {
                       // Suggestions are hollow, dashed and unlabelled so they never read as surveyed points.

@@ -139,6 +139,19 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private val lastDiagnosticValueNanos = mutableMapOf<TurnSensorType, Long>()
     private var activePositioningSession: PositioningSessionEntity? = null
     private var liveEndedAtEpochMillis: Long? = null
+    // Magnetic fingerprinting: per-step feature window, the floor map, and an in-progress survey walk.
+    private val magneticRepository = com.turn.fieldtest.data.repository.MagneticRepository(app.database)
+    private val magneticWindow = com.turn.fieldtest.core.MagneticStepWindow()
+    private var latestGravity: DoubleArray? = null
+    private var latestGravityNanos: Long? = null
+    private var lastMagneticBias: DoubleArray? = null
+    private var lastLiveMagneticObservation: com.turn.fieldtest.core.MagneticObservation? = null
+    /** Magnetic maps frozen for the running live session, keyed by floor, like [sessionMap]. */
+    private var sessionMagneticMaps: Map<String, com.turn.fieldtest.core.MagneticFingerprintMap> = emptyMap()
+    private class MagneticWalk(val fromPointId: String, val toPointId: String, val startedAtEpochMillis: Long) {
+        val observations = mutableListOf<com.turn.fieldtest.core.MagneticObservation?>()
+    }
+    private var activeMagneticWalk: MagneticWalk? = null
     private var activeSensorSession: SensorSessionEntity? = null
     private var particleFilter: ParticleFilter? = null
     private var rawPdrTracker: PdrTracker? = null
@@ -310,6 +323,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             sensorSource.state.collectLatest { sourceState ->
                 appState.realSensorRunning = sourceState.running
+                appState.magneticSensorStatus = when {
+                    sourceState.availability.none { it.type == TurnSensorType.MAGNETOMETER && it.available } ->
+                        "No magnetometer on this phone · Wi-Fi and step tracking continue without magnetic evidence"
+                    sourceState.magnetometerMode == null -> "Magnetometer present but not running"
+                    else -> "Magnetometer ready (${sourceState.magnetometerMode})"
+                }
                 appState.realSensorReadings = sourceState.availability.map { availability ->
                     availability.toUi(
                         latestValue = latestSensorValues[availability.type],
@@ -347,6 +366,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.surveyRunning = false
         appState.surveyStarting = false
         appState.diagnosticWalkRunning = false
+        if (activeMagneticWalk != null) {
+            cancelMagneticWalk()
+            appState.magneticWalkStatus = "Walk cancelled because TURN left the foreground · sensors stop in the background"
+        }
         surveyScanJob?.cancel()
         liveScanJob?.cancel()
         if (activeSurvey != null) {
@@ -588,6 +611,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realTestSamples.clear()
         appState.realLiveStatus = "Ready to start a physical session on ${floor.name}"
         refreshSurveyProgress(context)
+        runCatching { refreshMagneticCoverage(context) }
         appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
         if (!appState.mapEditorSupported) appState.editorStatus = "Map preserved. Editing multiple walkable regions or a custom origin is not supported yet."
     }
@@ -773,6 +797,86 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch { eventMutex.withLock { finishActiveSurvey("Researcher finished the bounded collection") } }
     }
 
+    /** Begins a magnetic path walk from saved survey point [fromPointId] to [toPointId] in a straight line. */
+    fun startMagneticWalk(fromPointId: String, toPointId: String) {
+        val sensors = sensorSource.state.value
+        val problem = when {
+            appState.mode != DataMode.REAL_DEVICE -> "Switch to Real device mode to survey magnetic paths"
+            !appState.realMapReady || appState.activeProject == null -> "Open a saved floor first"
+            !foreground -> "Keep TURN in the foreground"
+            appState.sessionLocked || appState.liveRunning || appState.surveyRunning || activeMagneticWalk != null ->
+                "Finish the running session first"
+            appState.hasUnsavedMapChanges -> "Save the map before surveying magnetic paths"
+            fromPointId == toPointId -> "Choose two different survey points"
+            sensors.magnetometerMode == null -> "This phone has no usable magnetometer; magnetic fingerprinting is unavailable"
+            sensors.selectedStepSource == null -> "A step detector is required to place magnetic readings along the path"
+            else -> null
+        }
+        if (problem != null) { appState.magneticWalkStatus = problem; return }
+        startRealSources()
+        magneticWindow.reset()
+        activeMagneticWalk = MagneticWalk(fromPointId, toPointId, System.currentTimeMillis())
+        appState.magneticWalkFromId = fromPointId; appState.magneticWalkToId = toPointId
+        appState.magneticWalkSteps = 0
+        appState.sessionLocked = true
+        appState.magneticWalkRunning = true
+        appState.magneticWalkStatus = "Walk straight to the second point at a steady pace, holding the phone the same way"
+    }
+
+    fun cancelMagneticWalk() {
+        if (activeMagneticWalk == null) return
+        activeMagneticWalk = null
+        appState.magneticWalkRunning = false
+        appState.sessionLocked = false
+        appState.magneticWalkStatus = "Walk cancelled · nothing was saved"
+    }
+
+    /** Places the walk's readings along the line and merges them into the floor's magnetic map, or explains why not. */
+    fun finishMagneticWalk() {
+        val walk = activeMagneticWalk ?: return
+        activeMagneticWalk = null
+        appState.magneticWalkRunning = false
+        val context = activeContext
+        viewModelScope.launch {
+            try {
+                val floor = projects.load(context).metricMap().floors.getValue(context.floorId)
+                val from = repositories.floorPlans.referencePoint(walk.fromPointId) ?: error("Start point no longer exists")
+                val to = repositories.floorPlans.referencePoint(walk.toPointId) ?: error("End point no longer exists")
+                val observations = walk.observations.toList()
+                val result = com.turn.fieldtest.core.MagneticPathSurvey.build(floor, MetricPoint(from.xMetres, from.yMetres),
+                    MetricPoint(to.xMetres, to.yMetres), observations)
+                val now = System.currentTimeMillis()
+                val accepted = result as? com.turn.fieldtest.core.MagneticWalkResult.Accepted
+                magneticRepository.recordWalk(com.turn.fieldtest.data.local.MagneticWalkEntity(
+                    id = "MAG-${UUID.randomUUID()}", floorId = context.floorId,
+                    fromReferencePointId = walk.fromPointId, toReferencePointId = walk.toPointId,
+                    startedAtEpochMillis = walk.startedAtEpochMillis, endedAtEpochMillis = now,
+                    stepCount = observations.size, lengthMetres = MetricPoint(from.xMetres, from.yMetres).distanceTo(MetricPoint(to.xMetres, to.yMetres)),
+                    readingCount = observations.sumOf { it?.sampleCount ?: 0 },
+                    status = if (accepted != null) "ACCEPTED" else "REJECTED",
+                    rejectionReason = (result as? com.turn.fieldtest.core.MagneticWalkResult.Rejected)?.reason,
+                    deviceModel = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                ), accepted?.samples, now)
+                refreshMagneticCoverage(context)
+                appState.magneticWalkStatus = if (accepted != null)
+                    "Saved: %.1f m in %d steps (%.2f m per step) · walk it the other way too for a sturdier map".format(accepted.lengthMetres, observations.size, accepted.strideMetres)
+                else "Not saved: ${(result as com.turn.fieldtest.core.MagneticWalkResult.Rejected).reason}"
+            } catch (error: Exception) {
+                appState.magneticWalkStatus = "Could not save the walk: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                appState.sessionLocked = false
+            }
+        }
+    }
+
+    private suspend fun refreshMagneticCoverage(context: ProjectContext) {
+        val map = magneticRepository.map(context.floorId)
+        if (appState.activeProject != context) return
+        appState.magneticCellSizeMetres = map.cellSizeMetres.toFloat()
+        appState.magneticCoverage = map.cells.keys.map { key -> map.centreOf(key).toUiOffset() }
+        appState.magneticWalkCount = magneticRepository.walks(context.floorId).count { it.status == "ACCEPTED" }
+    }
+
     fun toggleRealLive() {
         if (appState.mode != DataMode.REAL_DEVICE || appState.liveStarting) return
         if (appState.liveRunning || activePositioningSession != null) {
@@ -844,7 +948,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             eventMutex.withLock {
                 if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) return@withLock
-                particleFilter = null
+                particleFilter = null; lastLiveMagneticObservation = null
                 appState.realLiveInitialized = false
                 appState.realLivePosition = null
                 appState.realParticleCloud = emptyList()
@@ -894,6 +998,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 sessionMap = saved.metricMap()
                 if (chosenStart != null) require(sessionMap!!.floors.getValue(context.floorId).isWalkable(chosenStart)) { "Known start must be inside saved walkable space" }
                 sessionGraph = NavigationGraph(sessionMap!!.floors.getValue(context.floorId), saved.nodes.map { it.core() }, saved.edges.map { it.core() })
+                sessionMagneticMaps = magneticRepository.map(context.floorId).takeUnless { it.isEmpty }
+                    ?.let { mapOf(context.floorId to it) } ?: emptyMap()
                 liveWifiEvidence.reset(android.os.SystemClock.elapsedRealtimeNanos() / 1_000L)
                 appState.realWifiPosition = null
                 appState.realWifiFixEpochMillis = null
@@ -934,9 +1040,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     eventMutex.withLock { finishActiveLive("Stopped because TURN left the foreground while starting") }
                     return@onSuccess
                 }
-                particleFilter = null
+                particleFilter = null; lastLiveMagneticObservation = null
                 rawPdrTracker = null
                 liveEstimateSequence = 0L
+                magneticWindow.reset(); appState.realMagneticAppliedSteps = 0
+                appState.realMagneticStatus = if (sessionMagneticMaps.isEmpty()) "No magnetic map for this floor · survey magnetic paths to enable" else "Magnetic map loaded · waiting for steps"
                 livePdrSequence = 0L
                 liveYawBaselineRadians = null
                 lastLiveHeadingSensorNanos = null
@@ -1219,6 +1327,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     app.database.navigationDao().clearEdges(context.floorId)
                     app.database.navigationDao().removeNodes(context.floorId, emptyList())
                     app.database.navigationDao().removeDestinations(context.floorId, emptyList())
+                    // Magnetic readings are tied to the deleted geometry's coordinates.
+                    app.database.magneticDao().clearCells(context.floorId)
+                    app.database.magneticDao().clearWalks(context.floorId)
                 }
             }.onSuccess {
                 appState.clearMapDraft(force = true)
@@ -1227,7 +1338,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.mapHasMeasurements = runCatching { projects.load(context).hasMeasurements }.getOrDefault(true)
                 appState.markMapSaved()
                 savedNavigationGraph = runCatching { appState.draftNavigationGraph() }.getOrNull()
-                appState.editorStatus = "Saved map and linked fingerprints deleted from this device"
+                appState.editorStatus = "Saved map, linked fingerprints and magnetic paths deleted from this device"
+                appState.magneticCoverage = emptyList(); appState.magneticWalkCount = 0
                 appState.surveyRuntimeStatus = "Create and save a map before collecting"
             }.onFailure { error ->
                 appState.editorStatus = "Delete failed: ${error.message ?: error.javaClass.simpleName}"
@@ -1565,7 +1677,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLiveStatus = "Wi-Fi fix lies outside configured walkable geometry: ${failure.message}"
                 return
             }
-            particleFilter = filter
+            particleFilter = filter; lastLiveMagneticObservation = null
             val availableSteps = if (
                 sensorSource.state.value.selectedStepSource == TurnSensorType.STEP_DETECTOR
             ) setOf(StepSource.STEP_DETECTOR) else emptySet()
@@ -1759,7 +1871,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         activePositioningSession = null
         sessionMap = null
         appState.sessionLocked = false
-        particleFilter = null
+        particleFilter = null; lastLiveMagneticObservation = null
         rawPdrTracker = null
     }
 
@@ -1825,7 +1937,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val session = requireNotNull(activePositioningSession)
         val filter = ParticleFilter(currentPilotMap(), ParticleFilterConfig(particleCount = appState.particleCount), session.startedAtEpochMillis)
         withContext(Dispatchers.Default) { filter.initialize(AbsoluteFix(point, floorId, AbsoluteFixSource.MANUAL), positionStdMetres = 0.5) }
-        particleFilter = filter
+        particleFilter = filter; lastLiveMagneticObservation = null
         val sources = if (sensorSource.state.value.selectedStepSource == TurnSensorType.STEP_DETECTOR) setOf(StepSource.STEP_DETECTOR) else emptySet()
         rawPdrTracker = PdrTracker(point, latestMapHeadingRadians, StepProcessor(sources), StrideModel(appState.strideMetres.toDouble()))
         rawPdrFloorId = floorId
@@ -1871,12 +1983,20 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             lastDiagnosticValueNanos[sample.type] = sample.sensorTimestampNanos
         }
         updateLiveHeading(sample)
+        updateMagneticFeatures(sample)
         if (appState.diagnosticWalkRunning && sample.kind == SensorSampleKind.STEP_DETECTED) {
             appState.diagnosticWalkSteps += 1
             appState.realDiagnosticDistanceMetres = appState.diagnosticWalkSteps * appState.strideMetres.toDouble()
         }
-        if (appState.liveRunning && sample.kind == SensorSampleKind.STEP_DETECTED) {
-            processLiveStep(sample)
+        if (sample.kind == SensorSampleKind.STEP_DETECTED) {
+            // Always consume the window, so each step gets exactly the readings since the previous step.
+            val magnetic = magneticWindow.takeForStep(sample.sensorTimestampNanos)
+            activeMagneticWalk?.let { walk ->
+                walk.observations += magnetic
+                appState.magneticWalkSteps = walk.observations.size
+                appState.magneticWalkStatus = "Walking · ${walk.observations.size} steps · keep a steady pace in a straight line"
+            }
+            if (appState.liveRunning) processLiveStep(sample, magnetic)
         }
         val uiNow = android.os.SystemClock.elapsedRealtimeNanos()
         if (uiNow - lastSensorUiPublishNanos < 200_000_000L) return
@@ -1888,6 +2008,52 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 selectedStep = sourceState.selectedStepSource,
                 selectedHeading = sourceState.selectedHeadingSource,
             )
+        }
+    }
+
+    /**
+     * Turns magnetometer readings into orientation-invariant features using the latest gravity direction.
+     * Uncalibrated readings are corrected with Android's bias estimate; a change in that estimate, an
+     * accuracy change or unreliable data marks a discontinuity so step-to-step comparison is not misled.
+     */
+    private fun updateMagneticFeatures(sample: SensorSample) {
+        when (sample.kind) {
+            SensorSampleKind.GRAVITY -> if (sample.values.size >= 3) {
+                latestGravity = DoubleArray(3) { sample.values[it].toDouble() }; latestGravityNanos = sample.sensorTimestampNanos
+            }
+            SensorSampleKind.ACCELERATION -> if (sample.values.size >= 3 &&
+                sensorSource.state.value.availability.none { it.type == TurnSensorType.GRAVITY && it.available }) {
+                // Low-pass the accelerometer into a gravity estimate on phones without a gravity sensor.
+                val previous = latestGravity
+                latestGravity = DoubleArray(3) { i -> (previous?.get(i) ?: sample.values[i].toDouble()) * 0.8 + sample.values[i] * 0.2 }
+                latestGravityNanos = sample.sensorTimestampNanos
+            }
+            SensorSampleKind.ACCURACY_CHANGED -> if (sample.type == TurnSensorType.MAGNETOMETER) {
+                magneticWindow.markDiscontinuity(sample.sensorTimestampNanos)
+                appState.magneticSensorStatus = when (sample.accuracy) {
+                    android.hardware.SensorManager.SENSOR_STATUS_UNRELIABLE -> "Magnetometer unreliable · move the phone in a figure-eight to recalibrate"
+                    android.hardware.SensorManager.SENSOR_STATUS_ACCURACY_LOW -> "Magnetometer accuracy low"
+                    else -> "Magnetometer ready (${sensorSource.state.value.magnetometerMode ?: "unknown"})"
+                }
+            }
+            SensorSampleKind.MAGNETIC_FIELD -> {
+                if (sample.values.size < 3 || sample.accuracy == android.hardware.SensorManager.SENSOR_STATUS_UNRELIABLE) {
+                    magneticWindow.markDiscontinuity(sample.sensorTimestampNanos); return
+                }
+                val raw = DoubleArray(3) { sample.values[it].toDouble() }
+                val field = if (sample.values.size >= 6) {
+                    val bias = DoubleArray(3) { sample.values[it + 3].toDouble() }
+                    val previousBias = lastMagneticBias
+                    if (previousBias != null && (0..2).any { kotlin.math.abs(bias[it] - previousBias[it]) > 0.5 })
+                        magneticWindow.markDiscontinuity(sample.sensorTimestampNanos)
+                    lastMagneticBias = bias
+                    DoubleArray(3) { raw[it] - bias[it] }
+                } else raw
+                val gravityAge = latestGravityNanos?.let { sample.sensorTimestampNanos - it }
+                val gravity = latestGravity?.takeIf { gravityAge != null && gravityAge in -500_000_000L..500_000_000L } ?: return
+                com.turn.fieldtest.core.MagneticFeature.from(field, gravity)?.let { magneticWindow.record(sample.sensorTimestampNanos, it) }
+            }
+            else -> Unit
         }
     }
 
@@ -1967,7 +2133,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private suspend fun processLiveStep(sample: SensorSample) {
+    private suspend fun processLiveStep(sample: SensorSample, magnetic: com.turn.fieldtest.core.MagneticObservation?) {
         val sensorSession = activeSensorSession ?: return
         val positioningSession = activePositioningSession ?: return
         appState.realLiveDetectedSteps += 1
@@ -1994,6 +2160,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 else -> "Step detected · no measured heading at that step's timestamp"
             }
             appState.realLiveRecordingStatus = "Step saved with reason: $rejection"
+            // The filter did not move with this step, so the next magnetic change cannot be compared with it.
+            lastLiveMagneticObservation = null
             return
         }
         val filter = particleFilter
@@ -2024,10 +2192,32 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         if (!event.decision.acceptedForMovement) {
             appState.realLiveStepStatus = "Step ignored: ${event.decision.reason}"
             appState.realLiveRecordingStatus = "Rejected step saved"
+            lastLiveMagneticObservation = null
             return
         }
 
         val prediction = withContext(Dispatchers.Default) { filter?.predictStep(event.strideMetres, heading) }
+        // Magnetic evidence after the motion update: it judges where each particle has just moved to.
+        val magneticCorrection = if (prediction?.accepted == true && filter != null && magnetic != null &&
+            appState.magneticCorrectionsEnabled && sessionMagneticMaps.isNotEmpty()) {
+            withContext(Dispatchers.Default) { filter.correctWithMagnetic(sessionMagneticMaps, magnetic, lastLiveMagneticObservation) }
+        } else null
+        lastLiveMagneticObservation = magnetic.takeIf { prediction?.accepted == true }
+        appState.realMagneticStatus = when {
+            !appState.magneticCorrectionsEnabled -> "Magnetic corrections off"
+            sessionMagneticMaps.isEmpty() -> "No magnetic map for this floor · survey magnetic paths to enable"
+            magnetic == null -> "No magnetometer reading for this step"
+            magneticCorrection == null -> "Waiting for tracking before using magnetic evidence"
+            else -> when (magneticCorrection.kind) {
+                com.turn.fieldtest.core.MagneticCorrectionKind.APPLIED -> {
+                    appState.realMagneticAppliedSteps += 1
+                    "Magnetic evidence applied on ${appState.realMagneticAppliedSteps} steps"
+                }
+                com.turn.fieldtest.core.MagneticCorrectionKind.IGNORED_UNMAPPED_AREA -> "Outside surveyed magnetic paths · not applied"
+                com.turn.fieldtest.core.MagneticCorrectionKind.IGNORED_DISTURBED -> "Strong magnetic interference · step not used"
+                else -> "Magnetic evidence not applied"
+            }
+        }
         appState.realLiveStepStatus = if (prediction?.accepted == true) "Step accepted · position updated"
             else "Step recorded · fused position lost; request a fresh Wi-Fi fix"
         appState.realLiveStepCount = event.stateAfter.acceptedStepCount.toLong()
@@ -2035,11 +2225,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realRawPdrPosition = event.stateAfter.position.toUiOffset()
         appState.realRawPdrTrail = (appState.realRawPdrTrail + event.stateAfter.position.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
         appState.realLiveMapRejectedCount += prediction?.rejectedParticleCount ?: 0
-        appState.lastCorrectionType = if ((prediction?.rejectedParticleCount ?: 0) > 0) {
+        appState.lastCorrectionType = (if ((prediction?.rejectedParticleCount ?: 0) > 0) {
             "map constraint applied"
         } else {
             "PDR prediction"
-        }
+        }) + if (magneticCorrection?.kind == com.turn.fieldtest.core.MagneticCorrectionKind.APPLIED) " + magnetic" else ""
         appState.realLiveStatus = if (prediction?.accepted == true) {
             "Step ${event.stateAfter.acceptedStepCount}: ${appState.lastCorrectionType}"
         } else {
@@ -2065,7 +2255,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 status = "PDR prediction",
             ),
         )
-        prediction?.summary?.let { summary ->
+        (magneticCorrection?.summary ?: prediction?.summary)?.let { summary ->
             repositories.positioning.saveEstimate(
                 PositionEstimateEntity(
                     id = "EST-${positioningSession.id}-$sequence-FUSED",

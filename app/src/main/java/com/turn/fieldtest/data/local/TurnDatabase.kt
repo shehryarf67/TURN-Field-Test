@@ -37,6 +37,8 @@ import com.turn.fieldtest.data.export.BackupDao
         BeaconDefinitionEntity::class,
         BleObservationEntity::class,
         AggregatedBleFingerprintEntity::class,
+        MagneticCellEntity::class,
+        MagneticWalkEntity::class,
     ],
     version = TurnDatabase.SCHEMA_VERSION,
     exportSchema = true,
@@ -52,9 +54,10 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun evaluationDao(): EvaluationDao
     abstract fun bleDao(): BleDao
     abstract fun backupDao(): BackupDao
+    abstract fun magneticDao(): MagneticDao
 
     companion object {
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
         const val DATABASE_NAME = "turn-field-test.db"
 
         fun build(context: Context, databaseName: String = DATABASE_NAME): TurnDatabase =
@@ -88,5 +91,14 @@ object TurnDatabaseMigrations {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_walk_scan_drafts_floorId ON walk_scan_drafts(floorId)")
         }
     }
-    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3)
+    /** Additive: magnetic map cells and survey-walk lineage. No existing table changes. */
+    val FROM_3_TO_4 = object : Migration(3, 4) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `magnetic_cells` (`floorId` TEXT NOT NULL, `cellX` INTEGER NOT NULL, `cellY` INTEGER NOT NULL, `cellSizeMetres` REAL NOT NULL, `count` INTEGER NOT NULL, `meanMagnitude` REAL NOT NULL, `m2Magnitude` REAL NOT NULL, `meanVertical` REAL NOT NULL, `m2Vertical` REAL NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`floorId`, `cellX`, `cellY`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_magnetic_cells_floorId` ON `magnetic_cells` (`floorId`)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `magnetic_walks` (`id` TEXT NOT NULL, `floorId` TEXT NOT NULL, `fromReferencePointId` TEXT NOT NULL, `toReferencePointId` TEXT NOT NULL, `startedAtEpochMillis` INTEGER NOT NULL, `endedAtEpochMillis` INTEGER NOT NULL, `stepCount` INTEGER NOT NULL, `lengthMetres` REAL NOT NULL, `readingCount` INTEGER NOT NULL, `status` TEXT NOT NULL, `rejectionReason` TEXT, `deviceModel` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`floorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_magnetic_walks_floorId` ON `magnetic_walks` (`floorId`)")
+        }
+    }
+    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4)
 }
