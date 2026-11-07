@@ -99,7 +99,7 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                         OutlinedButton(onClick = state::undoCurrentTool, enabled = state.canEditMap) { Text("Undo") }
                         Button(onClick = state::finishWalkablePolygon, enabled = state.canEditMap && state.editorTool == EditorTool.WALKABLE) { Text("Close outline") }
                     }
-                    OutlinedButton(onClick = { state.draftWalkablePolygon.clear(); state.editorTool = EditorTool.WALKABLE; state.editorStatus = "Tap each corner of the new outline" }, enabled = state.canEditMap) { Text("Redraw outline") }
+                    OutlinedButton(onClick = { state.draftWalkablePolygon.clear(); state.suggestedSurveyPoints.clear(); state.editorTool = EditorTool.WALKABLE; state.editorStatus = "Tap each corner of the new outline" }, enabled = state.canEditMap) { Text("Redraw outline") }
                 }
                 "Paths" -> {
                     Text("Place nodes along corridors and at turns. Connect them, then name destination nodes.", style = MaterialTheme.typography.bodySmall)
@@ -159,7 +159,7 @@ fun MapSetupScreen(state: TurnAppState, actions: TurnAppActions) {
                         val status = state.surveyPointProgress[point.id]?.status
                         Text("${point.label} · %.1f, %.1f m".format(point.metres.x, point.metres.y) +
                             if (status == "COMPLETED" || status == "LEGACY") " · surveyed" else "", modifier = Modifier.weight(1f))
-                        TextButton(onClick = { state.removeReferencePoint(point.id) }, enabled = state.canEditMap) { Text("Remove") }
+                        TextButton(onClick = { state.removeReferencePoint(point.id) }, enabled = state.canEditMap && state.canRemoveReferencePoint(point.id)) { Text("Remove") }
                     } }
                 }
             }

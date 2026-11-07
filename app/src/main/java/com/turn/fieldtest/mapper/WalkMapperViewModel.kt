@@ -220,7 +220,8 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     }
     override fun refined(points: Map<String,P2>,segment: String)=main {
         val s=doc?.segments?.firstOrNull { it.id==segment && !it.interrupted } ?: return@main
-        update(false) { d->d.copy(rooms=d.rooms.map { r->r.copy(corners=r.corners.map { p->if(!p.adjusted && p.segmentId==segment && points.containsKey(p.id)) p.copy(p=s.alignment.apply(points.getValue(p.id))) else p }) }) }
+        // A confirmed outline was validated as drawn; anchor drift must not reshape it behind the user's back.
+        update(false) { d->d.copy(rooms=d.rooms.map { r->if(r.confirmed) r else r.copy(corners=r.corners.map { p->if(!p.adjusted && p.segmentId==segment && points.containsKey(p.id)) p.copy(p=s.alignment.apply(points.getValue(p.id))) else p }) }) }
     }
     override fun interrupted(segment: String)=main {
         val id=activeSegment?.takeIf {it==segment} ?: return@main

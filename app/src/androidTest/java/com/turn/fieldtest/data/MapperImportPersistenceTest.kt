@@ -55,6 +55,10 @@ class MapperImportPersistenceTest {
    db.floorPlanDao().upsertReferencePoint(ReferencePointEntity("rp","oldfloor","RP-01",2.0,3.0,true,updatedAtEpochMillis=1))
    db.surveyDao().upsertSession(SurveySessionEntity("s","old","oldfloor","rp",2.0,3.0,"test","test","35","1",dataMode="REAL_DEVICE",startedAtEpochMillis=1))
    db.surveyDao().upsertAggregatedFingerprints(listOf(AggregatedWifiFingerprintEntity("fp","rp","s","aa:bb",-55.0,-55.0,0.0,-55,-55,1,1,1,1.0,calculatedAtEpochMillis=2)))
+   // Evaluation samples RESTRICT deleting their checkpoint and floor; replacing must still succeed.
+   db.evaluationDao().upsertRun(TestRunEntity("run","old",null,"anon","m","d","35","1",startedAtEpochMillis=1))
+   db.evaluationDao().upsertCheckpoint(TestCheckpointEntity("cp","old","oldfloor","CP-01",4.0,5.0))
+   db.evaluationDao().upsertSample(TestSampleEntity("sample","run","cp","oldfloor",4.0,5.0,stepCount=0,wifiAccessPointCount=0,timestampEpochMillis=3))
    val text=context.assets.open("mapper/C-F4.json").bufferedReader().use {it.readText()}
    val parsed=MapperPackage.parse(text)
    val invalid=parsed.copy(places=parsed.places+parsed.places.first().copy(id="duplicate-node-destination"))

@@ -25,6 +25,7 @@ class MapperImporter(private val db: TurnDatabase, private val context: Context)
                             if(parsed.scheme=="file") parsed.path?.let {obsoleteImages.add(File(it))}
                         }
                     }
+                    db.evaluationDao().deleteSamplesForVenue(venue.id)
                     db.venueDao().delete(venue)
                 }
                 db.venueDao().upsert(VenueEntity(result.venueId,p.name,

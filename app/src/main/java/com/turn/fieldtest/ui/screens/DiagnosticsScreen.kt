@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +53,15 @@ fun DiagnosticsScreen(
     onToggleDiagnosticWalk: () -> Unit = {},
 ) {
     val simulated = state.mode == DataMode.DEMO
+    // The walk's only Stop button lives here; leaving the screen must not leave it recording and locking Settings.
+    val stopWalk by androidx.compose.runtime.rememberUpdatedState(onToggleDiagnosticWalk)
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            if (state.diagnosticWalkRunning) {
+                if (state.mode == DataMode.DEMO) state.diagnosticWalkRunning = false else stopWalk()
+            }
+        }
+    }
     val wifiRows = if (simulated) TurnDemoData.wifi else state.realWifiAccessPoints
     val sensorRows = if (simulated) TurnDemoData.sensors else state.realSensorReadings
     Column(

@@ -271,6 +271,16 @@ interface EvaluationDao {
 
     @Query("SELECT * FROM test_samples WHERE testRunId = :runId ORDER BY timestampEpochMillis")
     suspend fun samplesForExport(runId: String): List<TestSampleEntity>
+
+    /** Samples RESTRICT deleting their checkpoint and floor, so removing a venue must clear them first. */
+    @Query(
+        """
+        DELETE FROM test_samples WHERE testRunId IN (SELECT id FROM test_runs WHERE venueId = :venueId)
+          OR trueFloorId IN (SELECT id FROM floors WHERE venueId = :venueId)
+          OR checkpointId IN (SELECT id FROM test_checkpoints WHERE venueId = :venueId)
+        """,
+    )
+    suspend fun deleteSamplesForVenue(venueId: String)
 }
 
 @Dao

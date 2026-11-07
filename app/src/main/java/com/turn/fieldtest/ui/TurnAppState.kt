@@ -36,6 +36,13 @@ class TurnAppState {
     fun selectWalkableRegion(id: String) {
         if(!canEditMap || id==editedRegionId) return
         val next=otherWalkableRegions.firstOrNull { it.id==id } ?: return
+        // Switching parks the current outline; an unfinished or invalid one would be dropped or crash later.
+        val draftProblem = if (draftWalkablePolygon.size < 3) "it needs at least three corners" else runCatching {
+            validateSimpleWalkablePolygon(MetricPolygon(draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) }))
+        }.exceptionOrNull()?.message
+        if (draftProblem != null) {
+            editorStatus = "Finish $editedRegionName before editing another room: $draftProblem · or Reload saved map"; return
+        }
         val original=editedRegionOriginal
         val unchanged=original!=null && com.turn.fieldtest.data.repository.decodePolygon(original.polygonJson).vertices.map {Offset(it.x.toFloat(),it.y.toFloat())}==draftWalkablePolygon.toList()
         val previous=if(unchanged) original!! else WalkableRegionEntity(editedRegionId ?: "REGION-${java.util.UUID.randomUUID()}",next.floorId,editedRegionName,polygonJson(draftWalkablePolygon.toList()),updatedAtEpochMillis=0)
@@ -122,10 +129,17 @@ class TurnAppState {
                 if (navigationEdges.any { (it.fromNodeId == from.id && it.toNodeId == nearest.id) || (it.bidirectional && it.toNodeId == from.id && it.fromNodeId == nearest.id) }) {
                     editorStatus = "These nodes are already connected"; return
                 }
-                navigationEdges.add(edge)
-                val errors = runCatching { draftNavigationGraph().validationErrors() }.getOrElse { listOf(it.message.orEmpty()) }
-                if (errors.isNotEmpty()) { navigationEdges.remove(edge); editorStatus = "Connection crosses a wall or leaves walkable space" }
-                else { selectedNodeId = nearest.id; editorStatus = "Path connected · %.1f m".format(edge.distanceMetres) }
+                // Judge only the new connection; an older path broken by a later wall edit must not block every new one.
+                val floor = runCatching { draftNavigationGraph().floor }.getOrElse {
+                    editorStatus = "Fix the walkable outline first: ${it.message}"; return
+                }
+                val a = from.core().point; val b = nearest.core().point
+                if (!floor.isPathInsideWalkableSpace(a, b) || floor.crossesWall(a, b)) {
+                    editorStatus = "Connection crosses a wall or leaves walkable space"
+                } else {
+                    navigationEdges.add(edge)
+                    selectedNodeId = nearest.id; editorStatus = "Path connected · %.1f m".format(edge.distanceMetres)
+                }
             }
             else -> { selectedNodeId = nearest?.id; editorStatus = if (nearest == null) "Tap a node to select it" else "Node selected" }
         }
@@ -159,8 +173,11 @@ class TurnAppState {
         val node = navigationNodes.firstOrNull { it.id == selectedNodeId } ?: return
         navigationEdges.removeAll { it.fromNodeId == node.id || it.toNodeId == node.id }
         navigationNodes.remove(node)
-        if (node.poiId != null) destinations.removeAll { it.id == node.poiId }
-        selectedNodeId = null; editorStatus = "Node and its connections removed from draft"
+        // A room with a mapped outline outlives its entrance node: it returns to "Link an existing room".
+        val keepsRoom = node.poiId != null && destinationAreas.any { it.destinationId == node.poiId }
+        if (node.poiId != null && !keepsRoom) destinations.removeAll { it.id == node.poiId }
+        selectedNodeId = null
+        editorStatus = if (keepsRoom) "Entrance node removed · the room is kept; link it to another node" else "Node and its connections removed from draft"
     }
     fun clearRoute() {
         routePoints = emptyList(); remainingDistanceMetres = null; destinationReached = false
@@ -366,7 +383,7 @@ class TurnAppState {
                 }
             }
             EditorTool.WALKABLE -> {
-                draftWalkablePolygon.add(metricPoint)
+                draftWalkablePolygon.add(metricPoint); suggestedSurveyPoints.clear()
                 editorStatus = "Walkable vertex ${draftWalkablePolygon.size} · ${formatPoint(metricPoint)}"
             }
             EditorTool.WALL -> {
@@ -375,7 +392,7 @@ class TurnAppState {
                     pendingWallStart = metricPoint
                     editorStatus = "Wall start ${formatPoint(metricPoint)} · select endpoint"
                 } else {
-                    draftWalls.add(start to metricPoint)
+                    draftWalls.add(start to metricPoint); suggestedSurveyPoints.clear()
                     pendingWallStart = null
                     editorStatus = "Wall stored in metric coordinates"
                 }
@@ -385,16 +402,21 @@ class TurnAppState {
                 val suggestion = suggestedSurveyPoints.minByOrNull { (it - metricPoint).getDistance() }
                     ?.takeIf { (it - metricPoint).getDistance() <= 1.2f }
                 if (suggestion != null) { acceptSuggestedSurveyPoint(suggestion); return }
+                // Saving rejects points outside walkable space, so refuse them here rather than block the save later.
+                val walkable = allWalkablePolygons().filter { it.size >= 3 }.any { polygon ->
+                    MetricPolygon(polygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) })
+                        .contains(MetricPoint(metricPoint.x.toDouble(), metricPoint.y.toDouble()))
+                }
+                if (!walkable) { editorStatus = "Survey points must be inside walkable space · tap the corridor or a walkable room"; return }
                 val label = addReferencePointAt(metricPoint)
-                val walkable = runCatching { draftNavigationGraph().floor.isWalkable(MetricPoint(metricPoint.x.toDouble(), metricPoint.y.toDouble())) }.getOrDefault(true)
-                editorStatus = if (walkable) "$label placed at ${formatPoint(metricPoint)}"
-                    else "$label is outside walkable space · Wi-Fi matches there cannot correct live tracking"
+                editorStatus = "$label placed at ${formatPoint(metricPoint)}"
             }
             EditorTool.QR_ANCHOR -> {
                 val id = if (mode == DataMode.REAL_DEVICE) "QR-${java.util.UUID.randomUUID()}" else "QR-G-${qrAnchors.size + 1}"
                 qrAnchors.add(MapPointUi(id, "Ground", metricPoint, "QR ${qrAnchors.size + 1}"))
                 editorStatus = "$id placed at ${formatPoint(metricPoint)}"
             }
+            EditorTool.SELECT -> editorStatus = "Choose Walkable polygon or Wall to edit the layout"
             else -> editorStatus = "${editorTool.label} placed at ${formatPoint(metricPoint)}"
         }
     }
@@ -471,12 +493,15 @@ class TurnAppState {
 
     fun finishWalkablePolygon() {
         if (!requireMapEditing()) return
-        editorStatus = if (draftWalkablePolygon.size >= 3) {
-            editorTool = EditorTool.SELECT
-            "Walkable polygon closed with ${draftWalkablePolygon.size} vertices"
-        } else {
-            "Add at least three walkable vertices"
-        }
+        if (draftWalkablePolygon.size < 3) { editorStatus = "Add at least three walkable vertices"; return }
+        // Close only shapes that paths, survey suggestions and saving will accept, and say why otherwise.
+        val problem = runCatching {
+            validateSimpleWalkablePolygon(MetricPolygon(draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) }))
+        }.exceptionOrNull()
+        if (problem != null) { editorStatus = "Outline not closed: ${problem.message} · use Undo or Redraw outline"; return }
+        editorTool = EditorTool.SELECT
+        suggestedSurveyPoints.clear()
+        editorStatus = "Walkable polygon closed with ${draftWalkablePolygon.size} vertices"
     }
 
     fun addReferencePointAt(idInput: String, x: Float, y: Float) {
@@ -542,13 +567,21 @@ class TurnAppState {
         editorStatus = "$count survey points added · Save map to keep them"
     }
 
+    /** Saving refuses to drop a point with survey sessions, so the draft must refuse it too. */
+    fun canRemoveReferencePoint(id: String) = surveyPointProgress[id] == null
+
     fun removeReferencePoint(id: String) {
         if (!requireMapEditing()) return
+        val label = referencePoints.firstOrNull { it.id == id }?.label ?: id
+        if (!canRemoveReferencePoint(id)) {
+            editorStatus = "$label has saved survey data and cannot be removed · export it first, then use Delete saved map"
+            return
+        }
         referencePoints.removeAll { it.id == id }
         if (selectedSurveyReferencePointId == id) {
             selectedSurveyReferencePointId = referencePoints.firstOrNull()?.id.orEmpty()
         }
-        editorStatus = "$id removed from the draft · Save to persist"
+        editorStatus = "$label removed from the draft · Save to persist"
     }
 
     fun applyCalibration(measuredDistanceMetres: Double): Boolean {
@@ -578,6 +611,10 @@ class TurnAppState {
             editorStatus = "Floor dimensions must be between 0 and 1000 metres"
             return false
         }
+        // An imported plan fills the floor rectangle, so a different aspect ratio would stretch the drawing.
+        val imageAspect = floorPlanPixelHeight?.let { h -> floorPlanPixelWidth?.takeIf { it > 0 }?.let { h.toFloat() / it } }
+            ?.takeIf { floorPlanContentUri != null }
+        val height = if (imageAspect != null && kotlin.math.abs(height - width * imageAspect) > 0.01f * height) width * imageAspect else height
         val xScale = width / floorWidthMetres
         val yScale = height / floorHeightMetres
         fun scaled(point: Offset) = Offset(point.x * xScale, point.y * yScale)
@@ -593,6 +630,8 @@ class TurnAppState {
         referencePoints.clear(); referencePoints.addAll(points)
         qrAnchors.clear(); qrAnchors.addAll(anchors)
         calibrationPoints.clear(); calibrationPoints.addAll(calibration)
+        val suggestions = suggestedSurveyPoints.map(::scaled)
+        suggestedSurveyPoints.clear(); suggestedSurveyPoints.addAll(suggestions)
         pendingWallStart = pendingWallStart?.let(::scaled)
         floorWidthMetres = width
         floorHeightMetres = height

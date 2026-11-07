@@ -63,11 +63,70 @@ class SurveyPointSuggestionTest {
         assertTrue(state.hasUnsavedMapChanges)
     }
 
-    @Test fun tapAwayFromSuggestionsAddsAManualPointAndWarnsOutsideWalkableSpace() {
+    @Test fun pointsOutsideWalkableSpaceAreRefusedBecauseSavingWouldRejectThem() {
         val state = editableState().apply { draftWalkablePolygon.clear()
             draftWalkablePolygon.addAll(listOf(Offset.Zero, Offset(20f, 0f), Offset(20f, 6f), Offset(0f, 6f))) }
         state.addMapPoint(Offset(10f, 15f))
-        assertEquals(1, state.referencePoints.size)
-        assertTrue(state.editorStatus.contains("outside walkable space"))
+        assertTrue(state.referencePoints.isEmpty())
+        assertTrue(state.editorStatus.contains("inside walkable space"))
+        state.addMapPoint(Offset(10f, 3f))
+        assertEquals(listOf("RP-01"), state.referencePoints.map { it.label })
+    }
+
+    @Test fun surveyedPointsCannotBeRemovedAndMessagesUseTheLabel() {
+        val state = editableState().apply { addMapPoint(Offset(5f, 5f)); addMapPoint(Offset(12f, 12f)) }
+        val (surveyed, fresh) = state.referencePoints.toList()
+        state.surveyPointProgress = mapOf(surveyed.id to SurveyPointProgress("PARTIAL", 3, 8, 5))
+        state.removeReferencePoint(surveyed.id)
+        assertEquals(2, state.referencePoints.size)
+        assertTrue(state.editorStatus.startsWith("RP-01 has saved survey data"))
+        state.removeReferencePoint(fresh.id)
+        assertEquals(listOf(surveyed.id), state.referencePoints.map { it.id })
+        assertEquals("RP-02 removed from the draft · Save to persist", state.editorStatus)
+    }
+
+    @Test fun rescalingMovesSuggestionsAndEditingTheOutlineClearsThem() {
+        val state = editableState().apply { navigationNodes.clear(); navigationEdges.clear(); markMapSaved() } // path nodes lock the scale
+        state.suggestSurveyPoints(3.0)
+        val before = state.suggestedSurveyPoints.toList()
+        assertTrue(state.resizeFloor(40f, 40f))
+        assertEquals(before.map { it * 2f }, state.suggestedSurveyPoints.toList())
+        state.editorTool = EditorTool.WALKABLE
+        state.addMapPoint(Offset(1f, 1f))
+        assertTrue(state.suggestedSurveyPoints.isEmpty())
+    }
+
+    @Test fun selfCrossingOutlineIsNotClosedAndSaysWhy() {
+        val state = editableState().apply { draftWalkablePolygon.clear()
+            draftWalkablePolygon.addAll(listOf(Offset(0f, 0f), Offset(10f, 10f), Offset(10f, 0f), Offset(0f, 10f))) }
+        state.editorTool = EditorTool.WALKABLE
+        state.finishWalkablePolygon()
+        assertEquals(EditorTool.WALKABLE, state.editorTool)
+        assertTrue(state.editorStatus.startsWith("Outline not closed"), state.editorStatus)
+    }
+
+    @Test fun anOldBrokenPathDoesNotBlockNewConnections() {
+        val state = editableState().apply {
+            navigationNodes.add(NavigationNodeEntity("c", "f", 3.0, 15.0))
+            draftWalls.add(Offset(9f, 0f) to Offset(9f, 20f)) // now crosses the existing a–b path
+            graphTool = "Connect"; selectedNodeId = "a"
+        }
+        state.graphTap(Offset(3f, 15f))
+        assertTrue(state.navigationEdges.any { it.fromNodeId == "a" && it.toNodeId == "c" }, state.editorStatus)
+        state.selectedNodeId = "c"
+        state.graphTap(Offset(15f, 3f)) // c → b crosses the new wall
+        assertFalse(state.navigationEdges.any { it.toNodeId == "b" && it.fromNodeId == "c" })
+        assertEquals("Connection crosses a wall or leaves walkable space", state.editorStatus)
+    }
+
+    @Test fun removingAMappedRoomsEntranceKeepsTheRoom() {
+        val state = editableState().apply {
+            destinationAreas.add(com.turn.fieldtest.data.repository.DestinationArea("lab",
+                MetricPolygon(listOf(MetricPoint(14.0, 4.0), MetricPoint(18.0, 4.0), MetricPoint(18.0, 8.0), MetricPoint(14.0, 8.0)))))
+            selectedNodeId = "b"
+        }
+        state.removeSelectedNode()
+        assertTrue(state.destinations.any { it.id == "lab" })
+        assertTrue(state.navigationNodes.none { it.id == "b" })
     }
 }

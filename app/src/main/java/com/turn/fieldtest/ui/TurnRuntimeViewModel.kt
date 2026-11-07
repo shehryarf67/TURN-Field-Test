@@ -75,6 +75,7 @@ import com.turn.fieldtest.core.WeightedKnnWifiMatcher
 import com.turn.fieldtest.core.WifiCorrectionKind
 import com.turn.fieldtest.core.WifiFingerprint
 import com.turn.fieldtest.core.WifiMatcherConfig
+import com.turn.fieldtest.core.WifiMatchResult
 import com.turn.fieldtest.core.WifiNormalization
 import com.turn.fieldtest.core.WifiScanFreshness as CoreWifiFreshness
 import com.turn.fieldtest.core.normalizeRadians
@@ -137,6 +138,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private val latestSensorValues = linkedMapOf<TurnSensorType, String>()
     private val lastDiagnosticValueNanos = mutableMapOf<TurnSensorType, Long>()
     private var activePositioningSession: PositioningSessionEntity? = null
+    private var liveEndedAtEpochMillis: Long? = null
     private var activeSensorSession: SensorSessionEntity? = null
     private var particleFilter: ParticleFilter? = null
     private var rawPdrTracker: PdrTracker? = null
@@ -703,8 +705,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 val now = System.currentTimeMillis()
                 // A newly placed point may be visible in Compose before it has been saved in
                 // Room. Bind collection to the exact validated map shown to the researcher.
-                persistActiveMap(now)
-                appState.markMapSaved()
+                // Save only a changed draft: re-saving an unchanged map would also reject floors the editor
+                // cannot modify (e.g. a non-zero origin from a backup), so surveys could never start there.
+                if (appState.hasUnsavedMapChanges) {
+                    persistActiveMap(now)
+                    appState.markMapSaved()
+                    savedNavigationGraph = runCatching { appState.draftNavigationGraph() }.getOrNull()
+                }
                 requireSavedMapContext(metadata.referencePointId)
                 val selectedPoint = repositories.floorPlans.referencePoint(metadata.referencePointId)
                     ?: error("Unknown survey reference point ${metadata.referencePointId}")
@@ -891,6 +898,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realWifiPosition = null
                 appState.realWifiFixEpochMillis = null
                 appState.realWifiNeighbourDetails = emptyList()
+                appState.realNearestFingerprintIds = emptyList(); appState.realWifiMatchDistance = null
                 appState.realWifiEvidenceStatus = "Waiting for fresh live evidence"
                 val sourceState = sensorSource.state.value
                 val sensorSession = SensorSessionEntity(
@@ -1089,16 +1097,22 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
         val session = activeSurvey ?: return
         if (!appState.surveyRunning) return
+        // Count a snapshot only once it is stored, and count it even if re-aggregation then fails;
+        // otherwise the counter, the stored rows and the auto-finish target drift apart.
+        val entities = runCatching { captureService.record(session, surveyScanSequence, batch) }.getOrElse { failure ->
+            appState.surveyRuntimeStatus = "Scan received but Room persistence failed"
+            appState.surveySaveStatus = failure.message ?: failure::class.java.simpleName
+            return
+        }
+        surveyScanSequence++
+        appState.surveyRawObservationCount += entities.observations.size
+        surveyBssids += entities.observations.map { it.bssid }
+        appState.surveyDistinctBssidCount = surveyBssids.size
+        if (entities.snapshot.isFresh) appState.surveyAcceptedSnapshots += 1
+        else appState.surveyCachedIgnored += 1
         runCatching {
-            val entities = captureService.record(session, surveyScanSequence++, batch)
-            val aggregates = captureService.recomputeAggregates(session.id, System.currentTimeMillis())
-            entities to aggregates
-        }.onSuccess { (entities, aggregates) ->
-            appState.surveyRawObservationCount += entities.observations.size
-            surveyBssids += entities.observations.map { it.bssid }
-            appState.surveyDistinctBssidCount = surveyBssids.size
-            if (entities.snapshot.isFresh) appState.surveyAcceptedSnapshots += 1
-            else appState.surveyCachedIgnored += 1
+            captureService.recomputeAggregates(session.id, System.currentTimeMillis())
+        }.onSuccess { aggregates ->
             appState.realSurveyAggregates = aggregates.map { aggregate ->
                 FingerprintAggregateUi(
                     bssid = aggregate.bssid,
@@ -1117,12 +1131,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 "Cached/stale snapshot stored for lineage and excluded from aggregation"
             }
             appState.surveySaveStatus = "Room contains ${surveyScanSequence} snapshot record(s) for this session"
-            if (appState.surveyAcceptedSnapshots >= (session.targetSnapshotCount ?: appState.surveyTargetSnapshots)) {
-                finishActiveSurvey("Target reached; bounded survey completed automatically")
-            }
         }.onFailure { failure ->
-            appState.surveyRuntimeStatus = "Scan received but Room persistence failed"
+            appState.surveyRuntimeStatus = "Snapshot stored, but recomputing the fingerprint failed; it is recomputed when the survey closes"
             appState.surveySaveStatus = failure.message ?: failure::class.java.simpleName
+        }
+        if (appState.surveyAcceptedSnapshots >= (session.targetSnapshotCount ?: appState.surveyTargetSnapshots)) {
+            finishActiveSurvey("Target reached; bounded survey completed automatically")
         }
     }
 
@@ -1157,7 +1171,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.surveyCloseFailed = false
             activeSurvey = null
             appState.sessionLocked = false
-            refreshSurveyProgress(ProjectContext(session.venueId, session.floorId))
+            // The session is already saved; a failed badge refresh must not crash the app from a bare launch.
+            runCatching { refreshSurveyProgress(ProjectContext(session.venueId, session.floorId)) }
         }.onFailure { failure ->
             appState.surveyRuntimeStatus = "$reason; saving failed. Press Finish to retry."
             appState.surveyCloseFailed = true
@@ -1189,7 +1204,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         appState.projectBusy = true
         appState.editorStatus = "Deleting saved map and linked fingerprints…"
-        viewModelScope.launch {
+        viewModelScope.launch { try {
             runCatching {
                 app.database.withTransaction {
                     repositories.floorPlans.observeReferencePoints(context.floorId).first()
@@ -1208,7 +1223,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }.onSuccess {
                 appState.clearMapDraft(force = true)
                 appState.removeFloorPlanImage(force = true)
-                appState.mapHasMeasurements = projects.load(context).hasMeasurements
+                // Deletion already committed; if the reload fails, keep the conservative "has measurements" lock.
+                appState.mapHasMeasurements = runCatching { projects.load(context).hasMeasurements }.getOrDefault(true)
                 appState.markMapSaved()
                 savedNavigationGraph = runCatching { appState.draftNavigationGraph() }.getOrNull()
                 appState.editorStatus = "Saved map and linked fingerprints deleted from this device"
@@ -1216,8 +1232,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }.onFailure { error ->
                 appState.editorStatus = "Delete failed: ${error.message ?: error.javaClass.simpleName}"
             }
-            appState.projectBusy = false
-        }
+        } finally { appState.projectBusy = false } }
     }
 
     fun importFloorPlan(uri: Uri) {
@@ -1261,12 +1276,17 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.floorPlanPixelHeight = image.pixelHeight
                 appState.floorPlanMetresPerPixel = null
                 appState.calibrationPoints.clear()
-                if (appState.draftWalkablePolygon.isEmpty()) {
+                val resized = if (appState.draftWalkablePolygon.isEmpty()) {
                     val height = appState.floorWidthMetres * image.pixelHeight.toFloat() / image.pixelWidth.toFloat()
                     appState.resizeFloor(appState.floorWidthMetres, height)
+                } else true
+                if (resized && appState.canChangeScale) {
+                    appState.editorTool = com.turn.fieldtest.ui.model.EditorTool.CALIBRATION
+                    appState.editorStatus = "Image imported · tap scale point A, then point B"
+                } else {
+                    // Scale is locked (recorded sessions exist): say so instead of inviting a calibration that will be refused.
+                    appState.editorStatus = "Image imported, but scale is locked by recorded sessions · the drawing keeps the floor's current dimensions"
                 }
-                appState.editorTool = com.turn.fieldtest.ui.model.EditorTool.CALIBRATION
-                appState.editorStatus = "Image imported · tap scale point A, then point B"
             }.onFailure { error ->
                 appState.editorStatus = "Import failed: ${error.message ?: error.javaClass.simpleName}"
             }
@@ -1473,6 +1493,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.realLiveStatus = appState.realWifiEvidenceStatus
             return
         }
+        // Handle cached broadcasts before matching: an empty match would otherwise blank the neighbour IDs and
+        // distance shown, and saved at checkpoints, next to the still-current Wi-Fi position.
+        if (freshness != CoreWifiFreshness.FRESH) {
+            particleFilter?.correctWithWifi(WifiMatchResult.noEstimate(freshness))
+            appState.realWifiEvidenceStatus = "Cached/stale broadcast · correction not applied"
+            appState.lastCorrectionType = "cached Wi-Fi result ignored"
+            appState.realLiveStatus = "Cached/stale Wi-Fi retained for diagnostics; fusion was not corrected"
+            return
+        }
         val match = matcher.match(
             liveRssiByBssid = eligibleAps.associate { it.bssid.lowercase() to it.rssiDbm.toDouble() },
             fingerprints = fingerprints,
@@ -1486,13 +1515,6 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             "${it.referencePointId}: %.1f dB · %.0f%% weight · ${it.sharedBssidCount} shared APs".format(it.distance, it.weight * 100)
         }
 
-        if (freshness != CoreWifiFreshness.FRESH) {
-            particleFilter?.correctWithWifi(match)
-            appState.realWifiEvidenceStatus = "Cached/stale broadcast · correction not applied"
-            appState.lastCorrectionType = "cached Wi-Fi result ignored"
-            appState.realLiveStatus = "Cached/stale Wi-Fi retained for diagnostics; fusion was not corrected"
-            return
-        }
         if (match.estimatedPosition == null || match.estimatedFloorId == null || match.unlikeDatabase || match.spatiallyAmbiguous) {
             appState.lastCorrectionType = "confidence degraded"
             appState.realWifiPosition = null
@@ -1563,10 +1585,14 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.realLiveInitialized = true
             appState.lastCorrectionType = if (appState.relocalizationCount > 0) "globally relocalized" else "first confident Wi-Fi fix"
             appState.realLiveStatus = "Fresh Wi-Fi initialized the particle filter; original raw PDR is retained"
-            activePositioningSession = positioningSession.copy(
-                initialFloorId = match.estimatedFloorId,
-                initializationType = "FRESH_WIFI",
-            ).also { repositories.positioning.saveSession(it) }
+            // Only a session that was waiting for Wi-Fi was initialised by it; a later relocalisation of a
+            // manual start is recorded as a correction event and must not rewrite how the session began.
+            if (positioningSession.initializationType == "WAITING_FOR_FRESH_WIFI") {
+                activePositioningSession = positioningSession.copy(
+                    initialFloorId = match.estimatedFloorId,
+                    initializationType = "FRESH_WIFI",
+                ).also { repositories.positioning.saveSession(it) }
+            }
         } else {
             val correction = withContext(Dispatchers.Default) { requireNotNull(particleFilter).correctWithWifi(match) }
             if (correction.kind == WifiCorrectionKind.GLOBAL_RELOCALIZATION) {
@@ -1709,7 +1735,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realHeadingAligned = false
         appState.realHeadingSampleEpochMillis = null
         appState.realHeadingStatus = "Navigation stopped · choose your starting direction before the next walk"
-        val endedAt = System.currentTimeMillis()
+        // Tracking stopped at the first attempt; a later "Retry saving" must not move the recorded end time.
+        val endedAt = liveEndedAtEpochMillis ?: System.currentTimeMillis().also { liveEndedAtEpochMillis = it }
         try {
             app.database.withTransaction {
                 activeSensorSession?.let { repositories.positioning.saveSensorSession(it.copy(endedAtEpochMillis = endedAt)) }
@@ -1724,6 +1751,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.realLiveStatus = "Could not save session end: ${error.message}. Retry saving before switching projects."
             return
         }
+        liveEndedAtEpochMillis = null
         appState.liveCloseFailed = false
         appState.clearRoute(); appState.routeStatus = "Navigation stopped"
         appState.realLiveInitialized = false; appState.realLivePosition = null
