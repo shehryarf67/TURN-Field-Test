@@ -45,6 +45,17 @@ class CanvasWorkflowTest {
         compose.waitForIdle()
     }
 
+    @Test fun cancellingAheadPointReturnsToDirectionWithoutDiscardingRoute() {
+        val state=fixture().apply {selectedDestinationId="lab";chooseKnownStart(Offset(3f,3f))}
+        compose.setContent {TurnApp(state)}
+        compose.onNodeWithText("Start navigation").performClick()
+        compose.onNodeWithText("Tap a point ahead on the map").performScrollTo().performClick()
+        compose.runOnIdle {assertTrue(state.pickingHeading)}
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("Which way are you facing?").assertExists()
+        compose.runOnIdle {assertFalse(state.pickingHeading);assertEquals("lab",state.selectedDestinationId);assertEquals(Offset(3f,3f),state.manualStartPoint)}
+    }
+
     @Test fun destinationFirstSearchThenPromptsForStartAndDirection() {
         val state = fixture(); var starts = 0
         compose.setContent { TurnApp(state, TurnAppActions(

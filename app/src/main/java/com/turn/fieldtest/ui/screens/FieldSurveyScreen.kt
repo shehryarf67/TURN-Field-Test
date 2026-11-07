@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.turn.fieldtest.ui.*
 import com.turn.fieldtest.ui.model.TurnDestination
 import androidx.compose.ui.text.font.FontWeight
@@ -63,7 +64,7 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
                     label = { Text("${point.label} · $label") })
             }
         }
-        Column(Modifier.fillMaxWidth().height(if (shortWindow) 300.dp else panelHeight).verticalScroll(rememberScrollState()).padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxWidth().then(if(shortWindow) Modifier else Modifier.height(panelHeight).verticalScroll(rememberScrollState())).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (selected == null) {
                 Text("Add reference points in Map setup before surveying.")
                 TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add survey points") }
@@ -84,7 +85,7 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
                 null -> "This point has no saved fingerprint"
                 else -> "Partial collection saved. Begin a new collection to complete this point."
             }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-            Button(modifier = Modifier.fillMaxWidth(), enabled = !state.surveyStarting && !state.projectBusy && !state.liveRunning && selected != null,
+            Button(modifier = Modifier.fillMaxWidth().heightIn(min=52.dp), shape=RoundedCornerShape(16.dp), enabled = !state.surveyStarting && !state.projectBusy && !state.liveRunning && selected != null,
                 onClick = {
                     if (state.surveyRunning || state.surveyCloseFailed) actions.onRealSurveyFinished()
                     else selected?.let { actions.onRealSurveyStarted(SurveyCaptureMetadata(it.id, null, null, notes)) }

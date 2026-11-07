@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BluetoothDisabled
 import androidx.compose.material.icons.outlined.Info
@@ -53,7 +57,7 @@ fun SettingsScreen(
     ) {
         PageHeader(
             eyebrow = "08 · Configuration",
-            title = "Settings",
+            title = "Preferences & algorithms",
             description = "Tune research parameters explicitly. TURN never substitutes simulated radio or sensor readings in real-device mode.",
             compact = compact,
             action = {
@@ -218,18 +222,14 @@ fun SettingsScreen(
 
 @Composable
 private fun ModeChoice(title: String, detail: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) {
-        Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+    OutlinedCard(onClick=onClick,modifier=Modifier.fillMaxWidth(),shape=MaterialTheme.shapes.small,
+        border=BorderStroke(1.dp,if(selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+        colors=CardDefaults.outlinedCardColors(containerColor=if(selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha=.3f) else MaterialTheme.colorScheme.surface)) {
+        Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
+            RadioButton(selected=selected,onClick=null)
+            Column(Modifier.weight(1f).padding(start=8.dp)) {
                 Text(title, fontWeight = FontWeight.Bold)
-                Text(detail, style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-                Text(title, fontWeight = FontWeight.Bold)
-                Text(detail, style = MaterialTheme.typography.labelSmall)
+                Text(detail, style = MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -267,7 +267,7 @@ private fun SettingToggle(title: String, detail: String, checked: Boolean, enabl
 
 @Composable
 private fun PermissionRow(label: String, detail: String, active: Boolean) {
-    LabelValue(label, detail, valueColor = if (active) TurnMint else MaterialTheme.colorScheme.onSurfaceVariant)
+    LabelValue(label, detail, valueColor = if (active) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 private fun resetAlgorithmDefaults(state: TurnAppState) {

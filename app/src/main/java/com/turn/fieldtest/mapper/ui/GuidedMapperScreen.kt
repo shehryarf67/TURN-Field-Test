@@ -15,6 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.text.font.FontWeight
 import com.turn.fieldtest.mapper.WalkMapperViewModel
 import com.turn.fieldtest.mapper.ar.ArScanView
 import com.turn.fieldtest.mapper.core.*
@@ -57,11 +58,11 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
         confirmButton={TextButton(onClick={attempt {vm.addRoom(roomName); roomName=""; roomDialog=false; stage="Capture"}}, enabled=roomName.isNotBlank() && !vm.busy) {Text("Create room")}},
         dismissButton={TextButton(onClick={roomDialog=false}) {Text("Cancel")}})
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
-    Surface(Modifier.fillMaxSize()) {
+    Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=8.dp),verticalAlignment=UiAlignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Create a floor plan",style=MaterialTheme.typography.titleLarge)
+                    Text("Create a floor plan",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
                     Text(vm.room?.name ?: "Map a room with your phone",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick={onStopCamera(); details=true}) {Text("Advanced")}
@@ -69,10 +70,9 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
             }
             val steps = listOf("Capture", "Review", "Verify & save")
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.SpaceBetween) {
-                steps.forEachIndexed { i, label -> TextButton(onClick={if(label!="Capture") onStopCamera(); stage=label},enabled=doc!=null) {
-                    Text("${i+1} · $label",style=MaterialTheme.typography.labelMedium,
-                        color=if(stage==label) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                } }
+                steps.forEachIndexed { i, label -> FilterChip(selected=stage==label,
+                    onClick={if(label!="Capture") onStopCamera(); stage=label},enabled=doc!=null,
+                    label={Text("${i+1} · $label",style=MaterialTheme.typography.labelMedium)}) }
             }
             if(doc==null) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(vm.status,Modifier.padding(20.dp)); return@Column }
             val visual: @Composable (Modifier) -> Unit = { modifier ->
@@ -95,7 +95,8 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                 }
             }
             val controls: @Composable (Modifier) -> Unit = { modifier ->
-                Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                Surface(modifier,shape=MaterialTheme.shapes.medium,color=MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     Text(if(camera!=null) vm.arStatus.text else availability,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     when(stage) {
                         "Capture" -> {
@@ -108,7 +109,7 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                                         PointChoice("Corner A",vm.alignmentA,doc) {vm.alignmentA=it}
                                         PointChoice("Corner B",vm.alignmentB,doc) {vm.alignmentB=it}
                                     }
-                                    Button(onClick={outline=false; onStartCamera()},enabled=vm.cameraMayStart && !vm.busy,modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) {
+                                    Button(onClick={outline=false; onStartCamera()},enabled=vm.cameraMayStart && !vm.busy,shape=MaterialTheme.shapes.small,modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) {
                                         Icon(Icons.Outlined.PhotoCamera,null); Spacer(Modifier.width(8.dp)); Text("Start camera")
                                     }
                                 } else {
@@ -127,7 +128,7 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                                     Text(if(aligned) "Aim at each corner where the wall meets the floor. Mark corners in order around the room."
                                         else "Tap the physical floor and confirm it. Then tap a point ahead to set map direction.",style=MaterialTheme.typography.bodyMedium)
                                     Button(onClick={outline=false; camera.markAtCentre()},enabled=aligned && vm.arStatus.tracking && vm.room!=null && (vm.tool!="CORNER" || vm.room?.confirmed==false) && !outline,
-                                        modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) {Text(if(vm.tool=="CORNER") "Mark corner" else if(vm.pendingEndpoint==null) "Mark first endpoint" else "Mark second endpoint")}
+                                        shape=MaterialTheme.shapes.small,modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) {Text(if(vm.tool=="CORNER") "Mark corner" else if(vm.pendingEndpoint==null) "Mark first endpoint" else "Mark second endpoint")}
                                 }
                                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                     OutlinedButton(onClick=vm::undo,enabled=!vm.busy,modifier=Modifier.weight(1f)) {Text("Undo")}
@@ -167,8 +168,8 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                             }
                             if(vm.room?.confirmed==true) {
                                 Text("Outline confirmed",color=MaterialTheme.colorScheme.primary)
-                                Button(onClick={stage="Verify & save"},modifier=Modifier.fillMaxWidth()) {Text("Check measurements")}
-                            } else Button(onClick={vm.finishRoom()},enabled=(vm.room?.corners?.size ?: 0)>=3 && !vm.busy,modifier=Modifier.fillMaxWidth()) {Text("Confirm outline")}
+                                Button(onClick={stage="Verify & save"},shape=MaterialTheme.shapes.small,modifier=Modifier.fillMaxWidth()) {Text("Check measurements")}
+                            } else Button(onClick={vm.finishRoom()},enabled=(vm.room?.corners?.size ?: 0)>=3 && !vm.busy,shape=MaterialTheme.shapes.small,modifier=Modifier.fillMaxWidth()) {Text("Confirm outline")}
                             OutlinedButton(onClick={details=true},modifier=Modifier.fillMaxWidth()) {Text("Edit corners, walls & doors")}
                             TextButton(onClick={stage="Capture"}) {Text("Back to capture")}
                         }
@@ -176,6 +177,7 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                     }
                     Text(vm.status,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.primary)
                     Text(vm.saveStatus,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 }
             }
             if(landscape) Row(Modifier.weight(1f).padding(8.dp)) {
@@ -206,7 +208,7 @@ private fun GuidedVerification(vm: WalkMapperViewModel,onPublish: ()->Unit,onExi
     val issues=remember(doc) {ScanGeometry.issues(doc)}
     issues.forEach {Text(it.message,style=MaterialTheme.typography.bodySmall,color=if(it.blocking) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)}
     OutlinedTextField(doc.name,vm::name,label={Text("Floor name")},singleLine=true,modifier=Modifier.fillMaxWidth())
-    Button(onClick=onPublish,enabled=!vm.busy && doc.name.isNotBlank() && issues.none {it.blocking},modifier=Modifier.fillMaxWidth()) {Text(if(vm.busy) "Saving…" else "Save floor plan")}
+    Button(onClick=onPublish,enabled=!vm.busy && doc.name.isNotBlank() && issues.none {it.blocking},shape=MaterialTheme.shapes.small,modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) {Text(if(vm.busy) "Saving…" else "Save floor plan")}
     doc.publicationIssues.forEach {Text(it,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error)}
     if(doc.publishedFloorId!=null) Button(onClick=onExit,modifier=Modifier.fillMaxWidth()) {Text("Open saved floor")}
     TextButton(onClick=onAdvanced) {Text("Edit checks & advanced settings")}

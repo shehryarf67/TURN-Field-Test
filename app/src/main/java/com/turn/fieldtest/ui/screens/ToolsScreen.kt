@@ -33,7 +33,7 @@ fun ToolsScreen(state: TurnAppState, actions: TurnAppActions) {
                 onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) })
             ToolCard("2 · Wi-Fi survey", "${state.referencePoints.size} reference points · ${state.surveyPointProgress.values.count { it.status == "COMPLETED" }} completed",
                 Icons.Outlined.Wifi, onClick = { state.selectDestination(TurnDestination.SURVEY) })
-            ToolCard("3 · Explore & navigate", "Choose a start, align your direction and select a place", Icons.Outlined.NearMe,
+            ToolCard("3 · Explore & navigate", "Choose a start and destination, then confirm your direction", Icons.Outlined.NearMe,
                 onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) })
             ToolCard("Create a map with your phone", "Guided AR capture or measured drawing · review and verify before use",
                 Icons.Outlined.ViewInAr, enabled = state.canEditMap && !state.hasUnsavedMapChanges && state.mode == DataMode.REAL_DEVICE,
@@ -54,9 +54,12 @@ fun ToolsScreen(state: TurnAppState, actions: TurnAppActions) {
 @Composable
 internal fun ToolCard(title: String, detail: String, icon: ImageVector, enabled: Boolean = true, onClick: () -> Unit) {
     OutlinedCard(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(Modifier.size(44.dp),shape=MaterialTheme.shapes.small,color=MaterialTheme.colorScheme.primaryContainer) {
+                Box(contentAlignment=Alignment.Center) {Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)}
+            }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

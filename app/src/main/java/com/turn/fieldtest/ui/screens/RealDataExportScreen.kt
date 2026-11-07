@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,11 +35,11 @@ fun RealDataExportScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         PageHeader("07 · Research data", "Data & export",
-            "Save physical Room records through Android's document picker.", compact)
+            "Back up maps, surveys and recordings to your files.", compact)
         Text(state.lastDataAction, style = MaterialTheme.typography.bodyMedium)
         SectionCard("Complete database", "Keep a JSON backup after every field session") {
             Text("Includes all database tables, raw readings, fingerprints, geometry, sessions and estimates. Image URIs reference phone-local assets; copy floor-plan images separately.")
-            Button(
+            Button(shape=MaterialTheme.shapes.small,
                 onClick = { backup.launch("turn-database-${System.currentTimeMillis()}.json") },
                 enabled = !state.realExportBusy && !state.surveyRunning && !state.liveRunning,
                 modifier = Modifier.fillMaxWidth(),
@@ -50,7 +51,7 @@ fun RealDataExportScreen(
                     if (it != null) onExport(it, dataset)
                     else state.lastDataAction = "Export cancelled; stored records unchanged"
                 }
-                Button(
+                OutlinedButton(shape=MaterialTheme.shapes.small,
                     onClick = { picker.launch("turn-${dataset.name.lowercase()}-${System.currentTimeMillis()}.csv") },
                     enabled = !state.realExportBusy && !state.surveyRunning && !state.liveRunning,
                     modifier = Modifier.fillMaxWidth(),

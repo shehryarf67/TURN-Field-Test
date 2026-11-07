@@ -247,8 +247,11 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         Icon(if (state.pickingStart) Icons.Outlined.TouchApp else Icons.Outlined.Explore, null, tint = MaterialTheme.colorScheme.primary)
                         Text(if (state.pickingStart) "Tap where you are standing" else "Tap a point ahead of you, at least 1 m away",
                             Modifier.weight(1f).padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        TextButton(onClick = { state.pickingStart = false; state.pickingHeading = false
-                            sheet = if (state.liveRunning) "options" else if (state.pickingHeading) "direction" else "start" }) { Text("Cancel") }
+                        TextButton(onClick = {
+                            val wasPickingHeading=state.pickingHeading
+                            state.pickingStart = false; state.pickingHeading = false
+                            sheet = if (state.liveRunning) "options" else if (wasPickingHeading) "direction" else "start"
+                        }) { Text("Cancel") }
                     }
                 }
             } else {

@@ -1,6 +1,7 @@
 package com.turn.fieldtest.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -36,6 +38,15 @@ import com.turn.fieldtest.ui.model.EventSeverity
 import com.turn.fieldtest.ui.theme.TurnAmber
 import com.turn.fieldtest.ui.theme.TurnMint
 import com.turn.fieldtest.ui.theme.TurnRed
+
+/** Research state colours need readable text on the light Wayfinder surfaces too. */
+@Composable
+private fun readableAccent(color: Color): Color = if(MaterialTheme.colorScheme.surface.luminance()<.5f) color else when(color) {
+    TurnMint -> Color(0xFF166534)
+    TurnAmber -> Color(0xFF854D0E)
+    TurnRed -> MaterialTheme.colorScheme.error
+    else -> color
+}
 
 @Composable
 internal fun PageHeader(
@@ -68,13 +79,12 @@ internal fun PageHeader(
 @Composable
 private fun HeaderCopy(eyebrow: String, title: String, description: String) {
     Text(
-        eyebrow.uppercase(),
+        eyebrow.substringAfter(" · "),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.Bold,
-        letterSpacing = MaterialTheme.typography.labelSmall.letterSpacing * 1.3
     )
-    Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+    Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
     Text(
         description,
         style = MaterialTheme.typography.bodyMedium,
@@ -94,9 +104,10 @@ internal fun SectionCard(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = RoundedCornerShape(18.dp)
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -114,7 +125,6 @@ internal fun SectionCard(
                 }
                 trailing?.invoke()
             }
-            Spacer(Modifier.height(14.dp))
             content()
         }
     }
@@ -155,18 +165,18 @@ internal fun MetricCard(
 ) {
     OutlinedCard(
         modifier = modifier,
-        shape = RoundedCornerShape(15.dp),
-        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
+        shape = MaterialTheme.shapes.small,
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                label.uppercase(),
+                label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(value, style = MaterialTheme.typography.titleLarge, color = accent, fontWeight = FontWeight.Black)
+            Text(value, style = MaterialTheme.typography.titleLarge, color = readableAccent(accent), fontWeight = FontWeight.Bold)
             if (supporting != null) {
                 Text(
                     supporting,
@@ -186,23 +196,23 @@ internal fun StatusPill(
     severity: EventSeverity = EventSeverity.INFO,
     modifier: Modifier = Modifier
 ) {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val color = when (severity) {
         EventSeverity.INFO -> MaterialTheme.colorScheme.primary
-        EventSeverity.GOOD -> TurnMint
-        EventSeverity.WARNING -> TurnAmber
-        EventSeverity.ERROR -> TurnRed
+        EventSeverity.GOOD -> if(dark) TurnMint else Color(0xFF166534)
+        EventSeverity.WARNING -> if(dark) TurnAmber else Color(0xFF854D0E)
+        EventSeverity.ERROR -> MaterialTheme.colorScheme.error
     }
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(color.copy(alpha = 0.14f))
-            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(50))
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(color))
-        Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color)
+        Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = color)
     }
 }
 
@@ -228,7 +238,7 @@ internal fun LabelValue(
             value,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
-            color = valueColor,
+            color = readableAccent(valueColor),
             modifier = Modifier.weight(1.35f)
         )
     }
@@ -323,4 +333,4 @@ internal fun BleDisabledBanner(modifier: Modifier = Modifier) {
     }
 }
 
-internal val PagePadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp)
+internal val PagePadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp)

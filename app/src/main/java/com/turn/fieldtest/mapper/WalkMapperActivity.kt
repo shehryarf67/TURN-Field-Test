@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
@@ -56,9 +58,15 @@ class WalkMapperActivity: ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             val appearance by (application as com.turn.fieldtest.TurnApplication).settings.settings.collectAsState(
                 initial = com.turn.fieldtest.data.settings.TurnSettings())
+            SideEffect {
+                val bars=if(appearance.darkTheme) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle=bars,navigationBarStyle=bars)
+            }
             TurnTheme(darkTheme = appearance.darkTheme) { WalkMapperScreen(vm,camera,availability,arSupported,
             onStartCamera=::startCamera,onStopCamera=::stopCamera,
             onExit={ lifecycleScope.launch { if(vm.doc==null || vm.saveNow()) {

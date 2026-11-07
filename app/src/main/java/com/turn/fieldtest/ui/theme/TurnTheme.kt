@@ -17,8 +17,8 @@ val TurnBlue = Color(0xFF4B87FF)
 val TurnMint = Color(0xFF72E0B1)
 val TurnAmber = Color(0xFFFFC568)
 val TurnRed = Color(0xFFFF7C7C)
-val TurnInk = Color(0xFF142432)
-val TurnPaper = Color(0xFFF5F8FA)
+val TurnInk = Color(0xFF0F172A)
+val TurnPaper = Color(0xFFF8FAFC)
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFFA9C7FF),
@@ -46,7 +46,7 @@ private val DarkColors = darkColorScheme(
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF1760D4),
+    primary = Color(0xFF1A5FD0),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFE1ECFF),
     onPrimaryContainer = Color(0xFF12396E),
@@ -62,11 +62,12 @@ private val LightColors = lightColorScheme(
     onSurface = TurnInk,
     surfaceVariant = Color(0xFFE6EEF2),
     surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFF1F5FC),
+    surfaceContainerLow = Color(0xFFF1F5F9),
     surfaceContainer = Color(0xFFEBF1FA),
     surfaceContainerHigh = Color(0xFFE5EDF8),
     surfaceContainerHighest = Color(0xFFDEE8F5),
     onSurfaceVariant = Color(0xFF465A66),
+    outlineVariant = Color(0xFFE2E8F0),
     error = Color(0xFFBA1A1A)
 )
 
@@ -77,8 +78,8 @@ fun TurnTheme(
 ) {
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColors else LightColors,
-        shapes = Shapes(extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp),
-            medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(30.dp)),
+        shapes = Shapes(extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(14.dp),
+            medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(28.dp)),
         content = content
     )
 }

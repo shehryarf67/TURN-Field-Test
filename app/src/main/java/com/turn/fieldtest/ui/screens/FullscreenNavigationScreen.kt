@@ -11,6 +11,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import com.turn.fieldtest.ui.NavigationViewOrientation
 import com.turn.fieldtest.ui.TurnAppState
 import kotlinx.coroutines.delay
@@ -24,18 +27,30 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
     }
     val age = state.liveEstimateEpochMillis?.let { (now - it).coerceAtLeast(0) / 1000 }
     val confidence = navigationConfidence(state, age, now)
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        NavigationMap(state, Modifier.fillMaxSize(), showPosition = true, showGraph = state.debugOverlays)
-        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing)
+    var headerHeight by remember {mutableIntStateOf(0)}
+    val topInset=with(LocalDensity.current) {headerHeight.toDp()}
+    val safe=WindowInsets.safeDrawing.asPaddingValues()
+    val direction=LocalLayoutDirection.current
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        val landscape=maxWidth>maxHeight
+        val mapPadding=if(landscape) PaddingValues(start=340.dp+safe.calculateLeftPadding(direction),top=safe.calculateTopPadding()+12.dp,
+            end=safe.calculateRightPadding(direction)+12.dp,bottom=safe.calculateBottomPadding()+12.dp)
+            else PaddingValues(top=topInset,bottom=124.dp+safe.calculateBottomPadding())
+        NavigationMap(state, Modifier.fillMaxSize(), showPosition = true, showGraph = state.debugOverlays,
+            rotateToFit=true,roomLabels=true,viewportPadding=mapPadding,
+            controlsPadding=PaddingValues(end=12.dp+safe.calculateRightPadding(direction),bottom=12.dp+safe.calculateBottomPadding()))
+        Row(Modifier.align(if(landscape) Alignment.TopStart else Alignment.TopCenter)
+            .then(if(landscape) Modifier.width(340.dp) else Modifier.fillMaxWidth())
+            .onSizeChanged {headerHeight=it.height}.windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             Surface(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.medium) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(state.floorName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (state.liveRunning) Text("Steps ${state.realLiveStepCount} / ${state.realLiveDetectedSteps} detected",
+                    if (state.debugOverlays && state.liveRunning) Text("Steps ${state.realLiveStepCount} / ${state.realLiveDetectedSteps} detected",
                         style = MaterialTheme.typography.bodySmall)
                     Text(confidence + (state.realLiveUncertaintyMetres?.let { " · ± %.1f m".format(it) } ?: ""),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    Text(if (state.realHeadingAligned) "Heading %.0f° on map".format((state.realLiveHeadingDegrees + 360.0) % 360.0)
+                    if(state.debugOverlays) Text(if (state.realHeadingAligned) "Heading %.0f° on map".format((state.realLiveHeadingDegrees + 360.0) % 360.0)
                         else state.realHeadingStatus, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodySmall)
                     state.destinations.firstOrNull { it.id == state.selectedDestinationId }?.let { poi ->
@@ -46,9 +61,13 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
                     }
                 }
             }
-            Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.medium) {
+            if(!landscape) Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.medium) {
                 TextButton(onClick = { state.navigationFullscreen = false }) { Text("Exit full screen") }
             }
+        }
+        if(landscape) Surface(Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
+            color=MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.small) {
+            TextButton(onClick={state.navigationFullscreen=false}) {Text("Exit full screen")}
         }
         Row(Modifier.align(Alignment.BottomStart).windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(start = 12.dp, bottom = 72.dp).horizontalScroll(rememberScrollState()),
