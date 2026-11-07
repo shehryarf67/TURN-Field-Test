@@ -22,6 +22,12 @@ android {
         buildConfigField("boolean", "BLE_DEFAULT_ENABLED", "false")
     }
 
+    // CI signs debug builds with the team's shared debug key so they install over existing phone installs.
+    // Local builds leave the variable unset and keep Android's default ~/.android/debug.keystore.
+    providers.environmentVariable("TURN_DEBUG_KEYSTORE").orNull?.let { keystore ->
+        signingConfigs.getByName("debug") { storeFile = file(keystore) }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
