@@ -19,6 +19,17 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
+      # Optional: sign with the team's debug key so builds install over an existing app without uninstalling.
+      # Without the secret, Gradle generates a fresh debug key and the first install needs an uninstall.
+      - name: Restore shared debug keystore
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_B64" ]; then
+            mkdir -p ~/.android && echo "$DEBUG_KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+          else
+            echo "No DEBUG_KEYSTORE_B64 secret; using a generated debug key"
+          fi
       - name: Unit tests
         run: ./gradlew test --no-daemon --max-workers=2
       - name: Lint and debug APK
@@ -28,3 +39,29 @@ jobs:
           name: turn-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  # Every green build of main replaces one rolling pre-release, so a single permanent link
+  # (…/releases/download/latest-debug/turn-debug.apk) always serves the newest APK.
+  publish:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-latest-debug
+      cancel-in-progress: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: turn-debug-apk
+      - name: Replace the latest-debug release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mv app-debug.apk turn-debug.apk
+          gh release delete latest-debug --cleanup-tag --yes || true
+          gh release create latest-debug turn-debug.apk --prerelease --target "$GITHUB_SHA" \
+            --title "Latest debug build (${GITHUB_SHA::7})" \
+            --notes "Debug APK built from ${GITHUB_SHA} on main. Replaced automatically on every push to main."
