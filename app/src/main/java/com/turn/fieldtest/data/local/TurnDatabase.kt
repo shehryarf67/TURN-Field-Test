@@ -57,7 +57,7 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun magneticDao(): MagneticDao
 
     companion object {
-        const val SCHEMA_VERSION = 4
+        const val SCHEMA_VERSION = 5
         const val DATABASE_NAME = "turn-field-test.db"
 
         fun build(context: Context, databaseName: String = DATABASE_NAME): TurnDatabase =
@@ -100,5 +100,20 @@ object TurnDatabaseMigrations {
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_magnetic_walks_floorId` ON `magnetic_walks` (`floorId`)")
         }
     }
-    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4)
+    /** Additive: per-floor mapper source so one building can hold several mapper floors. */
+    val FROM_4_TO_5 = object : Migration(4, 5) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `floors` ADD COLUMN `mapperSourceJson` TEXT")
+            // Before schema 5 every mapper import was its own one-floor venue whose notes ended with the source JSON.
+            // Move it onto that floor so later floors of the building can never pick it up by accident.
+            db.execSQL("""
+                UPDATE floors SET mapperSourceJson = (
+                    SELECT substr(v.notes, instr(v.notes, char(10) || '{') + 1) FROM venues v WHERE v.id = floors.venueId)
+                WHERE mapperSourceJson IS NULL AND venueId IN (
+                    SELECT v.id FROM venues v WHERE v.notes LIKE 'TURN-Mapper %' AND instr(v.notes, char(10) || '{') > 0
+                    AND (SELECT COUNT(*) FROM floors f WHERE f.venueId = v.id) = 1)
+            """.trimIndent())
+        }
+    }
+    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4,FROM_4_TO_5)
 }

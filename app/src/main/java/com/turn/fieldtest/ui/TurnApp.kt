@@ -10,6 +10,10 @@ import com.turn.fieldtest.ui.theme.TurnTheme
 data class TurnAppActions(
     val onMapperImportRequested: () -> Unit = {},
     val onBundledMapperImport: (String, Boolean) -> Unit = { _, _ -> },
+    /** Adds a bundled mapper floor to an existing building (floor id, venue id). */
+    val onBundledFloorAddedToBuilding: (String, String) -> Unit = { _, _ -> },
+    /** Adds an empty floor to a building (venue id, floor name, level). */
+    val onFloorAdded: (String, String, Int) -> Unit = { _, _, _ -> },
     val onDestinationSelected: (String?) -> Unit = {},
     val onProjectCreated: (com.turn.fieldtest.data.repository.ProjectInput) -> Unit = {},
     val onProjectOpened: (com.turn.fieldtest.data.repository.ProjectContext, Boolean) -> Unit = { _, _ -> },

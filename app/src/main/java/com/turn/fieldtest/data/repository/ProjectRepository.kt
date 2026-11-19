@@ -28,6 +28,7 @@ data class ProjectSummary(
     val fingerprintPointCount: Int,
     val surveySessionCount: Int,
     val positioningSessionCount: Int,
+    val floorLevel: Int = 0,
 ) {
     val context: ProjectContext get() = ProjectContext(venueId, floorId)
 }
@@ -96,6 +97,21 @@ class ProjectRepository(private val database: TurnDatabase) {
         repositories.floorPlans.save(FloorEntity(context.floorId, context.venueId, names.floorName,
             levelNumber = 0, widthMetres = 42.0, heightMetres = 28.0,
             createdAtEpochMillis = now, updatedAtEpochMillis = now))
+        context
+    }
+
+    /** Adds an empty floor to an existing building; floor identity stays independent of its name. */
+    suspend fun addFloor(venueId: String, floorName: String, levelNumber: Int, now: Long): ProjectContext = database.withTransaction {
+        val name = floorName.trim()
+        require(name.isNotEmpty() && name.length <= 120) { "Enter a floor name of at most 120 characters" }
+        requireNotNull(repositories.venues.venue(venueId)) { "Saved building is unavailable" }
+        val siblings = database.floorPlanDao().observeFloors(venueId).first()
+        require(siblings.none { it.name.equals(name, ignoreCase = true) }) { "This building already has a floor named $name" }
+        // floors has a unique (venueId, levelNumber) index; @Upsert would otherwise skip the row silently.
+        require(siblings.none { it.levelNumber == levelNumber }) { "This building already has a floor at level $levelNumber" }
+        val context = ProjectContext(venueId, "FL-${UUID.randomUUID()}")
+        repositories.floorPlans.save(FloorEntity(context.floorId, venueId, name, levelNumber = levelNumber,
+            widthMetres = 42.0, heightMetres = 28.0, createdAtEpochMillis = now, updatedAtEpochMillis = now))
         context
     }
 

@@ -38,10 +38,9 @@ object MapperRoomCatalog {
 }
 
 private fun SavedFloorMap.mapperSource(): JsonObject? = runCatching {
-    val notes=venue.notes.orEmpty()
-    if(!notes.startsWith("TURN-Mapper ")) return null
-    val start=notes.lastIndexOf("\n{"); if(start<0) return null
-    val source=Json.parseToJsonElement(notes.substring(start+1)).jsonObject
+    // Each floor carries its own mapper source (the 4 -> 5 migration moved older ones off the venue notes),
+    // so one floor's rooms can never be applied to another floor of the same building.
+    val source=Json.parseToJsonElement(floor.mapperSourceJson ?: return null).jsonObject
     val f=source.getValue("floors").jsonArray.single().jsonObject
     require(kotlin.math.abs(f.getValue("widthMetres").jsonPrimitive.double-floor.widthMetres)<.001 &&
         kotlin.math.abs(f.getValue("heightMetres").jsonPrimitive.double-floor.heightMetres)<.001)

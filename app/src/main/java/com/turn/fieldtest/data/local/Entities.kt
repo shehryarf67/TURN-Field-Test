@@ -42,6 +42,8 @@ data class FloorEntity(
     val imageYAxisPointsDown: Boolean = true,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
+    /** TURN-Mapper source for this floor (schema 5); older imports kept it in the venue notes. */
+    val mapperSourceJson: String? = null,
 )
 
 @Entity(

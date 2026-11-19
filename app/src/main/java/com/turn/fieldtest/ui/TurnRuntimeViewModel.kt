@@ -437,7 +437,21 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    fun importMapperPackage(asset: String? = null, uri: Uri? = null, replace: Boolean = false) {
+    /** Adds an empty floor to [venueId] and opens it in Map setup. */
+    fun addFloor(venueId: String, floorName: String, levelNumber: Int) {
+        if (appState.mode != DataMode.REAL_DEVICE || !projectChangeAllowed() || appState.hasUnsavedMapChanges) return
+        appState.projectBusy = true
+        viewModelScope.launch {
+            try {
+                val context = projects.addFloor(venueId, floorName, levelNumber, System.currentTimeMillis())
+                loadProject(context)
+                appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.FLOOR_EDITOR)
+            } catch (error: Exception) { appState.projectStatus = "Could not add floor: ${error.message}" }
+            finally { appState.projectBusy = false }
+        }
+    }
+
+    fun importMapperPackage(asset: String? = null, uri: Uri? = null, replace: Boolean = false, intoVenueId: String? = null) {
         if(appState.mode != DataMode.REAL_DEVICE || appState.projectBusy || appState.sessionLocked || appState.liveRunning ||
             appState.surveyRunning || appState.liveStarting || appState.surveyStarting || appState.liveCloseFailed || appState.surveyCloseFailed ||
             appState.diagnosticWalkRunning || appState.startupLoading || appState.realEvaluationBusy || appState.hasUnsavedMapChanges) return
@@ -454,11 +468,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     }
                     val text=bytes.toString(Charsets.UTF_8)
                     val parsed=MapperPackage.parse(text)
-                    MapperImporter(app.database,app).install(parsed,text,replace).also {committed=true}
+                    MapperImporter(app.database,app).install(parsed,text,replace,intoVenueId).also {committed=true}
                 }
                 loadProject(context)
                 appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.LIVE_LOCATE)
-                appState.projectStatus="Mapper floor imported · supplied metric scale · collect new Wi-Fi fingerprints"
+                appState.projectStatus=if(intoVenueId!=null) "Floor added to the building · collect Wi-Fi fingerprints on it" else "Mapper floor imported · supplied metric scale · collect new Wi-Fi fingerprints"
             } catch(e: Exception) {
                 if(e is kotlinx.coroutines.CancellationException) throw e
                 appState.projectStatus=if(committed) "Mapper floor saved, but opening failed: ${e.message}. Reopen it from Buildings."
@@ -518,6 +532,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.draftWalkablePolygon.clear()
         appState.draftWalls.clear()
         appState.referencePoints.clear(); appState.suggestedSurveyPoints.clear()
+        // Magnetic walk picks name this floor's points; another floor's ids would break the picker.
+        appState.magneticWalkFromId = null; appState.magneticWalkToId = null
+        appState.magneticWalkStatus = "Choose two survey points along one corridor, stand at the first, then start"
         appState.selectedSurveyReferencePointId = ""
         appState.qrAnchors.clear()
         appState.calibrationPoints.clear()

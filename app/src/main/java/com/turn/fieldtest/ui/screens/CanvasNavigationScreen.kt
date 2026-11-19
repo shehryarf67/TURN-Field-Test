@@ -261,11 +261,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.primary)
                         Text("Search places", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                        Surface(onClick = { state.selectDestination(TurnDestination.VENUES) }, shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                            Text(state.floorName, Modifier.padding(horizontal = 10.dp, vertical = 6.dp).widthIn(max = 96.dp),
-                                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        FloorSwitcher(state, actions)
                         IconButton(onClick = { state.navigationFullscreen = true }, Modifier.size(40.dp)) { Icon(Icons.Outlined.Fullscreen, "Full screen map") }
                         IconButton(onClick = { sheet = "options" }, Modifier.size(40.dp)) { Icon(Icons.Outlined.MoreVert, "Map options") }
                     }

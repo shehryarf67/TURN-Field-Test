@@ -25,7 +25,7 @@ interface VenueDao {
 @Dao
 interface FloorPlanDao {
     @Query("""
-        SELECT v.id AS venueId, f.id AS floorId, v.name AS venueName, f.name AS floorName,
+        SELECT v.id AS venueId, f.id AS floorId, v.name AS venueName, f.name AS floorName, f.levelNumber AS floorLevel,
         (SELECT COUNT(*) FROM reference_points r WHERE r.floorId = f.id) AS referencePointCount,
         (SELECT COUNT(DISTINCT a.referencePointId) FROM aggregated_wifi_fingerprints a
          JOIN reference_points r ON r.id = a.referencePointId WHERE r.floorId = f.id) AS fingerprintPointCount,
@@ -39,7 +39,8 @@ interface FloorPlanDao {
 
     @Query("""
         SELECT EXISTS(SELECT 1 FROM survey_sessions WHERE floorId = :floorId)
-        OR EXISTS(SELECT 1 FROM positioning_sessions WHERE venueId = :venueId)
+        OR EXISTS(SELECT 1 FROM positioning_sessions WHERE venueId = :venueId
+            AND (initialFloorId = :floorId OR initialFloorId IS NULL))
         OR EXISTS(SELECT 1 FROM test_checkpoints WHERE floorId = :floorId)
     """)
     suspend fun hasMeasurements(floorId: String, venueId: String): Boolean

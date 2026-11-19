@@ -48,7 +48,12 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
         Text(if (magneticMode) "Magnetic survey" else "Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(if (magneticMode) "Pick two points on one corridor · Stand at the first · Walk straight · Finish at the second"
             else "Select a point · Stand still · Collect · Save", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        Text("${state.venueName} · ${state.floorName}", style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Bounded so a long building name can never squeeze the floor switcher out of the row.
+            Text(state.venueName, style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            FloorSwitcher(state, actions)
+        }
         if (!magneticMode && state.referencePoints.isNotEmpty()) {
             Text("${surveyed.size} of ${state.referencePoints.size} points surveyed", style = MaterialTheme.typography.labelLarge)
             LinearProgressIndicator(progress = { surveyed.size / state.referencePoints.size.toFloat() }, modifier = Modifier.fillMaxWidth())

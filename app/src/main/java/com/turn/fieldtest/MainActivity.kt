@@ -113,6 +113,8 @@ class MainActivity : ComponentActivity() {
                 actions = TurnAppActions(
                     onMapperImportRequested = { mapperPackageLauncher.launch(arrayOf("application/json","application/octet-stream")) },
                     onBundledMapperImport = { floor,replace -> runtimeViewModel.importMapperPackage(asset="mapper/$floor.json",replace=replace) },
+                    onBundledFloorAddedToBuilding = { floor, venue -> runtimeViewModel.importMapperPackage(asset = "mapper/$floor.json", intoVenueId = venue) },
+                    onFloorAdded = runtimeViewModel::addFloor,
                     onModeChanged = { mode ->
                         runtimeViewModel.setMode(mode)
                         if (mode == DataMode.REAL_DEVICE && runtimeViewModel.appState.mode == mode) {

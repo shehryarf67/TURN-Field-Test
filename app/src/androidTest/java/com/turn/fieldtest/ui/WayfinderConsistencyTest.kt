@@ -47,8 +47,8 @@ class WayfinderConsistencyTest {
         destinations.addAll(p.places.map {poi->val n=nodes.getValue(poi.nodeId);PointOfInterestEntity("preview-${poi.id}",p.floorId,poi.name,poi.category,n.point.x,n.point.y)})
         navigationNodes.addAll(p.nodes.map {NavigationNodeEntity(it.id,p.floorId,it.point.x,it.point.y,pois[it.id]?.let {poi->"preview-${poi.id}"})})
         navigationEdges.addAll(p.edges.map {NavigationEdgeEntity(it.id,p.floorId,it.from,it.to,it.distanceMetres,bidirectional=it.bidirectional,accessible=it.accessible)})
-        val saved=SavedFloorMap(VenueEntity("visual-venue","University",notes="TURN-Mapper visual\n$text",createdAtEpochMillis=1,updatedAtEpochMillis=1),
-            FloorEntity(p.floorId,"visual-venue",p.floorId,4,p.width,p.height,createdAtEpochMillis=1,updatedAtEpochMillis=1),null,emptyList(),emptyList(),emptyList(),emptyList(),false,destinations=destinations.toList())
+        val saved=SavedFloorMap(VenueEntity("visual-venue","University",createdAtEpochMillis=1,updatedAtEpochMillis=1),
+            FloorEntity(p.floorId,"visual-venue",p.floorId,4,p.width,p.height,createdAtEpochMillis=1,updatedAtEpochMillis=1,mapperSourceJson=text),null,emptyList(),emptyList(),emptyList(),emptyList(),false,destinations=destinations.toList())
         destinations.addAll(saved.missingMapperRooms());destinationAreas.addAll(saved.copy(destinations=destinations.toList()).destinationAreas())
         p.anchors.forEachIndexed {i,a->referencePoints.add(MapPointUi("visual-rp-$i",floorName,Offset(a.x.toFloat(),a.y.toFloat()),"Stair landing ${i+1}"))}
         selectedSurveyReferencePointId=referencePoints.first().id

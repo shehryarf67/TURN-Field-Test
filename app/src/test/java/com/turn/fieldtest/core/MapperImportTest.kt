@@ -26,8 +26,8 @@ class MapperImportTest {
             val nodes=source.getValue("nodes").jsonArray.associate {e->e.jsonObject.let {it.getValue("id").jsonPrimitive.content to it}}
             val places=source.getValue("pois").jsonArray.map {e->e.jsonObject.let {p->val n=nodes.getValue(p.getValue("nodeId").jsonPrimitive.content)
                 PointOfInterestEntity("fixture-${p.getValue("id").jsonPrimitive.content}","floor-${file.name}",p.getValue("name").jsonPrimitive.content,"ROOM",n.getValue("x").jsonPrimitive.double,n.getValue("y").jsonPrimitive.double)}}
-            val saved=SavedFloorMap(VenueEntity("v","Test",notes="TURN-Mapper test\n${file.readText()}",createdAtEpochMillis=1,updatedAtEpochMillis=1),
-                FloorEntity("floor-${file.name}","v",file.name,0,floor.getValue("widthMetres").jsonPrimitive.double,floor.getValue("heightMetres").jsonPrimitive.double,createdAtEpochMillis=1,updatedAtEpochMillis=1),
+            val saved=SavedFloorMap(VenueEntity("v","Test",createdAtEpochMillis=1,updatedAtEpochMillis=1),
+                FloorEntity("floor-${file.name}","v",file.name,0,floor.getValue("widthMetres").jsonPrimitive.double,floor.getValue("heightMetres").jsonPrimitive.double,createdAtEpochMillis=1,updatedAtEpochMillis=1,mapperSourceJson=file.readText()),
                 null,emptyList(),emptyList(),emptyList(),emptyList(),false,destinations=places)
             val completed=saved.copy(destinations=places+saved.missingMapperRooms())
             assertEquals(catalog.size,completed.destinationAreas().size,"Every label gets a stable place on ${file.name}")

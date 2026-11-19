@@ -9,9 +9,11 @@ import java.io.File
 import java.util.UUID
 
 class MapperImporter(private val db: TurnDatabase, private val context: Context) {
-    suspend fun install(p: MapperPackage, sourceJson: String, replaceExisting: Boolean): ProjectContext {
+    /** Installs [p] as a new building, or as another floor of building [intoVenueId] when given. */
+    suspend fun install(p: MapperPackage, sourceJson: String, replaceExisting: Boolean, intoVenueId: String? = null): ProjectContext {
+        require(intoVenueId==null || !replaceExisting) { "Adding a floor to a building never replaces other maps" }
         val now=System.currentTimeMillis(); val prefix="MAPPER-${UUID.randomUUID()}"
-        val result=ProjectContext("$prefix-V", "$prefix-F")
+        val result=ProjectContext(intoVenueId ?: "$prefix-V", "$prefix-F")
         val file=File(context.filesDir,"$prefix.png")
         val obsoleteImages=mutableListOf<File>()
         try {
@@ -28,11 +30,22 @@ class MapperImporter(private val db: TurnDatabase, private val context: Context)
                     db.evaluationDao().deleteSamplesForVenue(venue.id)
                     db.venueDao().delete(venue)
                 }
-                db.venueDao().upsert(VenueEntity(result.venueId,p.name,
-                    notes="TURN-Mapper ${p.revision}\n${p.provenance}\n$sourceJson",createdAtEpochMillis=now,updatedAtEpochMillis=now))
+                if(intoVenueId==null) db.venueDao().upsert(VenueEntity(result.venueId,p.name,
+                    notes="TURN-Mapper ${p.revision}\n${p.provenance}",createdAtEpochMillis=now,updatedAtEpochMillis=now))
+                else {
+                    val building=requireNotNull(db.venueDao().get(intoVenueId)) {"Saved building is unavailable"}
+                    val siblings=db.floorPlanDao().observeFloors(intoVenueId).first()
+                    require(siblings.none { it.name.equals(p.floorId,ignoreCase=true) }) { "${p.floorId} is already a floor of this building" }
+                    // floors has a unique (venueId, levelNumber) index; @Upsert would otherwise skip the floor silently.
+                    require(siblings.none { it.levelNumber==p.level }) { "This building already has a floor at level ${p.level}" }
+                    // A building named after its first floor ("… - C-F4") would mislabel the new one; drop that suffix.
+                    siblings.firstOrNull { building.name.endsWith(" - ${it.name}") }?.let { first ->
+                        db.venueDao().upsert(building.copy(name=building.name.removeSuffix(" - ${first.name}"),updatedAtEpochMillis=now))
+                    }
+                }
                 val dao=db.floorPlanDao()
                 dao.upsertFloor(FloorEntity(result.floorId,result.venueId,p.floorId,p.level,p.width,p.height,
-                    createdAtEpochMillis=now,updatedAtEpochMillis=now))
+                    createdAtEpochMillis=now,updatedAtEpochMillis=now,mapperSourceJson=sourceJson))
                 dao.upsertAsset(FloorPlanAssetEntity("$prefix-image",result.floorId,android.net.Uri.fromFile(file).toString(),"image/png",importedAtEpochMillis=now))
                 p.regions.forEachIndexed { i, region -> dao.upsertWalkableRegion(WalkableRegionEntity("$prefix-region-$i",result.floorId,"Walkable ${i+1}",
                     kotlinx.serialization.json.JsonArray(region.vertices.map { v -> kotlinx.serialization.json.buildJsonObject {
