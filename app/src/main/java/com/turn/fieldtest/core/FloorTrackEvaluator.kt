@@ -16,11 +16,14 @@ data class ConfirmedFloor(val atNanos: Long, val floorId: String)
  *
  * - [accuracy]: share of evaluated time on the right floor (time in transit and its grace window is not evaluated;
  *   time before the first decision counts as wrong). NaN when nothing could be evaluated.
- * - [latenciesSeconds]: per real floor change, seconds from ARRIVED to the first confirmed decision for the new floor
- *   (negative when confirmed before the walker marked arrival).
+ * - [latenciesSeconds]: per real floor change, seconds from ARRIVED to the first confirmed decision onto the new floor
+ *   made at or after the transit start (VERTICAL_START; for a direct jump, the start of its grace window). Negative
+ *   when confirmed before the walker marked arrival.
  * - [falseChangesPerHour]: confirmed changes to a floor that was neither the truth nor an end of the transit under way.
  * - [reverts]: confirmed changes undone within the revert window.
- * - [missedChanges]: real floor changes never confirmed before the next change or the end of the trace.
+ * - [missedChanges]: real floor changes never confirmed before the next change or the end of the trace. A tracker that
+ *   already sat on the arrival floor before the transit started made no decision for this change, so it is missed too
+ *   (the wrong floor before departure is already scored by [accuracy]).
  */
 data class FloorTrackMetrics(
     val accuracy: Double,
@@ -36,8 +39,14 @@ object FloorTrackEvaluator {
     const val REVERT_SECONDS = 30.0
     private const val NANOS = 1_000_000_000.0
 
-    /** A truth floor change: ends [departure] and [arrival], scored leniently over [windowStart, windowEnd). */
-    private class Change(val departure: String?, val arrival: String?, val arrivalNanos: Long, val windowStart: Long, val windowEnd: Long)
+    /**
+     * A truth floor change: ends [departure] and [arrival], scored leniently over [windowStart, windowEnd).
+     * Only decisions at or after [decideFrom] (the transit start, or [windowStart] for a direct jump) count for latency.
+     */
+    private class Change(
+        val departure: String?, val arrival: String?, val arrivalNanos: Long,
+        val windowStart: Long, val windowEnd: Long, val decideFrom: Long,
+    )
 
     fun evaluate(
         truth: List<FloorTruth>, confirmed: List<ConfirmedFloor>, endNanos: Long,
@@ -61,11 +70,12 @@ object FloorTrackEvaluator {
         for (s in segments) {
             if (s.floorId == null) { if (transitStart == null) transitStart = s.startNanos; continue }
             if (transitStart != null || (lastFloor != null && s.floorId != lastFloor)) {
-                changes += Change(lastFloor, s.floorId, s.startNanos, (transitStart ?: s.startNanos) - grace, s.startNanos + grace)
+                val windowStart = (transitStart ?: s.startNanos) - grace
+                changes += Change(lastFloor, s.floorId, s.startNanos, windowStart, s.startNanos + grace, transitStart ?: windowStart)
             }
             lastFloor = s.floorId; transitStart = null
         }
-        if (transitStart != null) changes += Change(lastFloor, null, endNanos, transitStart - grace, endNanos)
+        if (transitStart != null) changes += Change(lastFloor, null, endNanos, transitStart - grace, endNanos, transitStart)
 
         fun truthAt(t: Long): String? = segments.lastOrNull { it.startNanos <= t }?.floorId
         fun confirmedAt(t: Long): String? = decisions.lastOrNull { it.atNanos <= t }?.floorId
@@ -84,13 +94,15 @@ object FloorTrackEvaluator {
             }
         }
 
-        // Latency: first time in the change's span (until the next change's window) that the confirmed floor is the arrival.
+        // Latency: the first decision onto the arrival floor made from the transit start until the next change's window.
+        // Already being on the arrival floor before the transit started is not a decision for this change: it is missed.
         val latencies = mutableListOf<Double>(); var missed = 0
         changes.forEachIndexed { i, c ->
             if (c.departure == null || c.arrival == null || c.departure == c.arrival) return@forEachIndexed
             val spanEnd = changes.getOrNull(i + 1)?.windowStart ?: endNanos
-            val hit = if (confirmedAt(c.windowStart) == c.arrival) c.windowStart
-                else decisions.firstOrNull { it.atNanos > c.windowStart && it.atNanos < spanEnd && it.floorId == c.arrival }?.atNanos
+            val before = decisions.lastOrNull { it.atNanos < c.decideFrom }?.floorId
+            val hit = if (before == c.arrival) null
+                else decisions.firstOrNull { it.atNanos >= c.decideFrom && it.atNanos < spanEnd && it.floorId == c.arrival }?.atNanos
             if (hit == null) missed++ else latencies += (hit - c.arrivalNanos) / NANOS
         }
 

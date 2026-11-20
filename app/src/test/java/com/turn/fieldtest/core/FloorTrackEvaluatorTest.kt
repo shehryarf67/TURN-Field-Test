@@ -58,6 +58,30 @@ class FloorTrackEvaluatorTest {
     }
 
     @Test
+    fun stuckTrackerMissesBothChangesWithoutNegativeLatency() {
+        val truth = listOf(on(0, "F1"), transit(100), on(115, "F2"), transit(300), on(315, "F1"))
+        val m = FloorTrackEvaluator.evaluate(truth, listOf(at(0, "F1")), s(600))
+        assertEquals(2, m.missedChanges)
+        assertEquals(emptyList(), m.latenciesSeconds)
+        assertEquals(0, m.falseChanges)
+    }
+
+    @Test
+    fun trackerAlreadyOnTheArrivalFloorBeforeDepartureMissesTheChange() {
+        // Wrongly on F2 from the start: no decision is made for the change, so it is missed, and accuracy pays for 0-95 s.
+        val m = FloorTrackEvaluator.evaluate(stairsUp, listOf(at(0, "F2")), s(600))
+        assertEquals(1, m.missedChanges)
+        assertEquals(emptyList(), m.latenciesSeconds)
+        assertEquals(480.0 / 575.0, m.accuracy, 1e-12)
+        // Switching to F2 in the grace before the transit start is not a decision made for the change either.
+        val early = FloorTrackEvaluator.evaluate(stairsUp, listOf(at(0, "F1"), at(97, "F2")), s(600))
+        assertEquals(1, early.missedChanges)
+        assertEquals(emptyList(), early.latenciesSeconds)
+        // A decision exactly at the transit start does count.
+        assertEquals(listOf(-15.0), FloorTrackEvaluator.evaluate(stairsUp, listOf(at(0, "F1"), at(100, "F2")), s(600)).latenciesSeconds)
+    }
+
+    @Test
     fun abortedTransitIsNotAChangeButWanderingIsFalse() {
         val m = FloorTrackEvaluator.evaluate(listOf(on(0, "F1"), transit(100), on(120, "F1")),
             listOf(at(0, "F1"), at(105, "F2"), at(110, "F1")), s(600))
