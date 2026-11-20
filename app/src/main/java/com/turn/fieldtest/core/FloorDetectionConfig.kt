@@ -46,17 +46,36 @@ data class BarometerConfig(
     val stepWindowSeconds: Double = 1.0,
     /** "Otherwise flat": the rate over the [rateWindowSeconds] before the step stays at or below this (no motion). */
     val stepFlatRateMps: Double = 0.12,
-    /** The largest single-sample jump must carry at least this share of the change; a fast ramp is not a step. */
-    val stepSharpFraction: Double = 0.5,
     /**
-     * A step is absorbed tentatively and confirmed only after the raw pressure has held its new level this long; a
-     * step that keeps trending (a lift ride starting) is handed back to the height.
+     * "Sharp": a step happens within [stepSharpSeconds]. To become a candidate, the median changes by at least this
+     * share of the change within that span (at least one sample interval); to be confirmed, the raw means over that
+     * span either side of the jump differ by at least this share of the confirmed size. A ride is a ramp, not a jump.
+     */
+    val stepSharpFraction: Double = 0.5,
+    /** The span a step happens within; the jump is where the raw means this long either side of it differ most. */
+    val stepSharpSeconds: Double = 0.2,
+    /**
+     * A step is absorbed tentatively and judged this long after its jump; a step that is not a level shift at the jump
+     * (the start of a lift ride or a fast climb) is handed back to the height. Must exceed [stepLevelWindowSeconds]
+     * plus the median delay, so the judging window is complete and a step straight back has been seen.
      */
     val stepConfirmSeconds: Double = 2.0,
-    /** "Held its new level": the trend after the step, in the step's direction, stays at or below this. */
+    /**
+     * Raw samples this long either side of the jump (never across another step) are fitted with a line with one common
+     * slope plus a shift at the jump. A ride is continuous, so its fitted shift is near zero however it bends.
+     */
+    val stepLevelWindowSeconds: Double = 1.0,
+    /** A fitted shift of at least this is a level shift whatever follows: a ride may start right after a real step. */
+    val stepJumpHpa: Double = 0.16,
+    /** A smaller fitted shift, down to this share of the step (or of [stepRejectionHpa]), is one only if flat after. */
+    val stepLevelShiftFraction: Double = 0.5,
+    /** "Flat after": the trend from the jump until judged (or the next step), in its direction, is at most this. */
     val stepFlatAfterRateMps: Double = 0.5,
-    /** "Sharp": the three raw samples either side of the largest jump differ by at least this share of the change. */
-    val stepLevelShiftFraction: Double = 0.65,
+    /**
+     * A step back while a step is pending closes a pulse (a door opening and closing) when the level after it is within
+     * this share of the rise from the level before; both steps are kept and the offset ends where it began.
+     */
+    val stepPulseMatchFraction: Double = 0.5,
     val staleAfterSeconds: Double = 3.0,
     val driftTauSeconds: Double = 300.0,
     val driftQuietSeconds: Double = 20.0,
@@ -75,9 +94,12 @@ data class BarometerConfig(
         require(stepWindowSeconds > 0.0)
         require(stepFlatRateMps >= 0.0)
         require(stepSharpFraction in 0.0..1.0)
-        require(stepConfirmSeconds > 0.0)
-        require(stepFlatAfterRateMps >= 0.0)
+        require(stepSharpSeconds > 0.0 && stepSharpSeconds < stepWindowSeconds)
+        require(stepLevelWindowSeconds > 0.0 && stepConfirmSeconds > stepLevelWindowSeconds)
+        require(stepJumpHpa > 0.0)
         require(stepLevelShiftFraction in 0.0..1.0)
+        require(stepFlatAfterRateMps >= 0.0)
+        require(stepPulseMatchFraction in 0.0..1.0)
         require(staleAfterSeconds > 0.0)
         require(driftTauSeconds > 0.0)
         require(driftQuietSeconds > 0.0)

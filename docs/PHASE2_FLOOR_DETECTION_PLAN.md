@@ -160,7 +160,11 @@ How `BarometerTracker` processes samples:
 - It drops values that are not finite or outside 300-1100 hPa.
 - Smoothing is a 5-sample median, then an EMA with `alpha = 1 - exp(-dt/tau)`.
 - A gap longer than 5 s re-seeds the smoothing and keeps the anchor.
-- **Step rejection** (from *evidence*): a change of more than 0.15 hPa within 1 s while the 4 s rate is otherwise flat is absorbed into the offset and flagged as a `discontinuity`. This covers door, HVAC and stairwell pressurisation steps.
+- **Step rejection** (from *evidence*) covers door, HVAC and stairwell pressurisation steps. Every window is in seconds, so it behaves the same at any sample rate (SENSOR_DELAY_NORMAL is only a hint; phones deliver 5-25 Hz).
+  - *Candidate:* the median moves more than 0.15 hPa from the smoothed pressure 1 s earlier while the 4 s rate was flat (≤ 0.12 m/s), and half of that change happens within 0.2 s. The jump is located on the raw samples (the sample boundary where the raw means over 0.2 s either side differ most), and the step is absorbed into the offset at once, sized from raw means either side of the jump. This is only tentative.
+  - *Judgement,* 2 s after the jump, on raw samples that never reach back across an earlier step or forward across a later one. The step must be sharp: the raw means over 0.2 s either side of the jump differ by at least half its size. Within 1 s either side, a line with one common slope plus a shift at the jump is fitted. A lift ride or fast climb is continuous, so that fitted shift is near zero however the ride bends. A door step keeps its full size even if a ride starts right after it, so what pressure does after the jump does not decide. A fitted shift of at least 0.16 hPa is a step. A smaller one, down to half the step, counts only if the pressure is flat around it: no trend above 0.5 m/s in the 2 s before it, nor after it in its direction.
+  - *Outcome:* a confirmed step is re-sized from the level after minus the mean in the 2 s before. The level after is the mean since the jump when the pressure held level, otherwise a line over the 1 s after the jump taken at the jump, so a ride that follows is not counted. It is flagged as a `discontinuity`. A rejected step is handed back to the height retroactively (smoothed pressure and rates are recomputed as if it had never been absorbed), so a whole lift ride is measured.
+  - *Pulses:* a step back while a step is still pending (a door opening and closing) is judged together with it. If the level after it is within half the rise of the level before, both are kept and cancel exactly: nothing is handed back. If the step back never became a candidate, the first step is handed back instead, so the pulse comes and goes in the height with no net change.
 - Height = −ΔP / (P/8434), so hPa per metre ≈ 0.112 at 945 hPa.
 - Leaky drift compensation (τ 300 s) runs only after 20 s with |rate| ≤ 0.03 m/s **and** no pending unexplained height.
 
@@ -205,6 +209,7 @@ The no-barometer cues:
 - a 0.39 hPa ramp at 945 hPa gives 3.5 ± 0.3 m;
 - `anchor()` zeroes the height;
 - a 0.3 hPa door step becomes a discontinuity, not height;
+- a fast lift ride is height, not a discontinuity;
 - 10 min at 1.5 hPa/h gives |h| < 0.6 m;
 - STALE after 3 s; UNAVAILABLE when the sensor is absent.
 
@@ -213,6 +218,9 @@ The no-barometer cues:
 - two floors gives {2};
 - a lift down 2 floors with no steps gives LIFT;
 - **no event** for: a door pulse, a persistent 0.15 hPa HVAC step, a 1.75 m mezzanine, 30 min of noise plus drift, or a ramp that reverses halfway;
+- no event, and no floor-sized height, for ±0.2/±0.3 hPa door pulses of 0.4-1.2 s at 5, 8, 10, 15 and 25 Hz;
+- lifts of ±1/±2 floors at 1.0/1.6/2.5 m/s are never absorbed as a door step, at 5, 10 and 25 Hz;
+- a ±0.3 hPa step 0.5-3 s before a 2-floor lift ride in the same direction gives exactly {2} floors, at 5, 10 and 25 Hz;
 - a 1.5-floor change gives {1, 2}.
 
 `MotionContextTrackerTest`:
@@ -625,7 +633,7 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 
 | Group | Value |
 |---|---|
-| Barometer | valid 300-1100 hPa; out-of-order tolerance 50 ms; median 5; EMA τ 1.0 s; gap reset 5 s; scale height 8434 m; step rejection > 0.15 hPa within 1 s while flat; STALE after 3 s; drift τ 300 s after 20 s with \|rate\| ≤ 0.03 m/s |
+| Barometer | valid 300-1100 hPa; out-of-order tolerance 50 ms; median 5; EMA τ 1.0 s; gap reset 5 s; scale height 8434 m; step candidate > 0.15 hPa within 1 s while flat (≤ 0.12 m/s), half of it within 0.2 s; judged 2 s after the jump on ±1 s of raw samples, kept when the fitted shift is ≥ 0.16 hPa, or ≥ half the step with no trend above 0.5 m/s around it; a step back within half the rise closes a pulse; STALE after 3 s; drift τ 300 s after 20 s with \|rate\| ≤ 0.03 m/s |
 | Vertical detector | floor height 3.5 m (doc §4.3 pending); rate window 4 s; enter 0.12 m/s; exit 0.05 m/s; settle 3 s; minimum 0.6 floor (2.1 m); integer tolerance 0.35; lift ≥ 0.6 m/s with ≤ 2 steps; max segment 180 s; return-to-start 0.5 m |
 | No-barometer cues | stairs: ≥ 6 steps and ≥ max(5 s, 0.4·travelTime) with ≥ 0.5 portal weight; lift: ≥ 8 s with ≤ 1 step, emitted on the next step; seed share 0.2 stairs / 0.3 lift; cooldown 20 s |
 | Transition | barometric share 0.85; outside-portal likelihood 0.1 (1.0 for seeds); unverified factor 0.5; slack 1.0 m; portal memory 10 steps; stairs stride factor 0.5; exit σ min(r/2, 1 m); 20 exit tries; max 4 hops; ≥ 10 particles per floor; prune below 1e-3 |
