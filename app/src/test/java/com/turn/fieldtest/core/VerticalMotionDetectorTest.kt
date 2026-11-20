@@ -4,6 +4,7 @@ import com.turn.fieldtest.core.replay.PressureTrace
 import com.turn.fieldtest.core.replay.SyntheticPressure
 import com.turn.fieldtest.core.replay.nanos
 import com.turn.fieldtest.core.replay.replayPressure
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -12,7 +13,7 @@ import kotlin.test.assertTrue
 
 class VerticalMotionDetectorTest {
     private val config = FloorDetectionConfig()
-    private val seeds = 1L..5L
+    private val seeds = 1L..20L
 
     /** Latest acceptable emission after the climb: the rate window empties, settling holds, plus 1 s, plus 2 s of EMA lag and rate noise. */
     private val settleBudget = nanos(config.vertical.rateWindowSeconds + config.vertical.settleSeconds + 3.0)
@@ -70,6 +71,51 @@ class VerticalMotionDetectorTest {
             assertEquals(setOf(2), event.floorCandidates, "seed $seed")
             assertEquals(VerticalKindHint.LIFT, event.kind, "seed $seed")
             assertTrue(event.heightDeltaMetres < -6.0)
+        }
+    }
+
+    @Test
+    fun theStartOfALiftRideIsNeverAbsorbedAsADoorStep() {
+        for (speed in listOf(1.0, 1.6, 2.5)) {
+            for (seed in 1L..40L) {
+                for (floors in listOf(1, -1, 2, -2)) {
+                    val trace = SyntheticPressure(seed).walk(8.0).stand(5.0).lift(floors, speed).stand(6.0).walk(10.0).build()
+                    val replay = replayPressure(trace, config)
+                    val label = "$floors floors at $speed m/s, seed $seed"
+                    assertTrue(replay.states.none { it.discontinuity }, "$label: absorbed as a discontinuity")
+                    val event = replay.events.single()
+                    assertEquals(if (floors > 0) VerticalDirection.UP else VerticalDirection.DOWN, event.direction, label)
+                    assertEquals(setOf(abs(floors)), event.floorCandidates, label)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aSecondFlightRightAfterAnEventIsFoundAfterTheBarometerIsReAnchored() {
+        for (seed in 1L..10L) {
+            val firstEvent = events(SyntheticPressure(seed).walk(10.0).stairs(1).mark("top").walk(20.0).build()).single()
+            for (pauseSeconds in listOf(0.0, 1.0)) {
+                // The same seed draws the same noise, so the first event lands at the same instant in the longer trace.
+                val probe = SyntheticPressure(seed).walk(10.0).stairs(1).mark("top").build()
+                val untilEvent = (firstEvent.endNanos - probe.mark("top")) / 1e9 + pauseSeconds
+                val trace = SyntheticPressure(seed).walk(10.0).stairs(1).walk(untilEvent).stairs(1).walk(20.0).build()
+                val tracker = BarometerTracker(config.barometer, sensorPresent = true)
+                val detector = VerticalMotionDetector(config.vertical)
+                val found = mutableListOf<VerticalEvent>()
+                for (sample in trace.samples) {
+                    val state = tracker.add(sample.timestampNanos, sample.hpa) ?: continue
+                    val event = detector.onBarometer(state, trace.stepsInWindow(state.timestampNanos, config.vertical.rateWindowSeconds))
+                    if (event != null) {
+                        found += event
+                        tracker.anchor(state.timestampNanos) // what Step 5 does on an APPLIED event; no detector reset
+                    }
+                }
+                val label = "seed $seed, pause $pauseSeconds s"
+                assertEquals(firstEvent.endNanos, found.first().endNanos, "$label: the first event moved")
+                assertEquals(listOf(setOf(1), setOf(1)), found.map { it.floorCandidates }, label)
+                assertTrue(found.all { it.direction == VerticalDirection.UP }, label)
+            }
         }
     }
 

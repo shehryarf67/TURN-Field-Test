@@ -3,6 +3,7 @@ package com.turn.fieldtest.core
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.roundToInt
 
 enum class VerticalDirection { UP, DOWN, UNKNOWN }
@@ -29,17 +30,19 @@ data class VerticalEvent(
 /**
  * Finds floor changes in the barometric height: IDLE -> MOVING when |rate| reaches the enter threshold, MOVING ->
  * SETTLING when it drops to the exit threshold, and an event once settling has held for the settle time; only a
- * rate back at the enter threshold resumes MOVING (hysteresis against rate noise). Call [reset] after re-anchoring
- * the barometer mid-segment.
+ * rate back at the enter threshold resumes MOVING (hysteresis against rate noise). Heights come from the smoothed
+ * pressure, not from the tracker's anchored height, so re-anchoring the barometer at any time (for example right after
+ * an event) needs no [reset]; that only drops an open segment.
  */
 class VerticalMotionDetector(private val config: VerticalMotionConfig) {
     /** BLOCKED follows an over-long segment: nothing starts until the rate has dropped to the exit threshold. */
     private enum class Phase { IDLE, MOVING, SETTLING, BLOCKED }
 
-    private val heights = ArrayDeque<Pair<Long, Double>>()
+    /** Smoothed pressure over the rate window, with absorbed discontinuities already removed. */
+    private val pressures = ArrayDeque<Pair<Long, Double>>()
     private var phase = Phase.IDLE
     private var startNanos = 0L
-    private var startHeight = 0.0
+    private var startHpa = 0.0
     private var settleSince = 0L
     private var peakRate = 0.0
     private var maxSteps = 0
@@ -56,16 +59,16 @@ class VerticalMotionDetector(private val config: VerticalMotionConfig) {
     fun onBarometer(state: BarometerState, stepsInWindow: Int): VerticalEvent? {
         require(stepsInWindow >= 0)
         val now = state.timestampNanos
-        val height = state.heightSinceAnchorMetres
+        val hpa = state.smoothedHpa
         val rate = abs(state.verticalRateMps)
-        heights.addLast(now to height)
+        pressures.addLast(now to hpa)
         val lookback = nanos(config.rateWindowSeconds)
-        while (heights.size >= 2 && heights[1].first <= now - lookback) heights.removeFirst()
+        while (pressures.size >= 2 && pressures[1].first <= now - lookback) pressures.removeFirst()
         when (phase) {
             Phase.IDLE -> if (rate >= config.enterRateMps) {
-                val start = heights.first()
+                val start = pressures.first()
                 startNanos = start.first
-                startHeight = start.second
+                startHpa = start.second
                 peakRate = 0.0
                 maxSteps = 0
                 movingSamples = 0
@@ -89,7 +92,7 @@ class VerticalMotionDetector(private val config: VerticalMotionConfig) {
                     phase = Phase.MOVING
                     accumulate(rate, stepsInWindow)
                 } else if (now - settleSince >= nanos(config.settleSeconds)) {
-                    return finish(now, height)
+                    return finish(now, hpa)
                 }
             }
         }
@@ -97,7 +100,7 @@ class VerticalMotionDetector(private val config: VerticalMotionConfig) {
     }
 
     fun reset() {
-        heights.clear()
+        pressures.clear()
         phase = Phase.IDLE
     }
 
@@ -119,9 +122,9 @@ class VerticalMotionDetector(private val config: VerticalMotionConfig) {
         else -> VerticalKindHint.ANY
     }
 
-    private fun finish(now: Long, height: Double): VerticalEvent? {
+    private fun finish(now: Long, hpa: Double): VerticalEvent? {
         phase = Phase.IDLE
-        val delta = height - startHeight
+        val delta = config.scaleHeightMetres * ln(startHpa / hpa)
         if (abs(delta) <= config.returnToStartMetres) return null
         val floors = abs(delta) / config.floorHeightMetres
         if (floors < config.minimumFloorFraction) return null

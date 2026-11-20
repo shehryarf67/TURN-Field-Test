@@ -38,6 +38,8 @@ class FloorDetectionConfigTest {
         assertFailsWith<IllegalArgumentException> { WifiFloorConfig(vetoesBeforeUncertain = 0) }
         assertFailsWith<IllegalArgumentException> { DecisionConfig(switchVote = 0.4) }
         assertFailsWith<IllegalArgumentException> { FloorDetectionConfig(vertical = VerticalMotionConfig(rateWindowSeconds = 5.0)) }
+        assertFailsWith<IllegalArgumentException> { FloorDetectionConfig(vertical = VerticalMotionConfig(scaleHeightMetres = 8000.0)) }
+        assertFailsWith<IllegalArgumentException> { BarometerConfig(stepLevelShiftFraction = 1.5) }
         assertFailsWith<IllegalArgumentException> { json.decodeFromString<FloorDetectionConfig>("""{"decision":{"hardSwitchVote":0.9}}""") }
     }
 }

@@ -19,6 +19,9 @@ data class FloorDetectionConfig(
         require(barometer.rateWindowSeconds == vertical.rateWindowSeconds) {
             "The detector looks back over the same window the tracker measures its rate on."
         }
+        require(barometer.scaleHeightMetres == vertical.scaleHeightMetres) {
+            "The detector converts pressure to height as the tracker does."
+        }
     }
 }
 
@@ -45,6 +48,15 @@ data class BarometerConfig(
     val stepFlatRateMps: Double = 0.12,
     /** The largest single-sample jump must carry at least this share of the change; a fast ramp is not a step. */
     val stepSharpFraction: Double = 0.5,
+    /**
+     * A step is absorbed tentatively and confirmed only after the raw pressure has held its new level this long; a
+     * step that keeps trending (a lift ride starting) is handed back to the height.
+     */
+    val stepConfirmSeconds: Double = 2.0,
+    /** "Held its new level": the trend after the step, in the step's direction, stays at or below this. */
+    val stepFlatAfterRateMps: Double = 0.5,
+    /** "Sharp": the three raw samples either side of the largest jump differ by at least this share of the change. */
+    val stepLevelShiftFraction: Double = 0.65,
     val staleAfterSeconds: Double = 3.0,
     val driftTauSeconds: Double = 300.0,
     val driftQuietSeconds: Double = 20.0,
@@ -63,6 +75,9 @@ data class BarometerConfig(
         require(stepWindowSeconds > 0.0)
         require(stepFlatRateMps >= 0.0)
         require(stepSharpFraction in 0.0..1.0)
+        require(stepConfirmSeconds > 0.0)
+        require(stepFlatAfterRateMps >= 0.0)
+        require(stepLevelShiftFraction in 0.0..1.0)
         require(staleAfterSeconds > 0.0)
         require(driftTauSeconds > 0.0)
         require(driftQuietSeconds > 0.0)
@@ -88,9 +103,12 @@ data class VerticalMotionConfig(
     val stairsStepShare: Double = 0.5,
     val maximumSegmentSeconds: Double = 180.0,
     val returnToStartMetres: Double = 0.5,
+    /** Converts the smoothed pressure to height; equals the tracker's, so segments do not depend on its anchor. */
+    val scaleHeightMetres: Double = 8434.0,
 ) {
     init {
         require(floorHeightMetres > 0.0)
+        require(scaleHeightMetres > 0.0)
         require(rateWindowSeconds in 1.0..30.0)
         require(exitRateMps > 0.0 && enterRateMps > exitRateMps)
         require(settleSeconds >= 0.0)

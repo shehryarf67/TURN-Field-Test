@@ -66,11 +66,25 @@ class BarometerTrackerTest {
 
     @Test
     fun aDoorStepIsADiscontinuityNotHeight() {
-        for (seed in 1L..5L) {
-            val trace = SyntheticPressure(seed).walk(10.0).pressureStep(0.3).walk(15.0).build()
-            val states = replayPressure(trace).states
-            assertEquals(1, states.count { it.discontinuity }, "seed $seed")
-            assertTrue(states.all { abs(it.heightSinceAnchorMetres) < 0.7 }, "seed $seed: the 0.3 hPa step alone would be 2.7 m")
+        for (seed in 1L..20L) {
+            for (step in listOf(0.3, -0.3)) {
+                val trace = SyntheticPressure(seed).walk(10.0).pressureStep(step).walk(15.0).build()
+                val states = replayPressure(trace).states
+                assertEquals(1, states.count { it.discontinuity }, "seed $seed, step $step")
+                assertTrue(states.all { abs(it.heightSinceAnchorMetres) < 0.7 }, "seed $seed: the $step hPa step alone would be 2.7 m")
+            }
+        }
+    }
+
+    @Test
+    fun aFastLiftRideIsHeightNotADiscontinuity() {
+        for (seed in 1L..40L) {
+            for (floors in listOf(2, -2)) {
+                val trace = SyntheticPressure(seed).walk(8.0).stand(5.0).lift(floors, speedMps = 2.5).stand(8.0).build()
+                val states = replayPressure(trace).states
+                assertTrue(states.none { it.discontinuity }, "seed $seed, $floors floors: the start of the ride was absorbed")
+                assertEquals(floors * 3.5, states.last().heightSinceAnchorMetres, 0.4, "seed $seed, $floors floors")
+            }
         }
     }
 
