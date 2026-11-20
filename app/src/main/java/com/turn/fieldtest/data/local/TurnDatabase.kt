@@ -57,7 +57,7 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun magneticDao(): MagneticDao
 
     companion object {
-        const val SCHEMA_VERSION = 5
+        const val SCHEMA_VERSION = 6
         const val DATABASE_NAME = "turn-field-test.db"
 
         fun build(context: Context, databaseName: String = DATABASE_NAME): TurnDatabase =
@@ -115,5 +115,16 @@ object TurnDatabaseMigrations {
             """.trimIndent())
         }
     }
-    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4,FROM_4_TO_5)
+    /** Additive: connector label, travel time, step-free flag and on-site verification. */
+    val FROM_5_TO_6 = object : Migration(5, 6) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `vertical_transitions` ADD COLUMN `label` TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE `vertical_transitions` ADD COLUMN `travelTimeSeconds` REAL NOT NULL DEFAULT 15.0")
+            db.execSQL("ALTER TABLE `vertical_transitions` ADD COLUMN `accessible` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `vertical_transitions` ADD COLUMN `verifiedOnSite` INTEGER NOT NULL DEFAULT 0")
+            // Lifts and ramps are step-free by nature; older rows predate the flag.
+            db.execSQL("UPDATE `vertical_transitions` SET `accessible` = 1 WHERE `kind` IN ('LIFT', 'ELEVATOR', 'RAMP')")
+        }
+    }
+    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4,FROM_4_TO_5,FROM_5_TO_6)
 }

@@ -261,6 +261,29 @@ internal fun NavigationMap(
                         drawCircle(if (selected) TurnBlue else palette.primary, (if (selected) 6f else 4f) * unit / zoom, p)
                         if (poi.id !in labelledRooms) label(poi.name, p, Color.White, priority = selected)
                     }
+                    // Floor links on this floor: a lettered badge (S, L, E, R) and where it leads. Links not yet
+                    // checked on site get a dashed amber ring so they never look as trustworthy as checked ones.
+                    val floorId = state.activeProject?.floorId
+                    if (floorId != null) state.floorConnectors.forEach { c ->
+                        val e = c.entity
+                        val (here, otherName, otherLevel) = when (floorId) {
+                            e.fromFloorId -> Triple(Offset(e.fromXMetres.toFloat(), e.fromYMetres.toFloat()), c.toFloorName, c.toLevel)
+                            e.toFloorId -> if (!e.bidirectional) return@forEach
+                                else Triple(Offset(e.toXMetres.toFloat(), e.toYMetres.toFloat()), c.fromFloorName, c.fromLevel)
+                            else -> return@forEach
+                        }
+                        val p = project(here); val r = 8f * density.density / zoom
+                        drawCircle(Color.White, r + 1.5f * density.density / zoom, p)
+                        drawCircle(if (e.verifiedOnSite) TurnMint else TurnAmber, r, p)
+                        if (!e.verifiedOnSite) drawCircle(TurnAmber, r + 4f * density.density / zoom, p, style = Stroke(1.5f * density.density / zoom,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f * density.density / zoom, 3f * density.density / zoom))))
+                        val badge = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                            color = Color.White.toArgb(); textSize = 10f * density.density / zoom
+                            textAlign = android.graphics.Paint.Align.CENTER; isFakeBoldText = true
+                        }
+                        drawContext.canvas.nativeCanvas.drawText(c.kind.badge, p.x, p.y - (badge.fontMetrics.ascent + badge.fontMetrics.descent) / 2, badge)
+                        label("${e.label} → ${levelBadge(otherLevel)} $otherName", p + Offset(0f, r * 2.2f), Color.White)
+                    }
                     if (showMagneticCoverage) {
                         // Mapped magnetic cells as translucent squares, so gaps in coverage are obvious on site.
                         val half = state.magneticCellSizeMetres / 2f

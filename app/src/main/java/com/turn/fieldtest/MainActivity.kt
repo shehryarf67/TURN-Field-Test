@@ -27,6 +27,9 @@ class MainActivity : ComponentActivity() {
     private val mapperPackageLauncher=registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri!=null) runtimeViewModel.importMapperPackage(uri=uri)
     }
+    private val rawRecordingLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) runtimeViewModel.saveRawRecording(uri)
+    }
     private var afterWifiPermission: (() -> Unit)? = null
     private var afterMotionPermission: (() -> Unit)? = null
     private val mapperLauncher=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result->
@@ -115,6 +118,11 @@ class MainActivity : ComponentActivity() {
                     onBundledMapperImport = { floor,replace -> runtimeViewModel.importMapperPackage(asset="mapper/$floor.json",replace=replace) },
                     onBundledFloorAddedToBuilding = { floor, venue -> runtimeViewModel.importMapperPackage(asset = "mapper/$floor.json", intoVenueId = venue) },
                     onFloorAdded = runtimeViewModel::addFloor,
+                    onFloorLinksRefresh = runtimeViewModel::refreshFloorLinks,
+                    onConnectorSaved = runtimeViewModel::saveConnector,
+                    onConnectorDeleted = runtimeViewModel::deleteConnector,
+                    onConnectorVerified = runtimeViewModel::setConnectorVerified,
+                    onConnectorSuggestionsRequested = runtimeViewModel::suggestConnectors,
                     onModeChanged = { mode ->
                         runtimeViewModel.setMode(mode)
                         if (mode == DataMode.REAL_DEVICE && runtimeViewModel.appState.mode == mode) {
@@ -126,6 +134,12 @@ class MainActivity : ComponentActivity() {
                     },
                     onDiagnosticWalkToggled = {
                         withMotionPermissions(runtimeViewModel::toggleDiagnosticWalk)
+                    },
+                    onRawRecordingToggled = {
+                        withMotionPermissions(runtimeViewModel::toggleRawRecording)
+                    },
+                    onRawRecordingSaveRequested = {
+                        rawRecordingLauncher.launch("turn-raw-sensors-${java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date())}.csv")
                     },
                     onRealSurveyStarted = { metadata ->
                         withWifiPermissions { runtimeViewModel.beginRealSurvey(metadata) }

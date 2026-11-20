@@ -87,6 +87,9 @@ interface FloorPlanDao {
     @Query("SELECT * FROM vertical_transitions WHERE fromFloorId = :floorId OR toFloorId = :floorId")
     fun observeTransitions(floorId: String): Flow<List<VerticalTransitionEntity>>
 
+    @Query("SELECT * FROM vertical_transitions WHERE id = :id")
+    suspend fun transition(id: String): VerticalTransitionEntity?
+
     @Upsert
     suspend fun upsertTransition(transition: VerticalTransitionEntity)
 

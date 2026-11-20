@@ -283,6 +283,12 @@ class TurnAppState {
     var realSensorRunning by mutableStateOf(false)
     var realDiagnosticDistanceMetres by mutableStateOf(0.0)
     var realDiagnosticStatus by mutableStateOf("Not started")
+    /** Raw sensor CSV recording (Diagnostics); runs alongside navigation so stair and lift walks can be captured. */
+    var rawRecording by mutableStateOf(false)
+    var rawRecordingRows by mutableStateOf(0L)
+    var rawRecordingSaveable by mutableStateOf(false)
+    var rawRecordingSaving by mutableStateOf(false)
+    var rawRecordingStatus by mutableStateOf("Records barometer, motion, magnetic and Wi-Fi data to a CSV file")
 
     var surveyRunning by mutableStateOf(false)
     var surveyStarting by mutableStateOf(false)
@@ -525,6 +531,14 @@ class TurnAppState {
         editorStatus = "$clean added at ${formatPoint(Offset(x, y))}"
     }
 
+    // Floor links (stairs, lifts, escalators, ramps) for the open building.
+    var floorConnectors by mutableStateOf<List<com.turn.fieldtest.data.repository.FloorConnector>>(emptyList())
+    var connectorSuggestions by mutableStateOf<List<ConnectorDraft>>(emptyList())
+    /** Saved maps of every floor in the building, for picking link points on floors other than the open one. */
+    var buildingFloorMaps by mutableStateOf<Map<String, com.turn.fieldtest.data.repository.SavedFloorMap>>(emptyMap())
+    var floorLinksStatus by mutableStateOf(FLOOR_LINKS_IDLE_STATUS)
+    var floorLinksBusy by mutableStateOf(false)
+
     // Magnetic fingerprinting: path survey walks, the floor's coverage and live correction status.
     var magneticWalkRunning by mutableStateOf(false)
     var magneticWalkFromId by mutableStateOf<String?>(null)
@@ -722,3 +736,6 @@ fun rememberTurnAppState(): TurnAppState = remember { TurnAppState() }
 data class SurveyPointProgress(val status: String, val freshCount: Int, val target: Int?, val accessPointCount: Int)
 
 enum class NavigationViewOrientation { AUTO, PORTRAIT, LANDSCAPE }
+
+/** Floor links screen status when nothing is running. */
+const val FLOOR_LINKS_IDLE_STATUS = "Link floors where people can move between them"

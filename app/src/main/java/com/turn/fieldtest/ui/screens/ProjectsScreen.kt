@@ -199,6 +199,8 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
                             OutlinedButton(onClick = { open(current.context) }, enabled = available,
                                 modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Reload saved map") }
                         }
+                        if (floors.size > 1) OutlinedButton(onClick = { state.selectDestination(TurnDestination.FLOOR_LINKS) }, enabled = available,
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Link floors · stairs and lifts") }
                     }
                     TextButton(onClick = { addFloorTo = first.venueId }, enabled = available && !state.hasUnsavedMapChanges &&
                         state.mode == com.turn.fieldtest.ui.model.DataMode.REAL_DEVICE) {

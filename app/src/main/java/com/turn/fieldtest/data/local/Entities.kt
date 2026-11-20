@@ -1,5 +1,6 @@
 package com.turn.fieldtest.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -123,6 +124,13 @@ data class VerticalTransitionEntity(
     val activationRadiusMetres: Double = 2.0,
     val bidirectional: Boolean = true,
     val enabled: Boolean = true,
+    // Schema 6: what people see and what routing needs. A lift serving several floors is one row per pair.
+    @ColumnInfo(defaultValue = "") val label: String = "",
+    @ColumnInfo(defaultValue = "15.0") val travelTimeSeconds: Double = 15.0,
+    /** Step-free: usable on accessible-only routes (lifts and ramps, not stairs). */
+    @ColumnInfo(defaultValue = "0") val accessible: Boolean = false,
+    /** Suggested links stay unverified until someone confirms on site that the two points connect. */
+    @ColumnInfo(defaultValue = "0") val verifiedOnSite: Boolean = false,
 )
 
 @Entity(

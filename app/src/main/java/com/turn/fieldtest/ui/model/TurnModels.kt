@@ -10,7 +10,8 @@ enum class TurnDestination(val title: String, val shortLabel: String, val descri
     LIVE_LOCATE("Navigate", "NV", "Fused Wi-Fi and PDR positioning"),
     EVALUATE("Evaluate", "EV", "Independent checkpoint testing"),
     DATA_EXPORT("Data / export", "DX", "Import, export and backups"),
-    SETTINGS("Settings", "ST", "Modes, algorithms and hardware")
+    SETTINGS("Settings", "ST", "Modes, algorithms and hardware"),
+    FLOOR_LINKS("Floor links", "FL", "Stairs, lifts and ramps between floors")
 }
 
 enum class DataMode(val label: String, val detail: String) {

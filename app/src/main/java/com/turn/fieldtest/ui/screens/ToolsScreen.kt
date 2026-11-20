@@ -35,6 +35,9 @@ fun ToolsScreen(state: TurnAppState, actions: TurnAppActions) {
                 Icons.Outlined.Wifi, onClick = { state.selectDestination(TurnDestination.SURVEY) })
             ToolCard("3 · Explore & navigate", "Choose a start and destination, then confirm your direction", Icons.Outlined.NearMe,
                 onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) })
+            if (state.projects.count { it.venueId == state.activeProject?.venueId } > 1)
+                ToolCard("Link floors", "${state.floorConnectors.size} links · stairs, lifts, escalators and ramps", Icons.Outlined.Stairs,
+                    enabled = !state.sessionLocked, onClick = { state.selectDestination(TurnDestination.FLOOR_LINKS) })
             ToolCard("Create a map with your phone", "Guided AR capture or measured drawing · review and verify before use",
                 Icons.Outlined.ViewInAr, enabled = state.canEditMap && !state.hasUnsavedMapChanges && state.mode == DataMode.REAL_DEVICE,
                 onClick = actions.onWalkMapperRequested)

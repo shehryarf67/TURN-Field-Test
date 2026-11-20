@@ -141,6 +141,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var liveEndedAtEpochMillis: Long? = null
     // Magnetic fingerprinting: per-step feature window, the floor map, and an in-progress survey walk.
     private val magneticRepository = com.turn.fieldtest.data.repository.MagneticRepository(app.database)
+    // Declared before init: loadProject (run from init) reads the building's floor links.
+    private val connectorRepository = com.turn.fieldtest.data.repository.ConnectorRepository(app.database, projects)
     private val magneticWindow = com.turn.fieldtest.core.MagneticStepWindow()
     private var latestGravity: DoubleArray? = null
     private var latestGravityNanos: Long? = null
@@ -316,6 +318,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         viewModelScope.launch {
             wifiScanner.batches.collect { batch -> eventMutex.withLock {
+                rawRecorder?.let { recorder -> recordRaw { recorder.wifi(batch) } }
                 try { handleWifiBatch(batch) }
                 catch (error: Exception) { stopAfterLiveFailure(error) }
             } }
@@ -340,6 +343,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         viewModelScope.launch {
             sensorSource.samples.collect { sample -> eventMutex.withLock {
+                rawRecorder?.let { recorder -> recordRaw { recorder.sensor(sample) } }
                 try { handleSensorSample(sample) }
                 catch (error: Exception) { stopAfterLiveFailure(error) }
             } }
@@ -349,6 +353,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     fun onForeground() {
         foreground = true
         refreshWifiPermissionStatus()
+        // A finished recording survives a process restart, so it can still be saved afterwards.
+        if (rawRecorder == null && !appState.rawRecordingSaving) appState.rawRecordingSaveable =
+            runCatching { rawRecordingFile.length() > com.turn.fieldtest.platform.sensors.RawSensorRecorder.HEADER.length }.getOrDefault(false)
         if (!appState.startupLoading && appState.mode == DataMode.REAL_DEVICE) startRealSources()
     }
 
@@ -366,6 +373,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.surveyRunning = false
         appState.surveyStarting = false
         appState.diagnosticWalkRunning = false
+        if (rawRecorder != null) stopRawRecording("Recording stopped because TURN left the foreground")
         if (activeMagneticWalk != null) {
             cancelMagneticWalk()
             appState.magneticWalkStatus = "Walk cancelled because TURN left the foreground · sensors stop in the background"
@@ -404,6 +412,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.surveyRunning = false
         appState.diagnosticWalkRunning = false
         appState.realMapReady = false
+        if (rawRecorder != null) stopRawRecording("Recording stopped when switching data mode")
         if (mode == DataMode.DEMO) {
             wifiScanner.stop()
             sensorSource.stop()
@@ -448,6 +457,67 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.FLOOR_EDITOR)
             } catch (error: Exception) { appState.projectStatus = "Could not add floor: ${error.message}" }
             finally { appState.projectBusy = false }
+        }
+    }
+
+    /** Loads the open building's floor links, and with [withFloorMaps] every floor's saved map for picking points. */
+    fun refreshFloorLinks() = refreshFloorLinks(withFloorMaps = true)
+
+    private fun refreshFloorLinks(withFloorMaps: Boolean) {
+        val venueId = appState.activeProject?.venueId ?: return
+        viewModelScope.launch {
+            runCatching {
+                // Another building may have been opened while this loaded; its results must not land in that building.
+                val maps = if (withFloorMaps) app.database.floorPlanDao().observeFloors(venueId).first()
+                    .mapNotNull { f -> runCatching { projects.load(ProjectContext(venueId, f.id)) }.getOrNull()?.let { f.id to it } }.toMap() else null
+                val links = connectorRepository.connectors(venueId)
+                if (appState.activeProject?.venueId == venueId) {
+                    maps?.let { appState.buildingFloorMaps = it }
+                    appState.floorConnectors = links
+                }
+            }.onFailure { if (appState.activeProject?.venueId == venueId) appState.floorLinksStatus = "Could not load floor links: ${it.message}" }
+        }
+    }
+
+    private fun connectorAction(working: String, block: suspend () -> String) {
+        if (appState.floorLinksBusy || appState.sessionLocked) { appState.floorLinksStatus = "Finish the running session first"; return }
+        appState.floorLinksBusy = true; appState.floorLinksStatus = working
+        viewModelScope.launch {
+            try {
+                appState.floorLinksStatus = block()
+                appState.activeProject?.venueId?.let { appState.floorConnectors = connectorRepository.connectors(it) }
+            } catch (error: Exception) { appState.floorLinksStatus = "Not saved: ${error.message ?: error.javaClass.simpleName}" }
+            finally { appState.floorLinksBusy = false }
+        }
+    }
+
+    fun saveConnector(save: ConnectorSave) = connectorAction("Saving link…") {
+        connectorRepository.save(save.draft, save.bidirectional, save.accessible, save.verifiedOnSite, save.replacingId)
+        // Matched by position, not name: a suggestion renamed during review is still the same staircase.
+        appState.connectorSuggestions = appState.connectorSuggestions.filterNot { it.sameEndsAs(save.draft) }
+        "${save.draft.label} saved" + if (save.verifiedOnSite) "" else " · confirm on site, then mark it verified"
+    }
+
+    fun deleteConnector(id: String) = connectorAction("Removing link…") {
+        connectorRepository.delete(id); "Link removed"
+    }
+
+    fun setConnectorVerified(id: String, verified: Boolean) = connectorAction("Updating link…") {
+        connectorRepository.setVerified(id, verified); if (verified) "Marked as checked on site" else "Marked as not yet checked"
+    }
+
+    fun suggestConnectors() {
+        val venueId = appState.activeProject?.venueId ?: return
+        appState.floorLinksStatus = "Looking for numbered stair landings on each floor…"
+        viewModelScope.launch {
+            runCatching { connectorRepository.suggestions(venueId) }
+                .also { if (appState.activeProject?.venueId != venueId) return@launch }
+                .onSuccess {
+                    appState.connectorSuggestions = it
+                    appState.floorLinksStatus = if (it.isEmpty()) "No stair landings to pair on adjacent floors · draw links by hand"
+                        else "${it.size} suggested stair links · landing numbers are automatic, so check each on site"
+                }
+                .onFailure { appState.floorLinksStatus = "Could not suggest links: ${it.message}" }
         }
     }
 
@@ -629,6 +699,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realLiveStatus = "Ready to start a physical session on ${floor.name}"
         refreshSurveyProgress(context)
         runCatching { refreshMagneticCoverage(context) }
+        // Links are drawn on every floor map; suggestions and picker maps belong to one building only.
+        appState.connectorSuggestions = emptyList(); appState.floorLinksStatus = FLOOR_LINKS_IDLE_STATUS
+        if (appState.buildingFloorMaps.values.firstOrNull()?.venue?.id != context.venueId) appState.buildingFloorMaps = emptyMap()
+        appState.floorConnectors = runCatching { connectorRepository.connectors(context.venueId) }.getOrDefault(emptyList())
         appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
         if (!appState.mapEditorSupported) appState.editorStatus = "Map preserved. Editing multiple walkable regions or a custom origin is not supported yet."
     }
@@ -703,6 +777,79 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     fun requestDiagnosticScan() {
         if (!realWifiReady("Diagnostic scan")) return
         viewModelScope.launch { requestRealScan("Diagnostic scan") }
+    }
+
+    private var rawRecorder: com.turn.fieldtest.platform.sensors.RawSensorRecorder? = null
+    private val rawRecordingFile get() = java.io.File(java.io.File(app.filesDir, "raw-recordings"), "latest.csv")
+
+    /** Starts or stops writing every raw sensor sample and Wi-Fi scan to app storage; only the latest recording is kept. */
+    fun toggleRawRecording() {
+        rawRecorder?.let { stopRawRecording("Saved ${it.rows} rows · use Save recording to copy the file"); return }
+        if (appState.mode != DataMode.REAL_DEVICE || appState.rawRecordingSaving) return
+        if (missingMotionPermissions().isNotEmpty()) { onMotionPermissionDenied(); return }
+        val file = rawRecordingFile
+        rawRecorder = runCatching {
+            file.parentFile?.mkdirs()
+            com.turn.fieldtest.platform.sensors.RawSensorRecorder(file.bufferedWriter())
+        }.getOrElse {
+            appState.rawRecordingStatus = "Could not start recording: ${it.message}"
+            return
+        }
+        appState.rawRecording = true
+        appState.rawRecordingSaveable = false
+        appState.rawRecordingRows = 0
+        appState.rawRecordingStatus = "Recording · request Wi-Fi scans as you walk; navigation can run at the same time"
+        if (foreground) startRealSources()
+    }
+
+    private inline fun recordRaw(block: () -> Unit) {
+        try {
+            block()
+            val rows = rawRecorder?.rows ?: return
+            if (rows - appState.rawRecordingRows >= 50) appState.rawRecordingRows = rows
+        } catch (error: java.io.IOException) {
+            stopRawRecording("Recording stopped: ${error.message ?: "storage error"}")
+        }
+    }
+
+    private fun stopRawRecording(status: String) {
+        val recorder = rawRecorder ?: return
+        rawRecorder = null
+        appState.rawRecordingRows = recorder.rows
+        val closed = runCatching { recorder.close() }.isSuccess
+        appState.rawRecording = false
+        appState.rawRecordingSaveable = closed && recorder.rows > 0 && rawRecordingFile.exists()
+        appState.rawRecordingStatus = if (closed) status else "Recording stopped but the file could not be finished"
+    }
+
+    /** Copies the latest finished recording to a document the user picked. */
+    fun saveRawRecording(uri: android.net.Uri) {
+        if (rawRecorder != null || appState.rawRecordingSaving) return
+        // A new recording reuses the same file, so starting one is refused until this copy has finished.
+        appState.rawRecordingSaving = true
+        appState.rawRecordingStatus = "Saving recording…"
+        viewModelScope.launch {
+            try {
+                appState.rawRecordingStatus = runCatching {
+                    // Rows are counted from the file itself: after a process restart the in-memory count is gone.
+                    val rows = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val output = requireNotNull(app.contentResolver.openOutputStream(uri, "wt")) { "Could not open the chosen file" }
+                        var lines = 0L
+                        output.use { out -> rawRecordingFile.inputStream().use { input ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val n = input.read(buffer); if (n < 0) break
+                                for (i in 0 until n) if (buffer[i] == '\n'.code.toByte()) lines++
+                                out.write(buffer, 0, n)
+                            }
+                        } }
+                        (lines - 1).coerceAtLeast(0) // minus the header
+                    }
+                    appState.rawRecordingRows = rows
+                    "Recording saved ($rows rows)"
+                }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; "Could not save recording: ${it.message}" }
+            } finally { appState.rawRecordingSaving = false }
+        }
     }
 
     fun toggleDiagnosticWalk() {
@@ -2340,6 +2487,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     override fun onCleared() {
+        runCatching { rawRecorder?.close() }
+        rawRecorder = null
         surveyScanJob?.cancel()
         liveScanJob?.cancel()
         wifiScanner.stop()

@@ -26,8 +26,15 @@ data class TurnAppActions(
     val onModeChanged: (DataMode) -> Unit = {},
     val onDiagnosticScanRequested: () -> Unit = {},
     val onDiagnosticWalkToggled: () -> Unit = {},
+    val onRawRecordingToggled: () -> Unit = {},
+    val onRawRecordingSaveRequested: () -> Unit = {},
     val onRealSurveyStarted: (SurveyCaptureMetadata) -> Unit = {},
     val onRealSurveyFinished: () -> Unit = {},
+    val onFloorLinksRefresh: () -> Unit = {},
+    val onConnectorSaved: (ConnectorSave) -> Unit = {},
+    val onConnectorDeleted: (id: String) -> Unit = {},
+    val onConnectorVerified: (id: String, verified: Boolean) -> Unit = { _, _ -> },
+    val onConnectorSuggestionsRequested: () -> Unit = {},
     val onMagneticWalkStarted: (fromPointId: String, toPointId: String) -> Unit = { _, _ -> },
     val onMagneticWalkFinished: () -> Unit = {},
     val onMagneticWalkCancelled: () -> Unit = {},
@@ -35,6 +42,13 @@ data class TurnAppActions(
     val onRealLiveToggled: () -> Unit = {},
     val onRealLiveScanRequested: () -> Unit = {},
     val onRealLiveRelocalizationRequested: () -> Unit = {},
+)
+
+/** A floor link as edited on screen: [replacingId] is set when editing an existing link. */
+data class ConnectorSave(
+    val draft: com.turn.fieldtest.core.ConnectorDraft,
+    val bidirectional: Boolean, val accessible: Boolean, val verifiedOnSite: Boolean,
+    val replacingId: String? = null,
 )
 
 @Composable
@@ -63,6 +77,8 @@ internal fun TurnScreen(state: TurnAppState, actions: TurnAppActions, compact: B
             compact,
             onRequestScan = actions.onDiagnosticScanRequested,
             onToggleDiagnosticWalk = actions.onDiagnosticWalkToggled,
+            onToggleRawRecording = actions.onRawRecordingToggled,
+            onSaveRawRecording = actions.onRawRecordingSaveRequested,
         )
         TurnDestination.SURVEY -> if (state.mode == DataMode.REAL_DEVICE) com.turn.fieldtest.ui.screens.FieldSurveyScreen(state, actions) else SurveyScreen(
             state,
@@ -80,6 +96,7 @@ internal fun TurnScreen(state: TurnAppState, actions: TurnAppActions, compact: B
         TurnDestination.EVALUATE -> EvaluateScreen(state, compact, actions.onCheckpointCaptured)
         TurnDestination.DATA_EXPORT -> DataExportScreen(state, compact, actions.onRealExport)
         TurnDestination.SETTINGS -> SettingsScreen(state, compact, actions.onModeChanged)
+        TurnDestination.FLOOR_LINKS -> com.turn.fieldtest.ui.screens.FloorLinksScreen(state, actions)
     }
 }
 

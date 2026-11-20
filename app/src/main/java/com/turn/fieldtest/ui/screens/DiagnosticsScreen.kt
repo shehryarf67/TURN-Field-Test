@@ -27,6 +27,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -51,6 +52,8 @@ fun DiagnosticsScreen(
     compact: Boolean,
     onRequestScan: () -> Unit = {},
     onToggleDiagnosticWalk: () -> Unit = {},
+    onToggleRawRecording: () -> Unit = {},
+    onSaveRawRecording: () -> Unit = {},
 ) {
     val simulated = state.mode == DataMode.DEMO
     // The walk's only Stop button lives here; leaving the screen must not leave it recording and locking Settings.
@@ -110,6 +113,21 @@ fun DiagnosticsScreen(
         }
 
         BoxWithMetrics(state = state, compact = compact, simulated = simulated)
+
+        if (!simulated) SectionCard(
+            title = "Raw sensor recording",
+            subtitle = "For stair and lift walks: barometer, motion, magnetic and Wi-Fi to one CSV file",
+            trailing = { if (state.rawRecording) StatusPill("${state.rawRecordingRows} rows", EventSeverity.GOOD) },
+        ) {
+            Text(state.rawRecordingStatus, style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onToggleRawRecording, enabled = !state.rawRecordingSaving, modifier = Modifier.weight(1f)) {
+                    Text(if (state.rawRecording) "Stop recording" else "Start recording")
+                }
+                OutlinedButton(onClick = onSaveRawRecording, enabled = !state.rawRecording && state.rawRecordingSaveable && !state.rawRecordingSaving,
+                    modifier = Modifier.weight(1f)) { Text("Save recording…") }
+            }
+        }
 
         SectionCard(
             title = "Visible Wi-Fi access points",

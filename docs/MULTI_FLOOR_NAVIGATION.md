@@ -92,3 +92,8 @@ Phases 0 and 1 are low-risk groundwork. Phase 2 carries the research risk and ne
 1. Start phase 0: venue-level project context and floor switcher, with no change to tracking behaviour.
 2. Add a raw-sensor recording diagnostic (barometer, accelerometer/gravity, steps, magnetometer, Wi-Fi scans with timestamps), then record C-block stairs up and down, and the lift if available, on two phones.
 3. Draft the schema 5 migration and the "Link floors" editor (phase 1).
+
+## 6. Progress
+- **Phase 0 (done):** buildings hold several floors; floor switcher; per-floor mapper sources, levels unique per building.
+- **Phase 1 (done):** schema 6 adds a name, travel time, step-free flag and "checked on site" flag to each floor link (additive migration; old lift/ramp rows become step-free). *Tools → Link floors* (or *Link floors* on the open building's card) lists links, suggests stair links from matching numbered stair landings on adjacent levels, and edits links by tapping a point on each floor's map. Links show on the navigation map as lettered badges (S, L, E, R); unchecked links have a dashed amber ring. *Diagnostics → Raw sensor recording* writes barometer, motion, magnetic and Wi-Fi rows (no network names) to a CSV you can save anywhere, for the phase 2 stair and lift recordings.
+- **Before phase 2:** confirm suggested stair links on site, and record C-block stairs and the lift on two phones with the raw recorder.
