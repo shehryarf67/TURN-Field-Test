@@ -427,7 +427,7 @@ All times use the elapsedRealtimeNanos base; sensor timestamps share it (SensorS
 **Tests:**
 - `RawSensorTraceTest`: round trip of samples, markers and Wi-Fi batches; header rejection. It extends the recorder test at FloorConnectorsTest.kt:91-110.
 - `FloorTrackEvaluatorTest`: hand-built timelines.
-- `MultiFloorReplayTest` (asymmetric frames; one stair link F1↔F2, one lift F1↔F3, F2↔F3 stairs), each scenario run with and without a barometer:
+- `MultiFloorReplayTest` (asymmetric frames; one stair link F1↔F2, one lift F1↔F3, F2↔F3 stairs). **As built it has four scenarios only, by the user's decision to save time, each run with a barometer over three seeds:** (1) walk to the stairs, climb one floor, walk on; (2) a two-floor lift ride; (3) near miss: walking past right beside the stairs on the same floor with door and HVAC pressure blips, no change; (4) strong Wi-Fi for another floor while the user stays put, vetoed, no change, then UNCERTAIN. The original list below is kept for phase 4:
   - (a) Walk, stairs up, walk off with a barometer: exactly one CONFIRMED F1→F2 within 6 s of ARRIVED and 0 false changes. Without a barometer, with F2 fingerprints: F2 within 3 fresh scans.
   - (b) A two-floor lift with a barometer gives F3. Without one, the dwell cue plus Wi-Fi resolve it.
   - (c) 20 min of corridor walking past the stairs 6 times, plus drift and HVAC steps: 0 confirmed changes and 0 reverts.
@@ -438,6 +438,21 @@ All times use the elapsedRealtimeNanos base; sensor timestamps share it (SensorS
   - (h) The same building with links disabled gives `FloorTopology.NONE`, and the run equals the single-floor run bit for bit.
 
 The latency and false-change thresholds are loose, because the traces are synthetic.
+
+---
+
+### Steps 5 and 6 as built (API deviations)
+
+- **Files.** `core/FloorDecision.kt`, `core/FloorTracking.kt`; test helpers `test/.../core/replay/SyntheticTraces.kt` (`SyntheticWalk`, `SyntheticTrace`) and `FloorReplayHarness.kt` (test sources, as planned); tests `FloorDecisionTest`, `replay/MultiFloorReplayTest`.
+- **FloorDecision** takes the initial floor: `FloorDecision(topology, config, initialFloorId)`. `update(votes, nowNanos, lastEventFloors, moving = false)` gets the detector's MOVING flag instead of the coordinator marking CHANGING on every call. Added `clearUncertain()` and `val floorId`. Precedence: marked UNCERTAIN, then CHANGING (moving or within the hold), then UNCERTAIN below 0.6, then CONFIRMED. `markChanging` (an applied transition) clears an UNCERTAIN mark. The hard switch needs a unique argmax (ties are never broken by id).
+- **Coordinator construction.** `FloorTrackingCoordinator(topology, config = FloorDetectionConfig(), barometerPresent, startFloorId, tracking = FloorTrackingConfig())` requires a non-empty topology; `FloorTrackingCoordinator.createOrNull(...)` returns null for `FloorTopology.NONE`, so the VM keeps the legacy path (I1). New tunables live in the separate `@Serializable FloorTrackingConfig` (Wi-Fi uncertainty hold 120 s, last-event floor memory 120 s, tick 1 s) so `FloorDetectionConfig` stays unchanged.
+- **Events.** `FloorTrackingEvent` is one flat data class (`type: FloorTrackingEventType`, `atNanos`, from/to floor, `movedShare`, `floorVoteAfter`, `heightDeltaMetres`, `pressureHpa`, `barometerHealth`, `detail`) that maps 1:1 onto the Step 10 row, not a sealed interface. The CONFIG event (config JSON plus barometer presence) is emitted at construction.
+- **Absolute fixes** take `FloorFixSource { MANUAL, QR, WIFI_INIT, USER_RELOCALIZE, WIFI_CROSS_FLOOR }` instead of a string. WIFI_INIT and USER_RELOCALIZE start the 120 s probation; MANUAL and QR end it.
+- **Wi-Fi.** Added `correctWithWifi(filter, match, nowNanos, userRequested = false, allowGlobalRelocalization = true)`, which applies the policy: a lost filter is rebuilt only if `allowWifiInit` allows it (then with `crossFloorRelocalizationAllowed = true`), otherwise the flag is `crossFloorWifi(...) == ALLOW`. A cross-floor GLOBAL_RELOCALIZATION is recorded as an absolute fix (`onWifiCorrection(prior, result, nowNanos)` does this for callers that call the filter themselves). Same-floor, stale or floorless matches return ALLOW; weak other-floor matches return DEFER and reset the count.
+- **`onTick` returns Unit.** It never moves particles; the lift cue is reported on the next step, as the cue tracker is designed.
+- **`stairsActive` is true for any open vertical segment, lifts included** (the plan excluded lifts). A lift event settles about 10 s after the ride, while the user is already walking out of the car; without the damping, lift particles left portal memory before the event (found by scenario 2).
+- **REJECTED** keeps the barometer's whole height since the anchor as the pending height (so several rejected segments add up), holds drift compensation, and clears the pending state if a later rejected segment brings the height back within 0.6 of a floor of the anchor.
+- **Replay harness.** Heading and stride come from the caller (the scenario script); Wi-Fi rows go through a caller-supplied matcher (the tests use a fixture BSSID table, not the k-NN matcher). Magnetic correction is not replayed.
 
 ---
 
@@ -583,6 +598,8 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 
 ### Step 10: Schema 7, export 4
 
+> **Moved to phase 4** by the user's decision. Until then the coordinator only keeps its events in memory (`drainEvents()`); `FloorTrackingEvent` already has the columns of the entity below.
+
 **Entity:**
 
 ```kotlin
@@ -618,6 +635,8 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 ---
 
 ### Step 11: Diagnostics markers and documentation
+
+> **Moved to phase 4** by the user's decision (marker buttons and the MULTI_FLOOR_NAVIGATION.md update). The marker grammar itself already exists in `TraceMarkers`.
 
 - Diagnostics → Raw sensor recording gets marker buttons that call the existing `RawSensorRecorder.marker` (:37) with the Step 6 grammar: "Start stairs up", "Start stairs down", "Enter lift", "Standing still", and "Arrived on…" with chips for the building's floors.
 - Update `docs/MULTI_FLOOR_NAVIGATION.md` §6:
@@ -694,6 +713,8 @@ Floor names come from the saved floor names; "Floor 4" above is an example.
   - in-session browsing of other floors (the FloorSwitcher stays locked, FloorSwitcher.kt:31);
   - highlighting the link in use on the map.
 - **Phase 4:**
+  - Step 10 (schema 7 `floor_transition_events`, export schema 4) and Step 11 (Diagnostics marker buttons, docs), moved here by the user's decision;
+  - the remaining Step 6 replay scenarios (no-barometer variants, pending-height resolution, Wi-Fi start probation, STALE barometer, links-disabled parity);
   - threshold tuning from C-block recordings through the Step 6 harness;
   - a Diagnostics threshold editor or DataStore override;
   - per-venue floor height, `floors.elevationMetres` and reference pressure on reference points (§2.6);
