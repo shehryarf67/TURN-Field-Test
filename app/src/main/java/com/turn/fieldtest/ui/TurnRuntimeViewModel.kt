@@ -1880,6 +1880,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 WifiCorrectionKind.FILTER_LOST -> "filter lost"
                 WifiCorrectionKind.IGNORED_NO_ESTIMATE -> "Wi-Fi produced no estimate"
                 WifiCorrectionKind.IGNORED_NOT_FRESH -> "cached Wi-Fi result ignored"
+                // Only a multi-floor filter returns this; the live session does not build one yet.
+                WifiCorrectionKind.DEFERRED_CROSS_FLOOR -> "Wi-Fi suggests another floor · waiting for more evidence"
             }
             appState.realLiveStatus = when (correction.kind) {
                 WifiCorrectionKind.APPLIED -> "Fresh Wi-Fi corrected particle weights"

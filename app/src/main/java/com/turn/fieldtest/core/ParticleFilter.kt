@@ -1,7 +1,9 @@
 package com.turn.fieldtest.core
 
+import java.util.Locale
 import java.util.Random
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
@@ -19,6 +21,12 @@ data class Particle(
     /** Position before the latest step; magnetic evidence compares the change across that step. */
     val previousX: Double = x,
     val previousY: Double = y,
+    /**
+     * Portal memory, written only by a multi-floor filter: the index in [FloorTopology.portals] of the last
+     * portal whose area held the particle (-1 for none), and the steps taken since it left that area.
+     */
+    val portalIndex: Int = -1,
+    val stepsSincePortal: Int = Int.MAX_VALUE,
 ) {
     init {
         require(x.isFinite() && y.isFinite())
@@ -26,6 +34,8 @@ data class Particle(
         require(headingOffsetRadians.isFinite())
         require(strideScale.isFinite() && strideScale > 0.0)
         require(weight.isFinite() && weight >= 0.0)
+        require(portalIndex >= -1)
+        require(stepsSincePortal >= 0)
     }
 
     val position: MetricPoint get() = MetricPoint(x, y)
@@ -52,6 +62,22 @@ data class ParticleFilterConfig(
     /** Share of particles re-drawn around each confident fresh Wi-Fi fix before reweighting. */
     val wifiInjectionFraction: Double = 0.1,
     val wifiInjectionMinimumConfidence: Double = 0.4,
+    // Multi-floor only: read only when the filter has a non-empty FloorTopology.
+    /** Extra distance beyond a portal's radius that still counts as inside its area. */
+    val portalSlackMetres: Double = 1.0,
+    /** Steps after leaving a portal area during which a particle still counts as having used it. */
+    val portalMemorySteps: Int = 10,
+    /** Stride multiplier on stairs, for particles with portal memory, while stairs movement is active. */
+    val stairsStrideFactor: Double = 0.5,
+    /** Upper bound of the exit spread; the spread is min(radius / 2, this). */
+    val exitSpreadMaxMetres: Double = 1.0,
+    val exitSampleTries: Int = 20,
+    /** Most one-hop passes a mover makes to cover a multi-floor change through chained links. */
+    val maxHops: Int = 4,
+    /** Floor-stratified resampling keeps at least this many particles on every floor it keeps. */
+    val minParticlesPerFloor: Int = 10,
+    /** Floor-stratified resampling drops floors below this weight, except the strongest. */
+    val floorPruneWeight: Double = 1e-3,
 ) {
     init {
         require(particleCount > 0)
@@ -73,6 +99,14 @@ data class ParticleFilterConfig(
         require(clusterRadiusMetres > 0.0)
         require(wifiInjectionFraction in 0.0..0.5)
         require(wifiInjectionMinimumConfidence in 0.0..1.0)
+        require(portalSlackMetres.isFinite() && portalSlackMetres >= 0.0)
+        require(portalMemorySteps >= 0)
+        require(stairsStrideFactor.isFinite() && stairsStrideFactor > 0.0 && stairsStrideFactor <= 1.0)
+        require(exitSpreadMaxMetres.isFinite() && exitSpreadMaxMetres >= 0.0)
+        require(exitSampleTries >= 1)
+        require(maxHops in 1..8)
+        require(minParticlesPerFloor >= 1)
+        require(floorPruneWeight.isFinite() && floorPruneWeight >= 0.0 && floorPruneWeight < 0.5)
     }
 }
 
@@ -100,6 +134,8 @@ enum class FilterEventType {
     FLOOR_TRANSITION,
     FLOOR_TRANSITION_REJECTED,
     FILTER_LOST,
+    /** Multi-floor only: Wi-Fi pointed at another floor and the caller did not allow a cross-floor jump. */
+    CROSS_FLOOR_WIFI_DEFERRED,
 }
 
 data class FilterEvent(
@@ -133,6 +169,8 @@ enum class WifiCorrectionKind {
     IGNORED_NOT_FRESH,
     IGNORED_NO_ESTIMATE,
     FILTER_LOST,
+    /** Multi-floor only: the match needs a jump to another floor that was not allowed; particles are unchanged. */
+    DEFERRED_CROSS_FLOOR,
 }
 
 data class WifiCorrectionResult(
@@ -167,20 +205,56 @@ data class FloorTransitionResult(
 )
 
 /**
+ * Evidence that the user changed floor, e.g. a settled barometer event. [share] of each eligible particle's
+ * weight moves through compatible portals ([unverifiedFactor] scales it for links not checked on site);
+ * particles in no compatible portal are multiplied by [outOfPortalLikelihood].
+ */
+data class VerticalEvidence(
+    val direction: VerticalDirection,
+    val floorCandidates: Set<Int>,
+    val kind: VerticalKindHint,
+    val share: Double,
+    val outOfPortalLikelihood: Double,
+    val unverifiedFactor: Double,
+) {
+    init {
+        require(floorCandidates.isNotEmpty() && floorCandidates.all { it > 0 }) { "Floor candidates must be positive" }
+        require(share in 0.0..1.0)
+        require(outOfPortalLikelihood in 0.0..1.0)
+        require(unverifiedFactor in 0.0..1.0)
+    }
+}
+
+/**
  * Seeded particle-filter fusion. It deliberately has no clock, persistence or Android dependency;
  * callers persist returned [FilterEvent] values with their own timestamps.
+ *
+ * With a non-empty [floorTopology] the filter tracks several floors: particles change floor only through
+ * the topology's portals ([applyVerticalEvidence], [seedFloorHypotheses]) or an absolute fix, resampling keeps
+ * every floor's posterior, and Wi-Fi cannot move the cloud to another floor unless the caller allows it.
+ * Without one ([FloorTopology.NONE]) every multi-floor branch is skipped and behaviour is today's, bit for bit.
  */
 class ParticleFilter(
     private val metricMap: MetricMap,
     private val config: ParticleFilterConfig = ParticleFilterConfig(),
     seed: Long = 0L,
+    private val floorTopology: FloorTopology = FloorTopology.NONE,
 ) {
     private val random = Random(seed)
+    private val multiFloor = !floorTopology.isEmpty
     private var cachedSummary: ParticleSummary? = null
     private var mutableParticles: List<Particle> = emptyList()
         set(value) { field = value; cachedSummary = null }
     private val mutableEvents = mutableListOf<FilterEvent>()
     private var nextEventSequence = 1L
+
+    init {
+        if (multiFloor) {
+            val missing = floorTopology.portals.flatMap { listOf(it.fromFloorId, it.toFloorId) }
+                .filter { it !in metricMap.floors }.distinct()
+            require(missing.isEmpty()) { "Floor topology references floors missing from the map: $missing" }
+        }
+    }
 
     val particles: List<Particle> get() = mutableParticles.toList()
     val events: List<FilterEvent> get() = mutableEvents.toList()
@@ -195,7 +269,12 @@ class ParticleFilter(
         return requireNotNull(summary())
     }
 
-    fun predictStep(strideMetres: Double, measuredHeadingRadians: Double): PredictionResult {
+    /**
+     * Moves every particle by one step. [stairsActive] (multi-floor only) shortens the step by
+     * [ParticleFilterConfig.stairsStrideFactor] for particles that were recently in a portal, so they are
+     * still near the link when the barometer settles.
+     */
+    fun predictStep(strideMetres: Double, measuredHeadingRadians: Double, stairsActive: Boolean = false): PredictionResult {
         require(strideMetres.isFinite() && strideMetres > 0.0)
         require(measuredHeadingRadians.isFinite())
         if (mutableParticles.isEmpty()) {
@@ -212,14 +291,19 @@ class ParticleFilter(
             val strideScale = (particle.strideScale + gaussian(config.strideScaleRandomWalkStd))
                 .coerceIn(StrideModel.MIN_SCALE, StrideModel.MAX_SCALE)
             val heading = measuredHeadingRadians + headingOffset + gaussian(config.headingNoiseStdRadians)
-            val distance = max(0.0, strideMetres * strideScale + gaussian(config.movementStdMetres))
+            val sampledDistance = max(0.0, strideMetres * strideScale + gaussian(config.movementStdMetres))
+            val distance = if (multiFloor && stairsActive && particle.stepsSincePortal <= config.portalMemorySteps) {
+                sampledDistance * config.stairsStrideFactor
+            } else {
+                sampledDistance
+            }
             val candidate = MetricPoint(
                 particle.x + distance * cos(heading),
                 particle.y + distance * sin(heading),
             )
             val constraint = metricMap.movementConstraint(particle.floorId, particle.position, candidate)
             if (constraint == MovementConstraint.ALLOWED) {
-                survivors += particle.copy(
+                val moved = particle.copy(
                     x = candidate.x,
                     y = candidate.y,
                     headingOffsetRadians = headingOffset,
@@ -227,6 +311,7 @@ class ParticleFilter(
                     previousX = particle.x,
                     previousY = particle.y,
                 )
+                survivors += if (multiFloor) updatePortalMemory(moved) else moved
             } else {
                 rejectedByConstraint[constraint] = rejectedByConstraint.getOrDefault(constraint, 0) + 1
             }
@@ -243,7 +328,7 @@ class ParticleFilter(
         }
 
         mutableParticles = if (survivors.size < config.particleCount) {
-            systematicResample(normalizeWeights(survivors), config.particleCount)
+            resample(normalizeWeights(survivors), config.particleCount)
         } else {
             normalizeWeights(survivors)
         }
@@ -265,9 +350,15 @@ class ParticleFilter(
         )
     }
 
+    /**
+     * [crossFloorRelocalizationAllowed] is read only by a multi-floor filter. When false, a match on a floor other
+     * than the current estimate's never relocalises, injects or rebuilds the cloud there: it only reweights, and if
+     * the weights would collapse the particles are kept and [WifiCorrectionKind.DEFERRED_CROSS_FLOOR] is returned.
+     */
     fun correctWithWifi(
         match: WifiMatchResult,
         allowGlobalRelocalization: Boolean = true,
+        crossFloorRelocalizationAllowed: Boolean = true,
     ): WifiCorrectionResult {
         if (match.freshness != WifiScanFreshness.FRESH) {
             addEvent(
@@ -291,7 +382,9 @@ class ParticleFilter(
         val isStrong = !match.unlikeDatabase && match.confidence >= config.strongWifiConfidence
         val cloudCannotExplainMatch = current == null || current.floorId != wifiFloor ||
             current.position.distanceTo(wifiPosition) > config.globalRelocalizationDistanceMetres
-        if (allowGlobalRelocalization && isStrong && cloudCannotExplainMatch) {
+        // Multi-floor only. Without a current floor (lost filter) any rebuild would pick a floor, so it is blocked too.
+        val crossFloorBlocked = multiFloor && !crossFloorRelocalizationAllowed && current?.floorId != wifiFloor
+        if (allowGlobalRelocalization && isStrong && cloudCannotExplainMatch && !crossFloorBlocked) {
             relocateFromWifi(match)
             return WifiCorrectionResult(
                 WifiCorrectionKind.GLOBAL_RELOCALIZATION,
@@ -301,14 +394,16 @@ class ParticleFilter(
             )
         }
         if (mutableParticles.isEmpty()) {
+            if (crossFloorBlocked && allowGlobalRelocalization && isStrong) return deferCrossFloor(wifiFloor)
             addEvent(FilterEventType.FILTER_LOST, detail = "Wi-Fi evidence was not strong enough to relocalize")
             return WifiCorrectionResult(WifiCorrectionKind.FILTER_LOST, false, 0.0, null)
         }
 
         val evidenceStrength = match.confidence.coerceIn(0.05, 1.0)
-        injectAroundWifi(match, wifiPosition, wifiFloor)
+        val beforeCorrection = mutableParticles
+        if (!multiFloor || wifiFloor == current?.floorId) injectAroundWifi(match, wifiPosition, wifiFloor)
         val corrected = mutableParticles.map { particle ->
-            val likelihood = match.neighbours.sumOf { neighbour ->
+            val likelihood = if (multiFloor) multiFloorWifiLikelihood(particle, match) else match.neighbours.sumOf { neighbour ->
                 val sigma = config.correctionSpatialSigmaMetres * (1.0 + neighbour.distance / 25.0)
                 val squaredDistance = particle.position.distanceTo(neighbour.position).squared()
                 val spatial = exp(-squaredDistance / (2.0 * sigma.squared()))
@@ -321,6 +416,10 @@ class ParticleFilter(
         }
         val total = corrected.sumOf { it.weight }
         if (!total.isFinite() || total <= 1e-300) {
+            if (crossFloorBlocked) {
+                mutableParticles = beforeCorrection
+                return deferCrossFloor(wifiFloor)
+            }
             if (allowGlobalRelocalization && isStrong) {
                 relocateFromWifi(match)
                 return WifiCorrectionResult(
@@ -338,7 +437,7 @@ class ParticleFilter(
         mutableParticles = normalizeWeights(corrected)
         val effectiveCount = effectiveParticleCount()
         val shouldResample = effectiveCount < config.resampleEffectiveSizeRatio * config.particleCount
-        if (shouldResample) mutableParticles = systematicResample(mutableParticles, config.particleCount)
+        if (shouldResample) mutableParticles = resample(mutableParticles, config.particleCount)
         addEvent(FilterEventType.WIFI_CORRECTION, detail = "Applied ${match.freshness} Wi-Fi likelihood")
         return WifiCorrectionResult(
             kind = WifiCorrectionKind.APPLIED,
@@ -382,7 +481,7 @@ class ParticleFilter(
         }
         mutableParticles = normalizeWeights(corrected)
         val resample = effectiveParticleCount() < config.resampleEffectiveSizeRatio * config.particleCount
-        if (resample) mutableParticles = systematicResample(mutableParticles, config.particleCount)
+        if (resample) mutableParticles = resample(mutableParticles, config.particleCount)
         addEvent(FilterEventType.MAGNETIC_CORRECTION, detail = "Applied magnetic likelihood on %.0f%% mapped weight".format(mappedWeight * 100))
         return MagneticCorrectionResult(MagneticCorrectionKind.APPLIED, mappedWeight, resample, summary())
     }
@@ -400,7 +499,10 @@ class ParticleFilter(
         return requireNotNull(summary())
     }
 
-    /** A floor change is accepted only for particles currently inside a configured transition. */
+    /**
+     * A floor change is accepted only for particles currently inside a configured transition.
+     * Legacy; not used by live sessions (multi-floor sessions use [applyVerticalEvidence] and [seedFloorHypotheses]).
+     */
     fun requestFloorTransition(targetFloorId: String): FloorTransitionResult {
         require(targetFloorId.isNotBlank())
         if (mutableParticles.isEmpty()) {
@@ -448,7 +550,7 @@ class ParticleFilter(
 
     fun forceResample(): ParticleSummary? {
         if (mutableParticles.isNotEmpty()) {
-            mutableParticles = systematicResample(normalizeWeights(mutableParticles), config.particleCount)
+            mutableParticles = resample(normalizeWeights(mutableParticles), config.particleCount)
         }
         return summary()
     }
@@ -463,7 +565,86 @@ class ParticleFilter(
         val selectedFloor = floorVotes.entries
             .sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key })
             .first()
-        val floorParticles = normalized.filter { it.floorId == selectedFloor.key && it.weight > 0.0 }
+        return summarize(normalized, selectedFloor.key, selectedFloor.value).also { cachedSummary = it }
+    }
+
+    /**
+     * The same summary as [summary] but restricted to [floorId]'s particles, whatever the strongest floor is.
+     * Not cached. Null when the filter is lost or [floorId] holds no weight.
+     */
+    fun summary(floorId: String): ParticleSummary? {
+        if (mutableParticles.isEmpty()) return null
+        val normalized = normalizeWeights(mutableParticles)
+        // Summed in particle order, exactly as summary() sums its groups, so the argmax floor matches bit for bit.
+        val vote = normalized.filter { it.floorId == floorId }.sumOf { it.weight }
+        if (vote <= 0.0) return null
+        return summarize(normalized, floorId, vote)
+    }
+
+    /** Normalised weight per floor, keyed in floor-id order. Empty when the filter is lost. */
+    fun floorVotes(): Map<String, Double> {
+        if (mutableParticles.isEmpty()) return emptyMap()
+        return normalizeWeights(mutableParticles).groupBy { it.floorId }
+            .mapValues { (_, rows) -> rows.sumOf { it.weight } }
+            .toSortedMap()
+    }
+
+    /**
+     * Multi-floor only: the share of the filter's weight inside each portal's area, now or in portal memory, keyed by
+     * portal index. A particle in several portals counts for each. Empty without a topology or particles.
+     */
+    fun portalWeights(): Map<Int, Double> {
+        if (!multiFloor || mutableParticles.isEmpty()) return emptyMap()
+        val total = mutableParticles.sumOf { it.weight }
+        if (!total.isFinite() || total <= 0.0) return emptyMap()
+        val weights = sortedMapOf<Int, Double>()
+        mutableParticles.forEach { particle ->
+            eligiblePortals(particle).forEach { weights[it.index] = (weights[it.index] ?: 0.0) + particle.weight / total }
+        }
+        return weights
+    }
+
+    /**
+     * Multi-floor only: moves [VerticalEvidence.share] of the weight of particles in (or recently in) a compatible
+     * portal to that portal's exit on the other floor, chaining one-hop links when no direct link covers the floor
+     * count. Rejected, with the particles untouched, when no particle is eligible.
+     */
+    fun applyVerticalEvidence(evidence: VerticalEvidence): FloorTransitionResult {
+        if (!multiFloor) return FloorTransitionResult(false, 0, summary())
+        return transitionThroughPortals(
+            direction = evidence.direction, candidates = evidence.floorCandidates, kind = evidence.kind,
+            share = evidence.share, outOfPortalLikelihood = evidence.outOfPortalLikelihood,
+            unverifiedFactor = evidence.unverifiedFactor, onlyPortals = null, allowChains = true, source = "vertical evidence",
+        )
+    }
+
+    /**
+     * Multi-floor only: seeds [share] of the weight of particles in the given portals (e.g. after a stairs or lift
+     * dwell with no barometer) on the portals' far floors. Particles elsewhere keep their weight.
+     */
+    fun seedFloorHypotheses(
+        kind: VerticalKindHint,
+        portalIndices: Set<Int>,
+        share: Double,
+        unverifiedFactor: Double,
+    ): FloorTransitionResult {
+        if (!multiFloor) return FloorTransitionResult(false, 0, summary())
+        require(share in 0.0..1.0)
+        require(unverifiedFactor in 0.0..1.0)
+        val candidates = portalIndices.mapNotNull { floorTopology.portals.getOrNull(it) }.map { abs(it.levelDelta) }.toSet()
+        if (candidates.isEmpty()) {
+            addEvent(FilterEventType.FLOOR_TRANSITION_REJECTED, detail = "Floor seeding named no known portal")
+            return FloorTransitionResult(false, mutableParticles.size, summary())
+        }
+        return transitionThroughPortals(
+            direction = VerticalDirection.UNKNOWN, candidates = candidates, kind = kind, share = share,
+            outOfPortalLikelihood = 1.0, unverifiedFactor = unverifiedFactor, onlyPortals = portalIndices,
+            allowChains = false, source = "floor seeding",
+        )
+    }
+
+    private fun summarize(normalized: List<Particle>, floorKey: String, vote: Double): ParticleSummary {
+        val floorParticles = normalized.filter { it.floorId == floorKey && it.weight > 0.0 }
         val seed = floorParticles.map { candidate ->
             candidate to floorParticles.filter {
                 it.position.distanceTo(candidate.position) <= config.clusterRadiusMetres
@@ -473,7 +654,7 @@ class ParticleFilter(
                 .thenBy { it.first.x }
                 .thenBy { it.first.y },
         ).first().first
-        val floor = metricMap.floors.getValue(selectedFloor.key)
+        val floor = metricMap.floors.getValue(floorKey)
         fun reachable(point: MetricPoint): Boolean = seed.position.distanceTo(point) <= MetricGeometry.DEFAULT_EPSILON ||
             (floor.isPathInsideWalkableSpace(seed.position, point) && !floor.crossesWall(seed.position, point))
         val cluster = floorParticles.filter {
@@ -499,19 +680,228 @@ class ParticleFilter(
         val spread = sqrt(
             cluster.sumOf { it.weight * it.position.distanceTo(position).squared() } / clusterWeight,
         )
-        val floorConfidence = selectedFloor.value.coerceIn(0.0, 1.0)
-        val clusterAgreement = (clusterWeight / selectedFloor.value).coerceIn(0.0, 1.0)
+        val floorConfidence = vote.coerceIn(0.0, 1.0)
+        val clusterAgreement = (clusterWeight / vote).coerceIn(0.0, 1.0)
         val compactness = exp(-spread / config.clusterRadiusMetres)
         val confidence = (floorConfidence * clusterAgreement * compactness).coerceIn(0.0, 1.0)
         return ParticleSummary(
             position = position,
-            floorId = selectedFloor.key,
+            floorId = floorKey,
             floorConfidence = floorConfidence,
             confidence = confidence,
             uncertaintyRadiusMetres = max(0.25, 2.146 * spread),
             spatialSpreadMetres = spread,
             clusterParticleCount = cluster.size,
-        ).also { cachedSummary = it }
+        )
+    }
+
+    // ----- Multi-floor helpers (never called without a topology) -----------------------------------------
+
+    /** Portal memory after an allowed move: 0 steps if a portal now holds the particle, else one more step. */
+    private fun updatePortalMemory(particle: Particle): Particle {
+        val floor = metricMap.floors.getValue(particle.floorId)
+        val captured = floorTopology.capture(floor, particle.position, config.portalSlackMetres).firstOrNull()
+        return if (captured != null) {
+            particle.copy(portalIndex = captured.index, stepsSincePortal = 0)
+        } else {
+            val steps = if (particle.stepsSincePortal == Int.MAX_VALUE) Int.MAX_VALUE else particle.stepsSincePortal + 1
+            particle.copy(stepsSincePortal = steps)
+        }
+    }
+
+    /** Portals whose area holds the particle now, then the remembered one if still within portal memory. */
+    private fun eligiblePortals(particle: Particle): List<FloorPortal> {
+        val floor = metricMap.floors[particle.floorId] ?: return emptyList()
+        val captured = floorTopology.capture(floor, particle.position, config.portalSlackMetres)
+        val remembered = floorTopology.portals.getOrNull(particle.portalIndex)
+            ?.takeIf { particle.stepsSincePortal <= config.portalMemorySteps && it.fromFloorId == particle.floorId }
+        return if (remembered == null || captured.any { it.index == remembered.index }) captured else captured + remembered
+    }
+
+    private fun kindMatches(hint: VerticalKindHint, kind: ConnectorKind): Boolean = when (hint) {
+        VerticalKindHint.STAIRS -> kind == ConnectorKind.STAIRS || kind == ConnectorKind.ESCALATOR || kind == ConnectorKind.RAMP
+        VerticalKindHint.LIFT -> kind == ConnectorKind.LIFT
+        VerticalKindHint.ANY -> true
+    }
+
+    private fun directionMatches(direction: VerticalDirection, levelDelta: Int): Boolean = when (direction) {
+        VerticalDirection.UP -> levelDelta > 0
+        VerticalDirection.DOWN -> levelDelta < 0
+        VerticalDirection.UNKNOWN -> levelDelta != 0
+    }
+
+    private fun reversePortalIndex(portal: FloorPortal): Int = floorTopology.portals.firstOrNull {
+        it.linkId == portal.linkId && it.fromFloorId == portal.toFloorId && it.toFloorId == portal.fromFloorId
+    }?.index ?: -1
+
+    /**
+     * A walkable exit near the portal's far end (Gaussian, truncated at 3 sigma), reachable from it; the far end
+     * itself after too many tries.
+     */
+    private fun sampleExit(portal: FloorPortal): MetricPoint {
+        val floor = metricMap.floors.getValue(portal.toFloorId)
+        val spread = min(portal.radiusMetres / 2.0, config.exitSpreadMaxMetres)
+        repeat(config.exitSampleTries) {
+            val candidate = MetricPoint(portal.toCentre.x + gaussian(spread), portal.toCentre.y + gaussian(spread))
+            if (candidate.distanceTo(portal.toCentre) <= 3.0 * spread &&
+                floor.isPathInsideWalkableSpace(portal.toCentre, candidate) && !floor.crossesWall(portal.toCentre, candidate)) {
+                return candidate
+            }
+        }
+        return portal.toCentre
+    }
+
+    private fun transitionThroughPortals(
+        direction: VerticalDirection,
+        candidates: Set<Int>,
+        kind: VerticalKindHint,
+        share: Double,
+        outOfPortalLikelihood: Double,
+        unverifiedFactor: Double,
+        onlyPortals: Set<Int>?,
+        allowChains: Boolean,
+        source: String,
+    ): FloorTransitionResult {
+        if (mutableParticles.isEmpty()) {
+            addEvent(FilterEventType.FLOOR_TRANSITION_REJECTED, detail = "Filter has no particles")
+            return FloorTransitionResult(false, 0, null)
+        }
+        val mostFloors = candidates.max()
+        fun compatible(portal: FloorPortal) = kindMatches(kind, portal.kind) && directionMatches(direction, portal.levelDelta) &&
+            (onlyPortals == null || portal.index in onlyPortals)
+
+        data class Plan(val particle: Particle, val starts: List<FloorPortal>)
+        val plans = mutableParticles.map { particle ->
+            val eligible = eligiblePortals(particle).filter(::compatible)
+            val direct = eligible.filter { abs(it.levelDelta) in candidates }
+            val starts = when {
+                direct.isNotEmpty() -> direct
+                allowChains -> eligible.filter { abs(it.levelDelta) < mostFloors }
+                else -> emptyList()
+            }
+            Plan(particle, starts)
+        }
+        val rejected = plans.count { it.starts.isEmpty() }
+        if (rejected == plans.size) {
+            addEvent(
+                FilterEventType.FLOOR_TRANSITION_REJECTED,
+                rejectedParticleCount = rejected,
+                detail = "No particle was in a compatible floor link for $source",
+            )
+            return FloorTransitionResult(false, rejected, summary())
+        }
+
+        val next = mutableListOf<Particle>()
+        val usedLinks = sortedSetOf<String>()
+        var movedWeight = 0.0
+        plans.forEach { (particle, starts) ->
+            if (starts.isEmpty()) {
+                next += particle.copy(weight = particle.weight * outOfPortalLikelihood)
+                return@forEach
+            }
+            var stayerShare = 1.0
+            starts.forEach { start ->
+                val portalShare = share * (if (start.verifiedOnSite) 1.0 else unverifiedFactor) / starts.size
+                stayerShare -= portalShare
+                var last = start
+                var floorsMoved = abs(start.levelDelta)
+                var hops = 1
+                usedLinks += start.linkId
+                // Chain one-hop links in the same direction until the floor count is reached or no link continues.
+                // Each further hop must be reachable from the previous link's landing; only the final exit is sampled.
+                while (floorsMoved !in candidates && hops < min(mostFloors, config.maxHops)) {
+                    val floor = metricMap.floors.getValue(last.toFloorId)
+                    val hop = floorTopology.capture(floor, last.toCentre, config.portalSlackMetres).firstOrNull {
+                        compatible(it) && (it.levelDelta > 0) == (start.levelDelta > 0) &&
+                            floorsMoved + abs(it.levelDelta) <= mostFloors
+                    } ?: break
+                    last = hop
+                    floorsMoved += abs(hop.levelDelta)
+                    hops++
+                    usedLinks += hop.linkId
+                }
+                val exit = sampleExit(last)
+                val weight = particle.weight * portalShare
+                movedWeight += weight
+                next += particle.copy(
+                    x = exit.x, y = exit.y, floorId = last.toFloorId, weight = weight,
+                    previousX = exit.x, previousY = exit.y,
+                    portalIndex = reversePortalIndex(last), stepsSincePortal = 0,
+                )
+            }
+            next += particle.copy(weight = particle.weight * max(0.0, stayerShare))
+        }
+        val total = next.sumOf { it.weight }
+        val movedShare = if (total > 0.0) movedWeight / total else 0.0
+        mutableParticles = resample(normalizeWeights(next), config.particleCount)
+        addEvent(
+            FilterEventType.FLOOR_TRANSITION,
+            rejectedParticleCount = rejected,
+            detail = String.format(Locale.ROOT, "Moved %.3f of the weight through %s for %s", movedShare, usedLinks.joinToString(", "), source),
+        )
+        return FloorTransitionResult(true, rejected, summary())
+    }
+
+    private fun multiFloorWifiLikelihood(particle: Particle, match: WifiMatchResult): Double =
+        match.neighbours.sumOf { neighbour ->
+            if (particle.floorId == neighbour.floorId) {
+                val sigma = config.correctionSpatialSigmaMetres * (1.0 + neighbour.distance / 25.0)
+                val squaredDistance = particle.position.distanceTo(neighbour.position).squared()
+                neighbour.weight * exp(-squaredDistance / (2.0 * sigma.squared()))
+            } else {
+                // Floors do not share a frame, so a neighbour on another floor carries no spatial term.
+                neighbour.weight * config.crossFloorLikelihood
+            }
+        }
+
+    private fun deferCrossFloor(wifiFloor: String): WifiCorrectionResult {
+        addEvent(
+            FilterEventType.CROSS_FLOOR_WIFI_DEFERRED,
+            detail = "Wi-Fi suggests floor $wifiFloor; cross-floor relocalization deferred",
+        )
+        return WifiCorrectionResult(WifiCorrectionKind.DEFERRED_CROSS_FLOOR, false, effectiveParticleCount(), summary())
+    }
+
+    private fun resample(input: List<Particle>, count: Int): List<Particle> =
+        if (!multiFloor) systematicResample(input, count) else floorStratifiedResample(input, count)
+
+    /**
+     * Resamples each floor separately so the floor posterior survives: floors below [ParticleFilterConfig.floorPruneWeight]
+     * are dropped (never the strongest), each kept floor gets max(minParticlesPerFloor, its largest-remainder share of
+     * [count]) particles, the excess taken from the largest floor, and each output weighs W_f / n_f.
+     */
+    private fun floorStratifiedResample(input: List<Particle>, count: Int): List<Particle> {
+        require(input.isNotEmpty())
+        val normalized = normalizeWeights(input)
+        val byFloor = normalized.groupBy { it.floorId }.toSortedMap()
+        val floorWeights = byFloor.mapValues { (_, rows) -> rows.sumOf { it.weight } }
+        val strongest = floorWeights.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key })
+            .first().key
+        val kept = floorWeights.filter { (id, weight) -> id == strongest || (weight > 0.0 && weight >= config.floorPruneWeight) }
+        val keptTotal = kept.values.sum()
+        val ids = kept.keys.toList()
+        val shares = ids.map { kept.getValue(it) / keptTotal }
+        val exact = shares.map { it * count }
+        val allocation = exact.map { it.toInt() }.toIntArray()
+        val remaining = count - allocation.sum()
+        ids.indices.sortedWith(compareByDescending<Int> { exact[it] - allocation[it] }.thenBy { ids[it] })
+            .take(remaining).forEach { allocation[it]++ }
+        val minimum = min(config.minParticlesPerFloor, count / ids.size)
+        for (i in ids.indices) {
+            while (allocation[i] < minimum) {
+                val donor = ids.indices.filter { allocation[it] > minimum }
+                    .sortedWith(compareByDescending<Int> { allocation[it] }.thenBy { ids[it] })
+                    .firstOrNull() ?: break
+                allocation[donor]--
+                allocation[i]++
+            }
+        }
+        val output = ids.indices.flatMap { i ->
+            if (allocation[i] == 0) emptyList()
+            else systematicResample(byFloor.getValue(ids[i]), allocation[i]).map { it.copy(weight = shares[i] / allocation[i]) }
+        }
+        return normalizeWeights(output)
     }
 
     private fun initializeParticles(fix: AbsoluteFix, positionStdMetres: Double) {
@@ -578,6 +968,7 @@ class ParticleFilter(
             // Keep a surviving particle's heading and stride calibration; only the location is new.
             val donor = donors[random.nextInt(donors.size)]
             injected += donor.copy(x = candidate.x, y = candidate.y, floorId = floorId, weight = meanWeight,
+                portalIndex = -1, stepsSincePortal = Int.MAX_VALUE,
                 previousX = candidate.x + donor.previousX - donor.x, previousY = candidate.y + donor.previousY - donor.y)
         }
         if (injected.isEmpty()) return

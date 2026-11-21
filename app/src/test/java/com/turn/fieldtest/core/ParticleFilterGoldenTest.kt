@@ -36,6 +36,7 @@ class ParticleFilterGoldenTest {
     /** Constructor variants that must all reproduce the snapshot; the first one generates it. */
     private val variants: List<Pair<String, FilterFactory>> = listOf(
         "default" to FilterFactory { map, config, seed -> ParticleFilter(map, config, seed) },
+        "empty-topology" to FilterFactory { m, c, s -> ParticleFilter(m, c, s, FloorTopology.NONE) },
     )
 
     @Test fun a_predictStepsAgainstWallsReplenishSurvivors() = verify("a_predict_walls") { records ->
