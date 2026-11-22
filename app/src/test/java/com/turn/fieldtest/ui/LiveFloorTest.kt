@@ -85,4 +85,23 @@ class LiveFloorTest {
         assertTrue(state.floorTrackingEnabled)
         assertFalse(state.useUncheckedFloorLinks)
     }
+
+    // A session started on Floor 3 from a known start, then the display followed Floor 4. The known start is in Floor 3's
+    // frame; left set, the next session would start from those coordinates on Floor 4.
+    @Test fun selectionsFromTheStartFloorAreDroppedAfterTheDisplayFollowedAnotherFloor() {
+        val state = TurnAppState().apply {
+            destinations.add(com.turn.fieldtest.data.local.PointOfInterestEntity("lab-4", "f-4", "Lab 4", "ROOM", 2.0, 2.0))
+            manualStartPoint = Offset(25f, 8f); pickingStart = true; selectedNodeId = "node-3"
+            selectedDestinationId = "cafe-3"
+        }
+        state.clearSelectionsFromOtherFloor()
+        assertNull(state.manualStartPoint)
+        assertFalse(state.pickingStart)
+        assertNull(state.selectedNodeId)
+        assertNull(state.selectedDestinationId)
+
+        state.selectedDestinationId = "lab-4"
+        state.clearSelectionsFromOtherFloor()
+        assertEquals("lab-4", state.selectedDestinationId, "a destination on the open floor is kept")
+    }
 }

@@ -612,7 +612,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun loadProject(context: ProjectContext) {
         val savedMap = projects.load(context)
-        if (appState.activeProject != context) appState.mapSetupSection = "Scale"
+        val switchingFloor = appState.activeProject != context
+        if (switchingFloor) appState.mapSetupSection = "Scale"
         val venue = savedMap.venue
         val floor = savedMap.floor
         app.settings.update { it.copy(activeVenueId = context.venueId, activeFloorId = context.floorId) }
@@ -654,6 +655,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         runCatching { refreshMagneticCoverage(context) }
         // Links are drawn on every floor map; suggestions and picker maps belong to one building only.
         appState.connectorSuggestions = emptyList(); appState.floorLinksStatus = FLOOR_LINKS_IDLE_STATUS
+        // The last session's floor-tracking start status describes that session's floor, not this one.
+        if (switchingFloor) appState.floorTrackingStatus = null
         if (appState.buildingFloorMaps.values.firstOrNull()?.venue?.id != context.venueId) appState.buildingFloorMaps = emptyMap()
         appState.floorConnectors = runCatching { connectorRepository.connectors(context.venueId) }.getOrDefault(emptyList())
         appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
@@ -1335,7 +1338,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.liveRunning = false
                 appState.liveStarting = false
                 appState.sessionLocked = false
-                if (activePositioningSession == null) clearMultiFloorSession()
+                if (activePositioningSession == null) { clearMultiFloorSession(); appState.floorTrackingStatus = null }
                 appState.realLiveStatus = "Could not create physical session: ${failure.message ?: failure::class.java.simpleName}"
             }
         }
@@ -2146,6 +2149,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         rawPdrTracker = null
         val followedFloor = appState.activeProject?.takeIf { floorCoordinator != null && it != sessionContext }
         clearMultiFloorSession()
+        // The display followed another floor: the start floor's known start and selections do not apply there.
+        if (followedFloor != null) appState.clearSelectionsFromOtherFloor()
         // The display followed another floor: its survey badges and magnetic coverage were not loaded on the way.
         followedFloor?.let { floor -> viewModelScope.launch {
             runCatching { refreshSurveyProgress(floor) }
@@ -2428,16 +2433,19 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
      * Multi-floor sessions only: barometer samples feed the coordinator, and on any sample its housekeeping runs at
      * most once per second (barometer health, pending-height expiry, lift stillness, decision holds).
      */
-    private fun handleFloorSample(coordinator: com.turn.fieldtest.core.FloorTrackingCoordinator, sample: SensorSample) {
+    private suspend fun handleFloorSample(coordinator: com.turn.fieldtest.core.FloorTrackingCoordinator, sample: SensorSample) {
         val ts = sample.sensorTimestampNanos
+        // Vertical evidence moves and resamples particles, and the tick scans every particle against the portals:
+        // filter work runs off the main thread like every other filter update (the caller holds eventMutex).
+        val filter = particleFilter
         if (sample.kind == SensorSampleKind.PRESSURE) sample.values.firstOrNull()?.takeIf { it.isFinite() }?.let { hpa ->
-            val result = coordinator.onPressure(ts, hpa.toDouble(), particleFilter)
+            val result = withContext(Dispatchers.Default) { coordinator.onPressure(ts, hpa.toDouble(), filter) }
             drainFloorEvents()
             if (result != null) updateRealParticleUi()
         }
         if (lastFloorTickNanos == Long.MIN_VALUE || ts - lastFloorTickNanos >= 1_000_000_000L) {
             lastFloorTickNanos = ts
-            coordinator.onTick(ts, particleFilter)
+            withContext(Dispatchers.Default) { coordinator.onTick(ts, filter) }
             drainFloorEvents()
             if (particleFilter?.isLost == false) updateRealParticleUi(fresh = false)
         }

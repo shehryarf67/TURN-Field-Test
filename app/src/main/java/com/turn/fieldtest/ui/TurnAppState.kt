@@ -183,6 +183,18 @@ class TurnAppState {
         routePoints = emptyList(); remainingDistanceMetres = null; destinationReached = false
     }
 
+    /**
+     * After a multi-floor live session whose display followed another floor: selections made in the start floor's
+     * frame (known start, selected node) no longer describe the open floor, and a destination id that is not on it
+     * is dropped, as opening that floor would do. Otherwise the next session would start from the old floor's
+     * coordinates on this one.
+     */
+    fun clearSelectionsFromOtherFloor() {
+        manualStartPoint = null; pickingStart = false
+        selectedNodeId = null
+        if (destinations.none { it.id == selectedDestinationId }) selectedDestinationId = null
+    }
+
     var startupLoading by mutableStateOf(false)
     var projectBusy by mutableStateOf(false)
     var sessionLocked by mutableStateOf(false)
