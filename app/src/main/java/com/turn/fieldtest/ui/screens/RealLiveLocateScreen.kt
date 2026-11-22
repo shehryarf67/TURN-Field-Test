@@ -67,6 +67,10 @@ internal fun RealLiveLocateScreen(
     onScan: () -> Unit,
     onRelocalize: () -> Unit,
 ) {
+    // Multi-floor sessions name the tracked floor; single-floor sessions show the open floor as before.
+    val trackedFloorName = state.liveFloorTracking?.let { tracking ->
+        state.projects.firstOrNull { it.floorId == state.realLiveFloorId }?.floorName ?: tracking.floorName
+    } ?: state.floorName
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -97,7 +101,7 @@ internal fun RealLiveLocateScreen(
         ) {
             StatusPill(if (state.realLiveInitialized) "absolute fix acquired" else "awaiting absolute fix", if (state.realLiveInitialized) EventSeverity.GOOD else EventSeverity.WARNING)
             StatusPill(state.lastCorrectionType, EventSeverity.INFO)
-            StatusPill(if (state.realLiveFloorId == null) "floor uncertain" else state.floorName, if (state.realLiveFloorId == null) EventSeverity.WARNING else EventSeverity.GOOD)
+            StatusPill(if (state.realLiveFloorId == null) "floor uncertain" else trackedFloorName, if (state.realLiveFloorId == null) EventSeverity.WARNING else EventSeverity.GOOD)
             StatusPill("NO SIMULATED FALLBACK", EventSeverity.GOOD)
         }
 
@@ -109,7 +113,7 @@ internal fun RealLiveLocateScreen(
             secondaryWeight = 1f,
             primary = {
                 SectionCard(
-                    title = "${if (state.realLiveFloorId == null) "Unresolved floor" else state.floorName} · physical trace",
+                    title = "${if (state.realLiveFloorId == null) "Unresolved floor" else trackedFloorName} · physical trace",
                     subtitle = "Metric coordinates · lower-left origin · +x initial direction",
                     trailing = {
                         StatusPill(

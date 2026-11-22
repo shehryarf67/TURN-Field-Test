@@ -554,6 +554,22 @@ class TurnAppState {
     var realMagneticStatus by mutableStateOf("Magnetic corrections not used yet")
     var realMagneticAppliedSteps by mutableIntStateOf(0)
 
+    // Multi-floor tracking (phase 2). Every field stays null in single-floor sessions, so screens render as before.
+    /** The confirmed floor of a multi-floor live session; null otherwise. */
+    var liveFloorTracking by mutableStateOf<LiveFloorUi?>(null)
+    /** The destination picked during a multi-floor live session, kept across floor swaps. */
+    var liveDestination by mutableStateOf<LiveDestination?>(null)
+    /** The start floor of a multi-floor live session: keeps screen state while the display follows other floors. */
+    var liveSessionKey by mutableStateOf<com.turn.fieldtest.data.repository.ProjectContext?>(null)
+    /** Key for per-screen remembered state: the open floor, or the live multi-floor session while one runs. */
+    val screenStateKey: Any? get() = liveSessionKey ?: activeProject
+    /** Option "Multi-floor tracking"; saved with the other preferences. */
+    var floorTrackingEnabled by mutableStateOf(true)
+    /** Option "Use unchecked floor links"; saved with the other preferences. */
+    var useUncheckedFloorLinks by mutableStateOf(false)
+    /** Start status of floor tracking for the running or last session (plan §5); null when there is nothing to say. */
+    var floorTrackingStatus by mutableStateOf<String?>(null)
+
     /** Proposed survey locations shown on the map until accepted or cleared; never saved by themselves. */
     val suggestedSurveyPoints = mutableStateListOf<Offset>()
     var surveySpacingMetres by mutableStateOf(3.0)

@@ -128,8 +128,8 @@ class CanvasWorkflowTest {
         compose.onNodeWithContentDescription("Map options").performClick()
         compose.onNodeWithText("Magnetic evidence applied on 4 steps").assertExists()
         compose.runOnIdle { assertTrue(state.magneticCorrectionsEnabled) }
-        // Dark mode and debug overlays stay available; only the magnetic switch is locked.
-        compose.onAllNodes(isToggleable() and isNotEnabled()).assertCountEquals(1)
+        // Dark mode and debug overlays stay available; the magnetic switch and both floor-tracking switches are locked.
+        compose.onAllNodes(isToggleable() and isNotEnabled()).assertCountEquals(3)
         compose.onAllNodes(isToggleable() and isEnabled()).assertCountEquals(2)
     }
 

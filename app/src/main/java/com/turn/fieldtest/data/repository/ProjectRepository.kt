@@ -115,7 +115,12 @@ class ProjectRepository(private val database: TurnDatabase) {
         context
     }
 
-    suspend fun load(context: ProjectContext): SavedFloorMap = database.withTransaction {
+    /**
+     * Reads one saved floor. Missing mapper rooms and descriptive mapper reference names are repaired in the
+     * returned copy; with [persistRepairs] (the default) those repairs are also written back. Tracking sessions load
+     * the other floors of a building with `false`, so starting a session never writes to floors it only reads.
+     */
+    suspend fun load(context: ProjectContext, persistRepairs: Boolean = true): SavedFloorMap = database.withTransaction {
         val venue = requireNotNull(repositories.venues.venue(context.venueId)) { "Saved venue is unavailable" }
         val floor = requireNotNull(repositories.floorPlans.floor(context.floorId)) { "Saved floor is unavailable" }
         require(floor.venueId == venue.id) { "This floor belongs to another venue" }
@@ -129,9 +134,9 @@ class ProjectRepository(private val database: TurnDatabase) {
             database.navigationDao().nodes(floor.id), database.navigationDao().edges(floor.id),
             database.navigationDao().destinations(floor.id))
         val missing=saved.missingMapperRooms()
-        if(missing.isNotEmpty()) database.navigationDao().saveDestinations(missing)
+        if(persistRepairs && missing.isNotEmpty()) database.navigationDao().saveDestinations(missing)
         val renamed=saved.descriptiveMapperReferences()
-        renamed.forEach {database.floorPlanDao().upsertReferencePoint(it)}
+        if(persistRepairs) renamed.forEach {database.floorPlanDao().upsertReferencePoint(it)}
         saved.copy(destinations=(saved.destinations+missing).sortedBy {it.name.lowercase(java.util.Locale.ROOT)},
             points=saved.points.map {p->renamed.firstOrNull {it.id==p.id} ?: p})
     }

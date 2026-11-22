@@ -83,8 +83,10 @@ internal fun NavigationMap(
         /** Map-frame degrees (0 = +x, counter-clockwise) to the angle as drawn on screen. */
         fun screenDegrees(mapDegrees: Double) = mapDegrees - 90.0 * turns
         val vectorRooms = roomLabels && state.destinationAreas.isNotEmpty()
-        val liveFocus = state.realLivePosition?.takeIf { state.liveRunning && state.realLiveInitialized }
-        LaunchedEffect(followRequested, state.liveRunning, liveFocus != null, width, height) {
+        // Multi-floor sessions: the dot belongs to the tracked floor; hidden while another floor is shown.
+        val positionHere = com.turn.fieldtest.ui.positionOnDisplayedFloor(state.liveFloorTracking, state.realLiveFloorId, state.activeProject?.floorId)
+        val liveFocus = state.realLivePosition?.takeIf { state.liveRunning && state.realLiveInitialized && positionHere }
+        LaunchedEffect(followRequested, state.liveRunning, liveFocus != null, width, height, state.activeProject) {
             if (followRequested && state.liveRunning && liveFocus != null) {
                 following = true
                 zoom = (min(availableWidth, availableHeight) / 18f / scale).coerceIn(1f, 12f)
@@ -319,7 +321,7 @@ internal fun NavigationMap(
                     if (showPosition && state.debugOverlays) {
                         if (state.showRawPdr) { line(state.realRawPdrTrail, TurnAmber, 2f) }
                         if (state.showWifiFixes) {
-                          state.realWifiPosition?.let {
+                          state.realWifiPosition?.takeIf { state.liveFloorTracking == null || state.realWifiFloorId == state.activeProject?.floorId }?.let {
                             val p = project(it)
                             drawCircle(TurnMint, 7f / zoom, p, style = Stroke(2f / zoom))
                             label("Last Wi-Fi match", p, TurnMint)
@@ -327,7 +329,7 @@ internal fun NavigationMap(
                         }
                         if (state.showParticles) state.realParticleCloud.forEach { drawCircle(TurnCyan.copy(alpha = 0.6f), 2f / zoom, project(it)) }
                     }
-                    if (showPosition) {
+                    if (showPosition && positionHere) {
                       state.realLivePosition?.let { position ->
                         val p = project(position)
                         state.realLiveUncertaintyMetres?.takeIf { state.liveRunning && it.isFinite() }?.let {
@@ -379,7 +381,7 @@ internal fun NavigationMap(
                     following=state.liveRunning && state.realLiveInitialized
                     if(following) zoom=(min(availableWidth,availableHeight)/18f/scale).coerceIn(1f,12f)
                     pan = viewportCentre - centre - (project(it) - centre) * zoom
-                } }, enabled = state.realLivePosition != null) {
+                } }, enabled = state.realLivePosition != null && positionHere) {
                     Icon(Icons.Outlined.MyLocation, if (following) "Following my position" else if (state.liveRunning) "Center on my position" else "Center on last position")
                 }
               }

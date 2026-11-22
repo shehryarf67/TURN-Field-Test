@@ -45,7 +45,7 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
             .padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             Surface(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.medium) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(state.floorName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(state.floorName + com.turn.fieldtest.ui.fullscreenFloorSuffix(state.liveFloorTracking), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (state.debugOverlays && state.liveRunning) Text("Steps ${state.realLiveStepCount} / ${state.realLiveDetectedSteps} detected",
                         style = MaterialTheme.typography.bodySmall)
                     Text(confidence + (state.realLiveUncertaintyMetres?.let { " · ± %.1f m".format(it) } ?: ""),
@@ -53,8 +53,9 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
                     if(state.debugOverlays) Text(if (state.realHeadingAligned) "Heading %.0f° on map".format((state.realLiveHeadingDegrees + 360.0) % 360.0)
                         else state.realHeadingStatus, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodySmall)
-                    state.destinations.firstOrNull { it.id == state.selectedDestinationId }?.let { poi ->
-                        Text(poi.name + (state.remainingDistanceMetres?.let { " · %.1f m remaining".format(it) } ?: ""),
+                    (state.destinations.firstOrNull { it.id == state.selectedDestinationId }?.name
+                        ?: state.liveDestination?.takeIf { state.liveRunning && it.id == state.selectedDestinationId }?.name)?.let { name ->
+                        Text(name + (state.remainingDistanceMetres?.let { " · %.1f m remaining".format(it) } ?: ""),
                             maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                         Text(if (age != null && age > 20) "Route based on last known position" else state.routeStatus,
                             maxLines = 2, style = MaterialTheme.typography.bodySmall)
@@ -86,7 +87,12 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
     }
 }
 
-internal fun navigationConfidence(state: TurnAppState, ageSeconds: Long?, nowEpochMillis: Long = System.currentTimeMillis()): String = when {
+internal fun navigationConfidence(state: TurnAppState, ageSeconds: Long?, nowEpochMillis: Long = System.currentTimeMillis()): String =
+    baseNavigationConfidence(state, ageSeconds, nowEpochMillis) +
+        // Multi-floor sessions only: single-floor sessions have no floor tracking state.
+        if (state.liveRunning && state.liveFloorTracking?.state == com.turn.fieldtest.core.FloorState.UNCERTAIN) " · Floor uncertain" else ""
+
+private fun baseNavigationConfidence(state: TurnAppState, ageSeconds: Long?, nowEpochMillis: Long): String = when {
     !state.liveRunning -> "Stopped"
     !state.realLiveInitialized -> "Position unavailable"
     !state.realHeadingAligned -> "Heading unavailable · movement paused"

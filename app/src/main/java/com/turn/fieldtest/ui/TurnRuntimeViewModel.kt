@@ -173,14 +173,41 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var lastHeadingUiPublishNanos = 0L
     private var lastHeadingReceiptEpochMillis: Long? = null
     private var rawPdrFloorId: String? = null
+    // Multi-floor tracking (plan Steps 7-8). In single-floor sessions floorCoordinator stays null and every branch
+    // below takes the legacy path (invariant I1); sessionBuilding then holds only the start floor.
+    private val sessionLoader = SessionBuildingLoader(projects, connectorRepository)
+    private var sessionBuilding: SessionBuilding? = null
+    /** The floor the live session started on, frozen; the displayed floor may follow other floors. */
+    private var sessionContext: ProjectContext? = null
+    private var sessionGraphs: Map<String, NavigationGraph> = emptyMap()
+    private var floorCoordinator: com.turn.fieldtest.core.FloorTrackingCoordinator? = null
+    private val liveTrailsByFloor = mutableMapOf<String, FloorTrails>()
+    /** Raw PDR trail of a multi-floor session; shown only while its start floor is displayed. */
+    private var multiFloorRawPdrTrail: List<Offset> = emptyList()
+    private var userRelocalizePending = false
+    private var lastFloorTickNanos = Long.MIN_VALUE
+    /** Latest coordinator event, kept for diagnostics until events are persisted (phase 4). */
+    private var lastFloorEvent: com.turn.fieldtest.core.FloorTrackingEvent? = null
 
     fun captureCheckpoint(input: CheckpointInput) {
         val context = appState.activeProject ?: return
         val session = activePositioningSession ?: return
         if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning || appState.realEvaluationBusy) return
+        // Single-floor sessions: the truth floor is the open floor, bounded by its size, exactly as before.
+        // Multi-floor sessions: the researcher names the truth floor (default: the start floor), never the displayed one.
+        val building = sessionBuilding?.takeIf { floorCoordinator != null }
+        val trueFloorId = if (building == null) context.floorId else input.floorId?.takeIf { it in building.floorIds }
+            ?: sessionContext?.floorId ?: context.floorId
+        val trueFloor = building?.floorMaps?.get(trueFloorId)?.floor
+        val widthLimit = trueFloor?.widthMetres ?: appState.floorWidthMetres.toDouble()
+        val heightLimit = trueFloor?.heightMetres ?: appState.floorHeightMetres.toDouble()
+        if (building != null && appState.liveFloorTracking?.state == com.turn.fieldtest.core.FloorState.CHANGING) {
+            appState.realEvaluationStatus = "Floor change in progress · capture once the floor has settled"
+            return
+        }
         if (input.code.isBlank() || !input.x.isFinite() || !input.y.isFinite() ||
-            input.x !in 0.0..appState.floorWidthMetres.toDouble() ||
-            input.y !in 0.0..appState.floorHeightMetres.toDouble()) {
+            input.x !in 0.0..widthLimit ||
+            input.y !in 0.0..heightLimit) {
             appState.realEvaluationStatus = "Checkpoint code and coordinates inside the active floor are required"
             return
         }
@@ -194,15 +221,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         val fused = if (appState.realLiveInitialized) snapshot(appState.realLivePosition,
             appState.realLiveFloorId, appState.realLiveUncertaintyMetres) else null
         val truth = MetricPoint(input.x, input.y)
-        val wifiError = evaluateAtCheckpoint(truth, context.floorId, wifi)
-        val rawError = evaluateAtCheckpoint(truth, context.floorId, raw)
-        val fusedError = evaluateAtCheckpoint(truth, context.floorId, fused)
+        val wifiError = evaluateAtCheckpoint(truth, trueFloorId, wifi)
+        val rawError = evaluateAtCheckpoint(truth, trueFloorId, raw)
+        val fusedError = evaluateAtCheckpoint(truth, trueFloorId, fused)
         fun encoded(value: EvaluationEstimate?) = value?.let { Json.encodeToString(EvaluationEstimate.serializer(), it) }
-        val checkpointId = "CP-${context.floorId}-${input.code}"
+        val checkpointId = "CP-${trueFloorId}-${input.code}"
         val runId = "TEST-${session.id}"
         val sample = TestSampleEntity(
             id = "SAMPLE-${UUID.randomUUID()}", testRunId = runId, checkpointId = checkpointId,
-            trueFloorId = context.floorId, trueXMetres = input.x, trueYMetres = input.y,
+            trueFloorId = trueFloorId, trueXMetres = input.x, trueYMetres = input.y,
             wifiOnlyEstimateJson = encoded(wifi), rawPdrEstimateJson = encoded(raw), fusedEstimateJson = encoded(fused),
             wifiOnlyHorizontalErrorMetres = wifiError.horizontalMetres,
             rawPdrHorizontalErrorMetres = rawError.horizontalMetres, fusedHorizontalErrorMetres = fusedError.horizontalMetres,
@@ -226,10 +253,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             try {
                 app.database.withTransaction {
                     val existing = repositories.evaluation.observeCheckpoints(context.venueId).first().firstOrNull { it.checkpointCode == input.code }
-                    require(existing == null || (existing.floorId == context.floorId && existing.xMetres == input.x && existing.yMetres == input.y)) {
+                    require(existing == null || (existing.floorId == trueFloorId && existing.xMetres == input.x && existing.yMetres == input.y)) {
                         "Checkpoint code already belongs to a different coordinate"
                     }
-                    require(repositories.floorPlans.observeReferencePoints(context.floorId).first().none {
+                    require(repositories.floorPlans.observeReferencePoints(trueFloorId).first().none {
                         MetricPoint(it.xMetres, it.yMetres).distanceTo(truth) < 0.05
                     }) { "Choose an independent checkpoint, separate from a training reference point" }
                     val run = repositories.evaluation.observeRuns(context.venueId).first().firstOrNull { it.id == runId }
@@ -240,7 +267,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         appVersion = BuildConfig.VERSION_NAME, startedAtEpochMillis = now,
                     ))
                     if (existing == null) repositories.evaluation.saveCheckpoint(TestCheckpointEntity(
-                        checkpointId, context.venueId, context.floorId, input.code, input.x, input.y))
+                        checkpointId, context.venueId, trueFloorId, input.code, input.x, input.y))
                     repositories.evaluation.saveSample(sample.copy(checkpointId = existing?.id ?: checkpointId))
                 }
                 appState.realTestSamples.add(sample)
@@ -267,6 +294,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.strideMetres = saved.defaultStrideMetres.toFloat()
             appState.particleCount = saved.particleCount
             appState.darkTheme = saved.darkTheme
+            appState.floorTrackingEnabled = saved.floorTrackingEnabled
+            appState.useUncheckedFloorLinks = saved.useUncheckedFloorLinks
             appState.mode = DataMode.valueOf(saved.dataMode.name)
             try {
                 if (appState.mode == DataMode.REAL_DEVICE) {
@@ -290,6 +319,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     defaultStrideMetres = appState.strideMetres.toDouble(),
                     particleCount = appState.particleCount,
                     darkTheme = appState.darkTheme,
+                    floorTrackingEnabled = appState.floorTrackingEnabled,
+                    useUncheckedFloorLinks = appState.useUncheckedFloorLinks,
                 )
             }.distinctUntilChanged().collect { settings ->
                 try {
@@ -298,6 +329,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         wifiK = settings.wifiK, missingRssiDbm = settings.missingRssiDbm,
                         normalizeDeviceOffset = settings.normalizeDeviceOffset, defaultStrideMetres = settings.defaultStrideMetres,
                         particleCount = settings.particleCount, darkTheme = settings.darkTheme,
+                        floorTrackingEnabled = settings.floorTrackingEnabled, useUncheckedFloorLinks = settings.useUncheckedFloorLinks,
                     ) }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (error: Exception) { appState.projectStatus = "Could not save preferences: ${error.message}" }
@@ -583,6 +615,59 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         if (appState.activeProject != context) appState.mapSetupSection = "Scale"
         val venue = savedMap.venue
         val floor = savedMap.floor
+        app.settings.update { it.copy(activeVenueId = context.venueId, activeFloorId = context.floorId) }
+        applyFloorDisplay(savedMap, context)
+        appState.selectedNodeId = null; appState.selectedDestinationId = null
+        appState.manualStartPoint = null; appState.pickingStart = false
+        appState.clearRoute(); appState.liveEstimateEpochMillis = null
+        appState.surveyAcceptedSnapshots = 0
+        appState.surveyCachedIgnored = 0
+        appState.surveyRawObservationCount = 0
+        appState.surveyDistinctBssidCount = 0
+        appState.realSurveyAggregates = emptyList()
+        appState.surveySessionLabel = "No active survey"
+        appState.surveySaveStatus = "Saved fingerprints remain available for matching and export"
+        appState.surveyRuntimeStatus = "Select a reference point to collect fresh Wi-Fi snapshots"
+        appState.realLivePosition = null
+        appState.realRawPdrPosition = null
+        appState.realWifiPosition = null
+        appState.realFusedTrail = emptyList()
+        appState.realRawPdrTrail = emptyList()
+        appState.realWifiFixes = emptyList()
+        appState.realParticleCloud = emptyList()
+        appState.realLiveInitialized = false
+        appState.headingChoiceConfirmed = false
+        appState.pickingHeading = false
+        appState.realHeadingAligned = false
+        appState.realHeadingStatus = "Choose your walking direction on the map before starting"
+        appState.realLiveFloorId = null
+        appState.realWifiFloorId = null
+        appState.realLiveConfidence = 0.0
+        appState.realLiveFloorConfidence = 0.0
+        appState.realLiveUncertaintyMetres = null
+        appState.realLiveStepCount = 0L
+        appState.realLiveDistanceMetres = 0.0
+        appState.realNearestFingerprintIds = emptyList()
+        appState.realTestSamples.clear()
+        appState.realLiveStatus = "Ready to start a physical session on ${floor.name}"
+        refreshSurveyProgress(context)
+        runCatching { refreshMagneticCoverage(context) }
+        // Links are drawn on every floor map; suggestions and picker maps belong to one building only.
+        appState.connectorSuggestions = emptyList(); appState.floorLinksStatus = FLOOR_LINKS_IDLE_STATUS
+        if (appState.buildingFloorMaps.values.firstOrNull()?.venue?.id != context.venueId) appState.buildingFloorMaps = emptyMap()
+        appState.floorConnectors = runCatching { connectorRepository.connectors(context.venueId) }.getOrDefault(emptyList())
+        appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
+        if (!appState.mapEditorSupported) appState.editorStatus = "Map preserved. Editing multiple walkable regions or a custom origin is not supported yet."
+    }
+
+    /**
+     * Shows [savedMap] as the open floor: geometry, reference points, anchors, calibration, floor metadata, navigation
+     * data and the saved-map baseline. No database access and no live or survey reset, so a live multi-floor session
+     * can follow the confirmed floor with it (plan Step 8); [loadProject] adds the resets and refreshes.
+     */
+    private fun applyFloorDisplay(savedMap: SavedFloorMap, context: ProjectContext) {
+        val venue = savedMap.venue
+        val floor = savedMap.floor
         val asset = savedMap.asset
         val points = savedMap.points
         val regions = savedMap.regions
@@ -598,7 +683,6 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     vertex.jsonObject.getValue("y").jsonPrimitive.double.toFloat())
             }
         }
-        app.settings.update { it.copy(activeVenueId = context.venueId, activeFloorId = context.floorId) }
         appState.draftWalkablePolygon.clear()
         appState.draftWalls.clear()
         appState.referencePoints.clear(); appState.suggestedSurveyPoints.clear()
@@ -660,51 +744,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.navigationEdges.clear(); appState.navigationEdges.addAll(savedMap.edges)
         appState.destinations.clear(); appState.destinations.addAll(savedMap.destinations)
         appState.destinationAreas.clear(); appState.destinationAreas.addAll(savedMap.destinationAreas())
-        appState.selectedNodeId = null; appState.selectedDestinationId = null
-        appState.manualStartPoint = null; appState.pickingStart = false
-        appState.clearRoute(); appState.liveEstimateEpochMillis = null
         savedNavigationGraph = runCatching { NavigationGraph(savedMap.metricMap().floors.getValue(context.floorId), savedMap.nodes.map { it.core() }, savedMap.edges.map { it.core() }) }.getOrNull()
         appState.mapHasMeasurements = savedMap.hasMeasurements
         appState.mapEditorSupported = floor.originXMetres == 0.0 && floor.originYMetres == 0.0
         appState.markMapSaved()
-        appState.surveyAcceptedSnapshots = 0
-        appState.surveyCachedIgnored = 0
-        appState.surveyRawObservationCount = 0
-        appState.surveyDistinctBssidCount = 0
-        appState.realSurveyAggregates = emptyList()
-        appState.surveySessionLabel = "No active survey"
-        appState.surveySaveStatus = "Saved fingerprints remain available for matching and export"
-        appState.surveyRuntimeStatus = "Select a reference point to collect fresh Wi-Fi snapshots"
-        appState.realLivePosition = null
-        appState.realRawPdrPosition = null
-        appState.realWifiPosition = null
-        appState.realFusedTrail = emptyList()
-        appState.realRawPdrTrail = emptyList()
-        appState.realWifiFixes = emptyList()
-        appState.realParticleCloud = emptyList()
-        appState.realLiveInitialized = false
-        appState.headingChoiceConfirmed = false
-        appState.pickingHeading = false
-        appState.realHeadingAligned = false
-        appState.realHeadingStatus = "Choose your walking direction on the map before starting"
-        appState.realLiveFloorId = null
-        appState.realWifiFloorId = null
-        appState.realLiveConfidence = 0.0
-        appState.realLiveFloorConfidence = 0.0
-        appState.realLiveUncertaintyMetres = null
-        appState.realLiveStepCount = 0L
-        appState.realLiveDistanceMetres = 0.0
-        appState.realNearestFingerprintIds = emptyList()
-        appState.realTestSamples.clear()
-        appState.realLiveStatus = "Ready to start a physical session on ${floor.name}"
-        refreshSurveyProgress(context)
-        runCatching { refreshMagneticCoverage(context) }
-        // Links are drawn on every floor map; suggestions and picker maps belong to one building only.
-        appState.connectorSuggestions = emptyList(); appState.floorLinksStatus = FLOOR_LINKS_IDLE_STATUS
-        if (appState.buildingFloorMaps.values.firstOrNull()?.venue?.id != context.venueId) appState.buildingFloorMaps = emptyMap()
-        appState.floorConnectors = runCatching { connectorRepository.connectors(context.venueId) }.getOrDefault(emptyList())
-        appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
-        if (!appState.mapEditorSupported) appState.editorStatus = "Map preserved. Editing multiple walkable regions or a custom origin is not supported yet."
     }
 
     fun missingWifiPermissions(): Array<String> = app.permissionChecker
@@ -1065,7 +1108,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     val priorDegrees = Math.toDegrees(latestMapHeadingRadians)
                     app.database.positioningDao().upsertCorrection(CorrectionEventEntity(
                         id = "COR-${UUID.randomUUID()}", positioningSessionId = session.id,
-                        floorId = activeContext.floorId, type = "MANUAL_HEADING_ALIGNMENT",
+                        floorId = (if (floorCoordinator != null) appState.realLiveFloorId ?: sessionContext?.floorId ?: activeContext.floorId
+                            else activeContext.floorId), type = "MANUAL_HEADING_ALIGNMENT",
                         sourceId = "USER_MAP_DIRECTION", accepted = true,
                         reason = JsonObject(mapOf("priorHeadingDegrees" to JsonPrimitive(priorDegrees),
                             "declaredHeadingDegrees" to JsonPrimitive(degrees),
@@ -1113,6 +1157,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             eventMutex.withLock {
                 if (appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) return@withLock
                 particleFilter = null; lastLiveMagneticObservation = null
+                userRelocalizePending = true
                 appState.realLiveInitialized = false
                 appState.realLivePosition = null
                 appState.realParticleCloud = emptyList()
@@ -1158,12 +1203,36 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             runCatching {
                 val now = System.currentTimeMillis()
                 require(!appState.hasUnsavedMapChanges) { "Save or reload map changes before starting Live locate" }
-                val saved = projects.load(context)
-                sessionMap = saved.metricMap()
+                // Tracking off, or no usable link from this floor: only the start floor is loaded, exactly as before (I1).
+                val loaded = sessionLoader.load(context, appState.floorTrackingEnabled, appState.useUncheckedFloorLinks)
+                val barometerPresent = sensorSource.state.value.availability.any { it.type == TurnSensorType.BAROMETER && it.available }
+                val coordinator = if (loaded.multiFloor) com.turn.fieldtest.core.FloorTrackingCoordinator.createOrNull(
+                    loaded.topology, com.turn.fieldtest.core.FloorDetectionConfig(), barometerPresent, context.floorId) else null
+                // No coordinator means the legacy session: never let other floors reach the filter or fingerprints.
+                val building = if (coordinator == null) loaded.singleFloor() else loaded
+                val saved = building.floorMaps.getValue(context.floorId)
+                sessionMap = building.metricMap
                 if (chosenStart != null) require(sessionMap!!.floors.getValue(context.floorId).isWalkable(chosenStart)) { "Known start must be inside saved walkable space" }
                 sessionGraph = NavigationGraph(sessionMap!!.floors.getValue(context.floorId), saved.nodes.map { it.core() }, saved.edges.map { it.core() })
                 sessionMagneticMaps = magneticRepository.map(context.floorId).takeUnless { it.isEmpty }
                     ?.let { mapOf(context.floorId to it) } ?: emptyMap()
+                sessionGraphs = mapOf(context.floorId to requireNotNull(sessionGraph))
+                if (coordinator != null) {
+                    // Other floors' paths and magnetic maps are optional: a broken one must not stop the session.
+                    (building.floorIds - context.floorId).forEach { id ->
+                        val floorMap = building.floorMaps[id] ?: return@forEach
+                        runCatching { NavigationGraph(sessionMap!!.floors.getValue(id), floorMap.nodes.map { it.core() }, floorMap.edges.map { it.core() }) }
+                            .onSuccess { sessionGraphs = sessionGraphs + (id to it) }
+                        runCatching { magneticRepository.map(id) }.getOrNull()?.takeUnless { it.isEmpty }
+                            ?.let { sessionMagneticMaps = sessionMagneticMaps + (id to it) }
+                    }
+                }
+                sessionBuilding = building
+                sessionContext = context
+                floorCoordinator = coordinator
+                lastFloorEvent = null
+                coordinator?.let { drainFloorEvents() }
+                appState.floorTrackingStatus = floorTrackingStartStatus(building, appState.floorTrackingEnabled, barometerPresent)
                 liveWifiEvidence.reset(android.os.SystemClock.elapsedRealtimeNanos() / 1_000L)
                 appState.realWifiPosition = null
                 appState.realWifiFixEpochMillis = null
@@ -1248,6 +1317,15 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLiveSessionLabel = positioningSession.id
                 appState.realLiveHeadingSource = sensorSource.state.value.selectedHeadingSource?.name ?: "unavailable"
                 appState.realLiveStatus = "Waiting for a fresh Wi-Fi fix. Heading aligned to %.0f° on the map.".format(appState.initialHeadingDegrees)
+                liveTrailsByFloor.clear(); multiFloorRawPdrTrail = emptyList()
+                userRelocalizePending = false; lastFloorTickNanos = Long.MIN_VALUE
+                appState.liveFloorTracking = null
+                if (floorCoordinator != null) {
+                    // Keyed on the start floor, so screen state survives the display following other floors.
+                    appState.liveSessionKey = context
+                    appState.liveDestination = appState.destinations.firstOrNull { it.id == appState.selectedDestinationId }
+                        ?.let { LiveDestination(it.id, context.floorId, it.name) }
+                } else { appState.liveSessionKey = null; appState.liveDestination = null }
                 if (chosenStart != null) {
                     try { eventMutex.withLock { initializeManual(chosenStart, context.floorId) } }
                     catch (error: Exception) { appState.realLiveStatus = "Known start could not initialize tracking: ${error.message}. Stop and choose another point." }
@@ -1257,6 +1335,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.liveRunning = false
                 appState.liveStarting = false
                 appState.sessionLocked = false
+                if (activePositioningSession == null) clearMultiFloorSession()
                 appState.realLiveStatus = "Could not create physical session: ${failure.message ?: failure::class.java.simpleName}"
             }
         }
@@ -1815,7 +1894,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realWifiFloorId = match.estimatedFloorId
         appState.realWifiUncertaintyMetres = match.uncertaintyRadiusMetres
         appState.realWifiFixEpochMillis = batch.receivedAtEpochMillis
-        appState.realWifiFixes = (appState.realWifiFixes + match.estimatedPosition.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
+        val coordinator = floorCoordinator
+        val wifiNowNanos = android.os.SystemClock.elapsedRealtimeNanos()
+        if (coordinator != null) appendWifiFix(match.estimatedFloorId, match.estimatedPosition.toUiOffset())
+        else appState.realWifiFixes = (appState.realWifiFixes + match.estimatedPosition.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
         appState.realWifiEvidenceStatus = "Fresh Wi-Fi match · ${eligibleAps.size} new APs · ${match.neighbours.size} competitive reference points"
         val prior = particleFilter?.summary()
         if (particleFilter == null || particleFilter?.isLost == true) {
@@ -1823,10 +1905,17 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLiveStatus = "Wi-Fi fix is ambiguous; waiting for stronger position/floor evidence"
                 return
             }
+            // Multi-floor: after a lost filter, Wi-Fi may rebuild the cloud on another floor only with confirmation.
+            if (coordinator != null && !coordinator.allowWifiInit(match, wifiNowNanos, userRelocalizePending)) {
+                drainFloorEvents()
+                appState.realLiveStatus = wifiSuggestsFloorText(sessionFloorName(match.estimatedFloorId))
+                return
+            }
             val filter = ParticleFilter(
                 metricMap = currentPilotMap(),
                 config = ParticleFilterConfig(particleCount = appState.particleCount),
                 seed = positioningSession.startedAtEpochMillis,
+                floorTopology = sessionTopology(),
             )
             runCatching {
                 withContext(Dispatchers.Default) { filter.initialize(
@@ -1842,6 +1931,13 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 return
             }
             particleFilter = filter; lastLiveMagneticObservation = null
+            if (coordinator != null && match.estimatedFloorId in coordinator.topology.levels) {
+                coordinator.onAbsoluteFix(match.estimatedFloorId,
+                    if (userRelocalizePending) com.turn.fieldtest.core.FloorFixSource.USER_RELOCALIZE
+                    else com.turn.fieldtest.core.FloorFixSource.WIFI_INIT, wifiNowNanos)
+                drainFloorEvents()
+            }
+            userRelocalizePending = false
             val availableSteps = if (
                 sensorSource.state.value.selectedStepSource == TurnSensorType.STEP_DETECTOR
             ) setOf(StepSource.STEP_DETECTOR) else emptySet()
@@ -1855,6 +1951,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 rawPdrFloorId = match.estimatedFloorId
                 appState.realRawPdrPosition = match.estimatedPosition.toUiOffset()
                 appState.realRawPdrTrail = listOf(match.estimatedPosition.toUiOffset())
+                multiFloorRawPdrTrail = appState.realRawPdrTrail
             } else {
                 appState.relocalizationCount += 1
             }
@@ -1870,7 +1967,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 ).also { repositories.positioning.saveSession(it) }
             }
         } else {
-            val correction = withContext(Dispatchers.Default) { requireNotNull(particleFilter).correctWithWifi(match) }
+            val correction = withContext(Dispatchers.Default) {
+                val filter = requireNotNull(particleFilter)
+                // Multi-floor: the coordinator gates cross-floor relocalisation and records it as an absolute fix.
+                coordinator?.correctWithWifi(filter, match, wifiNowNanos) ?: filter.correctWithWifi(match)
+            }
+            drainFloorEvents()
             if (correction.kind == WifiCorrectionKind.GLOBAL_RELOCALIZATION) {
                 appState.relocalizationCount += 1
             }
@@ -1880,13 +1982,14 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 WifiCorrectionKind.FILTER_LOST -> "filter lost"
                 WifiCorrectionKind.IGNORED_NO_ESTIMATE -> "Wi-Fi produced no estimate"
                 WifiCorrectionKind.IGNORED_NOT_FRESH -> "cached Wi-Fi result ignored"
-                // Only a multi-floor filter returns this; the live session does not build one yet.
+                // Only a multi-floor filter returns this (single-floor sessions never build one).
                 WifiCorrectionKind.DEFERRED_CROSS_FLOOR -> "Wi-Fi suggests another floor · waiting for more evidence"
             }
             appState.realLiveStatus = when (correction.kind) {
                 WifiCorrectionKind.APPLIED -> "Fresh Wi-Fi corrected particle weights"
                 WifiCorrectionKind.GLOBAL_RELOCALIZATION -> "Strong distant Wi-Fi match globally relocalized the filter"
                 WifiCorrectionKind.FILTER_LOST -> "Particle filter lost; request Wi-Fi or re-anchor"
+                WifiCorrectionKind.DEFERRED_CROSS_FLOOR -> wifiSuggestsFloorText(sessionFloorName(match.estimatedFloorId))
                 else -> appState.lastCorrectionType
             }
         }
@@ -1909,10 +2012,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private suspend fun loadPilotFingerprints(): List<WifiFingerprint> {
-        val context = activeContext
+        // The session's start floor, not the displayed one (which follows the confirmed floor in multi-floor sessions).
+        val context = sessionContext ?: activeContext
+        val floorIds = sessionBuilding?.floorIds ?: setOf(context.floorId)
         val rows = repositories.surveys.matchingFingerprints(context.venueId)
         return rows.groupBy { it.referencePointId }.mapNotNull { (referencePointId, pointRows) ->
-            val point = repositories.floorPlans.referencePoint(referencePointId)?.takeIf { it.floorId == context.floorId } ?: return@mapNotNull null
+            val point = repositories.floorPlans.referencePoint(referencePointId)?.takeIf { it.floorId in floorIds } ?: return@mapNotNull null
             val vector = pointRows.groupBy { it.bssid.lowercase() }.mapValues { (_, bssidRows) ->
                 bssidRows.map { it.medianRssiDbm }.sorted().let(::median)
             }
@@ -2039,10 +2144,74 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.sessionLocked = false
         particleFilter = null; lastLiveMagneticObservation = null
         rawPdrTracker = null
+        val followedFloor = appState.activeProject?.takeIf { floorCoordinator != null && it != sessionContext }
+        clearMultiFloorSession()
+        // The display followed another floor: its survey badges and magnetic coverage were not loaded on the way.
+        followedFloor?.let { floor -> viewModelScope.launch {
+            runCatching { refreshSurveyProgress(floor) }
+            runCatching { refreshMagneticCoverage(floor) }
+        } }
     }
 
-    private fun updateRealParticleUi() {
+    /** Forgets the frozen session building (also after a failed start); single-floor sessions only reset nulls. */
+    private fun clearMultiFloorSession() {
+        sessionBuilding = null
+        sessionContext = null
+        sessionGraph = null
+        sessionGraphs = emptyMap()
+        sessionMagneticMaps = emptyMap()
+        floorCoordinator = null
+        liveTrailsByFloor.clear()
+        multiFloorRawPdrTrail = emptyList()
+        userRelocalizePending = false
+        appState.liveFloorTracking = null
+        appState.liveDestination = null
+        appState.liveSessionKey = null
+    }
+
+    /** Coordinator events are kept in memory only until phase 4 persists them; the latest stays for diagnostics. */
+    private fun drainFloorEvents() {
+        floorCoordinator?.drainEvents()?.lastOrNull()?.let { lastFloorEvent = it }
+    }
+
+    private fun sessionFloorName(floorId: String?): String = floorId?.let { id ->
+        sessionBuilding?.names?.get(id) ?: appState.projects.firstOrNull { it.floorId == id }?.floorName
+    } ?: "another floor"
+
+    /** The topology for a new filter: the session's only when floor tracking is active (I1). */
+    private fun sessionTopology(): com.turn.fieldtest.core.FloorTopology =
+        floorCoordinator?.let { sessionBuilding?.topology } ?: com.turn.fieldtest.core.FloorTopology.NONE
+
+    /** Adds a Wi-Fi fix to [floorId]'s trail in a multi-floor session; shown when that floor is displayed. */
+    private fun appendWifiFix(floorId: String, point: Offset) {
+        val trails = liveTrailsByFloor[floorId] ?: FloorTrails()
+        val wifi = (trails.wifi + point).takeLast(MAX_TRAIL_POINTS)
+        liveTrailsByFloor[floorId] = trails.copy(wifi = wifi)
+        if (appState.activeProject?.floorId == floorId) appState.realWifiFixes = wifi
+    }
+
+    /**
+     * Shows the confirmed floor (plan Step 8, invariant I3): swaps the displayed map to [floorId] from the frozen
+     * session building, with no database access and no live reset, then publishes that floor's trails.
+     */
+    private fun followLiveFloor(floorId: String) {
+        val building = sessionBuilding ?: return
+        val saved = building.floorMaps[floorId] ?: return
+        applyFloorDisplay(saved, ProjectContext(saved.venue.id, floorId))
+        val trails = liveTrailsByFloor[floorId] ?: FloorTrails()
+        appState.realFusedTrail = trails.fused
+        appState.realWifiFixes = trails.wifi
+        // Raw PDR has no floor model: it stays in its start floor's frame.
+        appState.realRawPdrTrail = if (floorId == rawPdrFloorId) multiFloorRawPdrTrail else emptyList()
+    }
+
+    /**
+     * Publishes the filter's estimate. [fresh] is false for the 1 Hz floor housekeeping tick of multi-floor sessions,
+     * which refreshes the floor decision without counting as a new position estimate.
+     */
+    private fun updateRealParticleUi(fresh: Boolean = true) {
         val filter = particleFilter ?: return
+        floorCoordinator?.let { updateMultiFloorParticleUi(filter, it, fresh); return }
         val summary = filter.summary()
         if (summary == null) {
             appState.realLiveInitialized = false
@@ -2070,8 +2239,74 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         updateRoute()
     }
 
+    /**
+     * Multi-floor branch of [updateRealParticleUi] (plan Step 8). The display shows only the confirmed floor of
+     * [FloorTrackingCoordinator.decide] (invariant I3); position, cloud and trail come from that floor's particles.
+     */
+    private fun updateMultiFloorParticleUi(
+        filter: ParticleFilter, coordinator: com.turn.fieldtest.core.FloorTrackingCoordinator, fresh: Boolean,
+    ) {
+        val decision = coordinator.decide(filter, android.os.SystemClock.elapsedRealtimeNanos())
+        drainFloorEvents()
+        val summary = filter.summary(decision.floorId) ?: filter.summary()
+        if (summary == null) {
+            appState.realLiveInitialized = false
+            appState.realLivePosition = null
+            appState.realParticleCloud = emptyList()
+            appState.realLiveConfidence = 0.0
+            appState.realLiveFloorConfidence = 0.0
+            appState.realLiveUncertaintyMetres = null
+            appState.clearRoute(); appState.routeStatus = "Position lost · request a fresh fix"
+            appState.realLiveStatus = "Filter lost; request a fresh Wi-Fi fix"
+            return
+        }
+        val nowMillis = System.currentTimeMillis()
+        val followed = floorToFollow(appState.activeProject?.floorId, decision.floorId)
+        if (followed != null) followLiveFloor(followed)
+        val building = sessionBuilding
+        val previous = appState.liveFloorTracking
+        appState.liveFloorTracking = LiveFloorUi(
+            floorId = decision.floorId,
+            floorName = sessionFloorName(decision.floorId),
+            level = building?.levels?.get(decision.floorId) ?: 0,
+            confidence = decision.vote,
+            state = decision.state,
+            barometer = coordinator.barometerHealth,
+            announcedAtEpochMillis = if (followed != null || decision.changedFrom != null) nowMillis else previous?.announcedAtEpochMillis,
+            sessionFloors = building?.floorIds.orEmpty().mapNotNull { id ->
+                building?.floorMaps?.get(id)?.floor?.let { SessionFloorUi(id, it.name, it.levelNumber, it.widthMetres, it.heightMetres) }
+            }.sortedByDescending { it.level },
+            startFloorId = sessionContext?.floorId ?: decision.floorId,
+        )
+        val point = summary.position.toUiOffset()
+        appState.realLiveInitialized = true
+        appState.realLivePosition = point
+        if (fresh) appState.liveEstimateEpochMillis = nowMillis
+        appState.realLiveFloorId = summary.floorId
+        appState.realLiveConfidence = summary.confidence
+        appState.realLiveFloorConfidence = decision.vote
+        appState.realLiveUncertaintyMetres = summary.uncertaintyRadiusMetres
+        if (fresh) {
+            val trails = liveTrailsByFloor[summary.floorId] ?: FloorTrails()
+            val fused = appendTrailPoint(trails.fused, point, MAX_TRAIL_POINTS)
+            liveTrailsByFloor[summary.floorId] = trails.copy(fused = fused)
+            if (appState.activeProject?.floorId == summary.floorId) appState.realFusedTrail = fused
+        }
+        val onFloor = filter.particles.filter { it.floorId == summary.floorId }
+        appState.realParticleCloud = onFloor
+            .filterIndexed { index, _ -> index % (onFloor.size / 100).coerceAtLeast(1) == 0 }
+            .take(100)
+            .map { it.position.toUiOffset() }
+        updateRoute()
+    }
+
     fun selectNavigationDestination(id: String?) {
         appState.selectedDestinationId = id
+        if (appState.liveRunning && floorCoordinator != null) {
+            val context = appState.activeProject
+            appState.liveDestination = appState.destinations.firstOrNull { it.id == id }
+                ?.let { LiveDestination(it.id, context?.floorId ?: it.floorId, it.name) }
+        }
         appState.clearRoute()
         updateRoute()
     }
@@ -2082,7 +2317,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         if (!appState.liveRunning || !appState.realLiveInitialized || position == null) {
             appState.clearRoute(); appState.routeStatus = "Initialize a position to calculate a route"; return
         }
-        val graph = sessionGraph ?: savedNavigationGraph
+        val liveDestination = appState.liveDestination?.takeIf { floorCoordinator != null && it.id == destination }
+        if (liveDestination != null && liveDestination.floorId != appState.realLiveFloorId) {
+            appState.clearRoute(); appState.routeStatus = destinationOnOtherFloorText(sessionFloorName(liveDestination.floorId)); return
+        }
+        val graph = if (floorCoordinator != null) appState.realLiveFloorId?.let { sessionGraphs[it] } ?: sessionGraph
+            else sessionGraph ?: savedNavigationGraph
         val node = graph?.nodes?.firstOrNull { it.poiId == destination }
         if (graph == null || node == null) {
             appState.clearRoute(); appState.routeStatus = "Connect this destination to the saved path graph"; return
@@ -2101,13 +2341,19 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun initializeManual(point: MetricPoint, floorId: String) {
         val session = requireNotNull(activePositioningSession)
-        val filter = ParticleFilter(currentPilotMap(), ParticleFilterConfig(particleCount = appState.particleCount), session.startedAtEpochMillis)
+        val filter = ParticleFilter(currentPilotMap(), ParticleFilterConfig(particleCount = appState.particleCount), session.startedAtEpochMillis,
+            sessionTopology())
         withContext(Dispatchers.Default) { filter.initialize(AbsoluteFix(point, floorId, AbsoluteFixSource.MANUAL), positionStdMetres = 0.5) }
         particleFilter = filter; lastLiveMagneticObservation = null
+        floorCoordinator?.takeIf { floorId in it.topology.levels }?.let {
+            it.onAbsoluteFix(floorId, com.turn.fieldtest.core.FloorFixSource.MANUAL, android.os.SystemClock.elapsedRealtimeNanos())
+            drainFloorEvents()
+        }
         val sources = if (sensorSource.state.value.selectedStepSource == TurnSensorType.STEP_DETECTOR) setOf(StepSource.STEP_DETECTOR) else emptySet()
         rawPdrTracker = PdrTracker(point, latestMapHeadingRadians, StepProcessor(sources), StrideModel(appState.strideMetres.toDouble()))
         rawPdrFloorId = floorId
         appState.realRawPdrPosition = point.toUiOffset(); appState.realRawPdrTrail = listOf(point.toUiOffset())
+        multiFloorRawPdrTrail = appState.realRawPdrTrail
         appState.lastCorrectionType = "manual known-location anchor"
         appState.realLiveStatus = "Tracking from your known start · Wi-Fi will correct drift when available"
         updateRealParticleUi()
@@ -2150,6 +2396,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         updateLiveHeading(sample)
         updateMagneticFeatures(sample)
+        if (appState.liveRunning) floorCoordinator?.let { handleFloorSample(it, sample) }
         if (appState.diagnosticWalkRunning && sample.kind == SensorSampleKind.STEP_DETECTED) {
             appState.diagnosticWalkSteps += 1
             appState.realDiagnosticDistanceMetres = appState.diagnosticWalkSteps * appState.strideMetres.toDouble()
@@ -2174,6 +2421,25 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 selectedStep = sourceState.selectedStepSource,
                 selectedHeading = sourceState.selectedHeadingSource,
             )
+        }
+    }
+
+    /**
+     * Multi-floor sessions only: barometer samples feed the coordinator, and on any sample its housekeeping runs at
+     * most once per second (barometer health, pending-height expiry, lift stillness, decision holds).
+     */
+    private fun handleFloorSample(coordinator: com.turn.fieldtest.core.FloorTrackingCoordinator, sample: SensorSample) {
+        val ts = sample.sensorTimestampNanos
+        if (sample.kind == SensorSampleKind.PRESSURE) sample.values.firstOrNull()?.takeIf { it.isFinite() }?.let { hpa ->
+            val result = coordinator.onPressure(ts, hpa.toDouble(), particleFilter)
+            drainFloorEvents()
+            if (result != null) updateRealParticleUi()
+        }
+        if (lastFloorTickNanos == Long.MIN_VALUE || ts - lastFloorTickNanos >= 1_000_000_000L) {
+            lastFloorTickNanos = ts
+            coordinator.onTick(ts, particleFilter)
+            drainFloorEvents()
+            if (particleFilter?.isLost == false) updateRealParticleUi(fresh = false)
         }
     }
 
@@ -2353,6 +2619,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 rejectionReason = event.decision.reason.takeUnless {
                     it == com.turn.fieldtest.core.StepRejectionReason.NONE
                 }?.name,
+                // Multi-floor sessions only; null (as before) without a floor coordinator.
+                pressureHpa = floorCoordinator?.latestPressureHpa,
             ),
         )
         if (!event.decision.acceptedForMovement) {
@@ -2362,13 +2630,22 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
-        val prediction = withContext(Dispatchers.Default) { filter?.predictStep(event.strideMetres, heading) }
+        val coordinator = floorCoordinator
+        val prediction = withContext(Dispatchers.Default) {
+            if (coordinator != null) filter?.predictStep(event.strideMetres, heading, stairsActive = coordinator.stairsActive)
+            else filter?.predictStep(event.strideMetres, heading)
+        }
         // Magnetic evidence after the motion update: it judges where each particle has just moved to.
         val magneticCorrection = if (prediction?.accepted == true && filter != null && magnetic != null &&
             appState.magneticCorrectionsEnabled && sessionMagneticMaps.isNotEmpty()) {
             withContext(Dispatchers.Default) { filter.correctWithMagnetic(sessionMagneticMaps, magnetic, lastLiveMagneticObservation) }
         } else null
         lastLiveMagneticObservation = magnetic.takeIf { prediction?.accepted == true }
+        if (coordinator != null) {
+            // Step timing for the vertical detector, and (without a healthy barometer) the stairs/lift dwell cues.
+            withContext(Dispatchers.Default) { coordinator.onStep(sample.sensorTimestampNanos, filter) }
+            drainFloorEvents()
+        }
         appState.realMagneticStatus = when {
             !appState.magneticCorrectionsEnabled -> "Magnetic corrections off"
             sessionMagneticMaps.isEmpty() -> "No magnetic map for this floor · survey magnetic paths to enable"
@@ -2389,7 +2666,12 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.realLiveStepCount = event.stateAfter.acceptedStepCount.toLong()
         appState.realLiveDistanceMetres = event.stateAfter.estimatedDistanceMetres
         appState.realRawPdrPosition = event.stateAfter.position.toUiOffset()
-        appState.realRawPdrTrail = (appState.realRawPdrTrail + event.stateAfter.position.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
+        if (coordinator != null) {
+            multiFloorRawPdrTrail = (multiFloorRawPdrTrail + event.stateAfter.position.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
+            if (appState.activeProject?.floorId == rawPdrFloorId) appState.realRawPdrTrail = multiFloorRawPdrTrail
+        } else {
+            appState.realRawPdrTrail = (appState.realRawPdrTrail + event.stateAfter.position.toUiOffset()).takeLast(MAX_TRAIL_POINTS)
+        }
         appState.realLiveMapRejectedCount += prediction?.rejectedParticleCount ?: 0
         appState.lastCorrectionType = (if ((prediction?.rejectedParticleCount ?: 0) > 0) {
             "map constraint applied"

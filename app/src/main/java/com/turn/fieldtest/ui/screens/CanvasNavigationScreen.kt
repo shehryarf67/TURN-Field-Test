@@ -36,6 +36,7 @@ import com.turn.fieldtest.core.MapHeading
 import com.turn.fieldtest.core.MetricPoint
 import com.turn.fieldtest.ui.TurnAppActions
 import com.turn.fieldtest.ui.TurnAppState
+import com.turn.fieldtest.ui.floorBannerVisible
 import com.turn.fieldtest.ui.model.TurnDestination
 import com.turn.fieldtest.ui.theme.TurnAmber
 import com.turn.fieldtest.ui.theme.TurnMint
@@ -84,23 +85,25 @@ private fun walkingTime(metres: Double): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
-    var sheet by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
-    var query by rememberSaveable(state.activeProject) { mutableStateOf("") }
-    var category by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
-    var startQuery by rememberSaveable(state.activeProject) { mutableStateOf("") }
-    var showReferences by rememberSaveable(state.activeProject) { mutableStateOf(false) }
-    var wifiStartChosen by rememberSaveable(state.activeProject) { mutableStateOf(false) }
-    var startLabel by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
-    var startPlaceId by rememberSaveable(state.activeProject) { mutableStateOf<String?>(null) }
-    var positionOnly by rememberSaveable(state.activeProject) { mutableStateOf(false) }
+    var sheet by rememberSaveable(state.screenStateKey) { mutableStateOf<String?>(null) }
+    var query by rememberSaveable(state.screenStateKey) { mutableStateOf("") }
+    var category by rememberSaveable(state.screenStateKey) { mutableStateOf<String?>(null) }
+    var startQuery by rememberSaveable(state.screenStateKey) { mutableStateOf("") }
+    var showReferences by rememberSaveable(state.screenStateKey) { mutableStateOf(false) }
+    var wifiStartChosen by rememberSaveable(state.screenStateKey) { mutableStateOf(false) }
+    var startLabel by rememberSaveable(state.screenStateKey) { mutableStateOf<String?>(null) }
+    var startPlaceId by rememberSaveable(state.screenStateKey) { mutableStateOf<String?>(null) }
+    var positionOnly by rememberSaveable(state.screenStateKey) { mutableStateOf(false) }
     var details by rememberSaveable { mutableStateOf(false) }
-    var startAttempted by rememberSaveable(state.activeProject) { mutableStateOf(false) }
+    var startAttempted by rememberSaveable(state.screenStateKey) { mutableStateOf(false) }
     var cardHeightPx by remember { mutableIntStateOf(0) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state.liveRunning) { while (state.liveRunning) { now = System.currentTimeMillis(); delay(1000) } }
     val age = state.liveEstimateEpochMillis?.let { (now - it).coerceAtLeast(0) / 1000 }
     val confidence = navigationConfidence(state, age, now)
     val selected = state.destinations.firstOrNull { it.id == state.selectedDestinationId }
+    // Multi-floor sessions: the destination keeps its name while the display shows another floor.
+    val selectedName = selected?.name ?: state.liveDestination?.takeIf { state.liveRunning && it.id == state.selectedDestinationId }?.name
     LaunchedEffect(selected?.id) { if (selected != null) positionOnly = false }
     // A start picked on the map no longer matches the label it was given when it changes elsewhere.
     LaunchedEffect(state.manualStartPoint) { if (state.manualStartPoint == null && !wifiStartChosen) { startLabel = null; startPlaceId = null } }
@@ -187,13 +190,14 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
         }
     }
     val live = state.liveRunning || state.liveStarting || state.liveCloseFailed
-    val instruction = if (state.liveRunning && selected != null && state.routePoints.size >= 2) nextInstruction(state.routePoints, selected.name) else null
+    val instruction = if (state.liveRunning && selectedName != null && state.routePoints.size >= 2) nextInstruction(state.routePoints, selectedName) else null
+    val floorBanner = live && floorBannerVisible(state.liveFloorTracking, now)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val landscape = maxWidth > maxHeight
         val density = LocalDensity.current
         val cardWidth = if (landscape) 340.dp else maxWidth.coerceAtMost(480.dp)
         val cardHeight = with(density) { cardHeightPx.toDp() }
-        val topInset = if (live) 104.dp else if (state.pickingStart || state.pickingHeading) 76.dp else 124.dp
+        val topInset = if (live) (if (floorBanner) 168.dp else 104.dp) else if (state.pickingStart || state.pickingHeading) 76.dp else 124.dp
         val mapInsets = if (landscape) PaddingValues(start = cardWidth + 16.dp, top = topInset, end = 8.dp, bottom = 8.dp)
             else PaddingValues(top = topInset, bottom = cardHeight + 8.dp, start = 8.dp, end = 8.dp)
         NavigationMap(state, Modifier.fillMaxSize(), showPosition = true, showGraph = state.debugOverlays,
@@ -241,6 +245,8 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         IconButton(onClick = { sheet = "options" }) { Icon(Icons.Outlined.MoreHoriz, "Map options") }
                     }
                 }
+                val tracking = state.liveFloorTracking
+                if (floorBanner && tracking != null) LiveFloorBanner(tracking, actions.onRealLiveRelocalizationRequested)
             } else if (state.pickingStart || state.pickingHeading) {
                 Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -285,7 +291,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 .verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!landscape) Box(Modifier.align(Alignment.CenterHorizontally).size(36.dp, 4.dp)
                     .then(Modifier).padding(0.dp)) { Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.outlineVariant) {} }
-                if (live) LiveCard(state, selected?.name, confidence, age, busy, onDirection = { sheet = "direction" },
+                if (live) LiveCard(state, selectedName, confidence, age, busy, onDirection = { sheet = "direction" },
                     onDestination = { openDestinations() }, onStop = actions.onRealLiveToggled)
                 else {
                     Text("Plan your route", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -457,6 +463,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         }
                         Switch(state.magneticCorrectionsEnabled, { state.magneticCorrectionsEnabled = it }, enabled = !live)
                     }
+                    FloorTrackingOptions(state, live)
                     TextButton(onClick = { sheet = null; details = true }) { Text("Research details & all controls") }
                     TextButton(onClick = { sheet = null; state.openTools() }) { Text("Map setup, survey & tools") }
                 }
@@ -486,6 +493,7 @@ private fun LiveCard(state: TurnAppState, destination: String?, confidence: Stri
                 Text(pill, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             }
         }
+        state.liveFloorTracking?.let { Spacer(Modifier.width(6.dp)); FloorChip(it) }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (destination != null) RouteStat(state.remainingDistanceMetres?.let { "%.0f m".format(it) } ?: "–",

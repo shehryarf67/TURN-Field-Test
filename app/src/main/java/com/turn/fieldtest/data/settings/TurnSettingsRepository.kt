@@ -29,6 +29,8 @@ data class TurnSettings(
     val absoluteRotationVectorEnabled: Boolean = false,
     val bleFeatureEnabled: Boolean = BuildConfig.BLE_DEFAULT_ENABLED,
     val darkTheme: Boolean = false,
+    val floorTrackingEnabled: Boolean = true,
+    val useUncheckedFloorLinks: Boolean = false,
 ) {
     fun normalized(): TurnSettings = copy(
         wifiK = wifiK.coerceIn(1, 20),
@@ -84,6 +86,8 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         absoluteRotationVectorEnabled = preferences[Keys.ABSOLUTE_ROTATION_VECTOR] ?: false,
         bleFeatureEnabled = preferences[Keys.BLE_FEATURE_ENABLED] ?: BuildConfig.BLE_DEFAULT_ENABLED,
         darkTheme = preferences[Keys.DARK_THEME] ?: false,
+        floorTrackingEnabled = preferences[Keys.FLOOR_TRACKING] ?: true,
+        useUncheckedFloorLinks = preferences[Keys.UNCHECKED_FLOOR_LINKS] ?: false,
     ).normalized()
 
     private fun write(preferences: androidx.datastore.preferences.core.MutablePreferences, value: TurnSettings) {
@@ -99,6 +103,8 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         preferences[Keys.ABSOLUTE_ROTATION_VECTOR] = value.absoluteRotationVectorEnabled
         preferences[Keys.BLE_FEATURE_ENABLED] = value.bleFeatureEnabled
         preferences[Keys.DARK_THEME] = value.darkTheme
+        preferences[Keys.FLOOR_TRACKING] = value.floorTrackingEnabled
+        preferences[Keys.UNCHECKED_FLOOR_LINKS] = value.useUncheckedFloorLinks
     }
 
     private object Keys {
@@ -114,5 +120,7 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         val ABSOLUTE_ROTATION_VECTOR = booleanPreferencesKey("absolute_rotation_vector")
         val BLE_FEATURE_ENABLED = booleanPreferencesKey("ble_feature_enabled")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
+        val FLOOR_TRACKING = booleanPreferencesKey("floor_tracking_enabled")
+        val UNCHECKED_FLOOR_LINKS = booleanPreferencesKey("use_unchecked_floor_links")
     }
 }

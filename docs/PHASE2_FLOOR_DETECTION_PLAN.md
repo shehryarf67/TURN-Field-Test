@@ -596,6 +596,17 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 
 ---
 
+### Steps 7 to 9 as built (progress)
+
+**Status: Steps 7, 8 and 9 are done.** Steps 10 and 11 moved to phase 4.
+
+- **Step 7.** `data/repository/SessionBuilding.kt` holds `SessionBuilding`, the pure `assembleSessionBuilding`, `SessionBuilding.singleFloor()`, `floorTrackingStartStatus` (§5 start status) and `SessionBuildingLoader`. `ProjectRepository.load(context, persistRepairs = true)`; other floors load with `false`. The VM builds the coordinator with `FloorTrackingCoordinator.createOrNull`; if it returns null the building is reduced with `singleFloor()`, so the legacy path never sees other floors. Wi-Fi corrections go through `coordinator.correctWithWifi` (which applies the cross-floor gate and records the absolute fix) instead of a separate `crossFloorRelocalizationAllowed` call. Coordinator events are drained after every call and only the latest is kept in memory; persisting them (`persistFloorEvents`, CONFIG event) is part of Step 10, now phase 4. QR has no live initialisation path in the VM today, so only manual start, Wi-Fi init and user relocalise call `onAbsoluteFix`.
+- **Step 8.** `applyFloorDisplay` is extracted from `loadProject`; `followLiveFloor` swaps the displayed floor from the frozen building with no database access and no live reset. The display follows whenever the decision's floor differs from the displayed floor (`floorToFollow`), which after the first decision only happens on a confirmed change (I3). Fused trails and Wi-Fi fixes are kept per floor; raw PDR stays on its start floor. `LiveDestination` keeps the destination's name and floor; on another floor the route shows the §5 text.
+- **Step 9.** `ui/LiveFloor.kt` holds `LiveFloorUi`, `SessionFloorUi`, `LiveDestination`, `FloorTrails` and the pure text and display helpers; `ui/screens/LiveFloorViews.kt` holds `FloorChip`, `LiveFloorBanner` and `FloorTrackingOptions`. `LiveFloorUi` also carries the session floors' sizes (checkpoint bounds) and the start floor (checkpoint default). `liveSessionKey` is a `ProjectContext`. "Multi-floor tracking" (default on) and "Use unchecked floor links" (default off) are saved with the other preferences in DataStore. Capture is refused while the floor is CHANGING.
+- **Tests.** JVM `SessionBuildingAssemblyTest` (legacy parity by data-class equality, unchecked/disabled links, skipped floors, start status) and `LiveFloorTest` (chip, banner, suffix, follow and dot decisions, checkpoint default, screen key). androidTest `LiveFloorUiTest` (chip, banner and Relocalize, no floor UI in single-floor sessions, locked and toggling switches, options sheet survives a follow, fullscreen suffix, checkpoint floor chips); `CanvasWorkflowTest.magneticCorrectionSwitchIsLockedDuringTracking` now counts three locked switches. Not built: the androidTest `SessionBuildingLoaderTest` and `ApplyFloorDisplayTest` (the VM is not testable on the JVM); the androidTests compile but were not run on a device.
+
+---
+
 ### Step 10: Schema 7, export 4
 
 > **Moved to phase 4** by the user's decision. Until then the coordinator only keeps its events in memory (`drainEvents()`); `FloorTrackingEvent` already has the columns of the entity below.

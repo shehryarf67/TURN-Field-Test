@@ -21,27 +21,52 @@ import com.turn.fieldtest.core.MethodError
 import com.turn.fieldtest.core.summarizeErrors
 import com.turn.fieldtest.data.local.TestSampleEntity
 import com.turn.fieldtest.ui.TurnAppState
+import com.turn.fieldtest.ui.defaultCheckpointFloor
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.FilterChip
 
-data class CheckpointInput(val code: String, val x: Double, val y: Double)
+/** [floorId] is the researcher's truth floor in multi-floor sessions; null means the session's start floor. */
+data class CheckpointInput(val code: String, val x: Double, val y: Double, val floorId: String? = null)
 
 @Composable
 fun RealEvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (CheckpointInput) -> Unit) {
     var code by rememberSaveable { mutableStateOf("") }
     var x by rememberSaveable { mutableStateOf("") }
     var y by rememberSaveable { mutableStateOf("") }
-    val parsedX = x.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..state.floorWidthMetres.toDouble() }
-    val parsedY = y.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..state.floorHeightMetres.toDouble() }
+    // Multi-floor sessions name the truth floor explicitly (default: the previous checkpoint's, else the start floor),
+    // never the displayed floor, so floor accuracy cannot confirm itself. Single-floor sessions show no chips.
+    val tracking = state.liveFloorTracking
+    val sessionFloors = tracking?.sessionFloors.orEmpty()
+    val showFloorChips = sessionFloors.size > 1
+    var chosenFloorId by rememberSaveable(state.liveSessionKey) { mutableStateOf<String?>(null) }
+    val checkpointFloor = if (!showFloorChips) null else sessionFloors.firstOrNull { it.id == chosenFloorId }
+        ?: sessionFloors.firstOrNull { it.id == defaultCheckpointFloor(state.realTestSamples.lastOrNull()?.trueFloorId,
+            sessionFloors.map { f -> f.id }, tracking!!.startFloorId) }
+    val widthLimit = checkpointFloor?.widthMetres ?: state.floorWidthMetres.toDouble()
+    val heightLimit = checkpointFloor?.heightMetres ?: state.floorHeightMetres.toDouble()
+    val parsedX = x.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..widthLimit }
+    val parsedY = y.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..heightLimit }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         PageHeader("06 · Independent validation", "Evaluate positioning",
             "Stand at a physically marked checkpoint while Live locate is running. Enter its measured coordinates.", compact)
         Text(state.realEvaluationStatus)
-        SectionCard("Independent checkpoint", "${state.floorName} · metric coordinates") {
+        SectionCard("Independent checkpoint", "${checkpointFloor?.name ?: state.floorName} · metric coordinates") {
+            if (showFloorChips) {
+                Text("Checkpoint floor")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    sessionFloors.forEach { floor ->
+                        FilterChip(selected = floor.id == checkpointFloor?.id, onClick = { chosenFloorId = floor.id },
+                            label = { Text(floor.name) })
+                    }
+                }
+            }
             OutlinedTextField(code, { code = it }, label = { Text("Checkpoint code") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(x, { x = it }, label = { Text("Measured x (metres)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(y, { y = it }, label = { Text("Measured y (metres)") }, modifier = Modifier.fillMaxWidth())
             Text("Use independently measured checkpoints, separate from training reference points. Reusing a checkpoint code requires the same coordinate.")
-            Button(onClick = { onCapture(CheckpointInput(code.trim(), requireNotNull(parsedX), requireNotNull(parsedY))) },
+            Button(onClick = { onCapture(CheckpointInput(code.trim(), requireNotNull(parsedX), requireNotNull(parsedY), checkpointFloor?.id)) },
                 enabled = state.liveRunning && !state.realEvaluationBusy && code.isNotBlank() && parsedX != null && parsedY != null,
                 modifier = Modifier.fillMaxWidth()) { Text("Capture test sample") }
         }
