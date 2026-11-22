@@ -62,6 +62,8 @@ import com.turn.fieldtest.core.AbsoluteFixSource
 import com.turn.fieldtest.core.MapFloor
 import com.turn.fieldtest.core.MetricMap
 import com.turn.fieldtest.core.MetricPoint
+import com.turn.fieldtest.core.MultiFloorRouteResult
+import com.turn.fieldtest.core.RouteFailure
 import com.turn.fieldtest.core.MetricPolygon
 import com.turn.fieldtest.core.ParticleFilter
 import com.turn.fieldtest.core.ParticleFilterConfig
@@ -181,6 +183,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var sessionContext: ProjectContext? = null
     private var sessionGraphs: Map<String, NavigationGraph> = emptyMap()
     private var floorCoordinator: com.turn.fieldtest.core.FloorTrackingCoordinator? = null
+    /** Router between floors for the live multi-floor session (phase 3); null in single-floor sessions. */
+    private var sessionRouter: com.turn.fieldtest.core.MultiFloorRouter? = null
+    /** The building and router the route preview between floors last loaded, with what they were loaded for. */
+    private var previewBuilding: Pair<Any, PreviewBuilding>? = null
     private val liveTrailsByFloor = mutableMapOf<String, FloorTrails>()
     /** Raw PDR trail of a multi-floor session; shown only while its start floor is displayed. */
     private var multiFloorRawPdrTrail: List<Offset> = emptyList()
@@ -287,6 +293,24 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }.collect { appState.projects = it }
         }
         viewModelScope.launch {
+            // Route preview to a place on another floor (phase 3). Same-floor previews stay in the screen as before.
+            snapshotFlow {
+                val context = appState.activeProject
+                val place = appState.selectedPlaceOnOtherFloor()
+                if (appState.mode != DataMode.REAL_DEVICE || appState.liveRunning || appState.liveStarting || context == null ||
+                    place == null || appState.hasUnsavedMapChanges) null
+                else CrossFloorPreviewRequest(context, place, appState.manualStartPoint?.let { MetricPoint(it.x.toDouble(), it.y.toDouble()) },
+                    appState.floorTrackingEnabled, appState.useUncheckedFloorLinks, appState.stepFreeRouting, appState.floorConnectors,
+                    appState.navigationPreviewGraph)
+            }.distinctUntilChanged().collectLatest { request ->
+                appState.crossFloorPreview = request?.let {
+                    try { planCrossFloorPreview(it) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (error: Exception) { CrossFloorPreview(it.place.id, it.context.floorId, it.start, null, "Could not plan a route between floors: ${error.message}") }
+                }
+            }
+        }
+        viewModelScope.launch {
             val saved = app.settings.settings.first()
             appState.knnK = saved.wifiK
             appState.missingRssi = saved.missingRssiDbm
@@ -296,6 +320,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.darkTheme = saved.darkTheme
             appState.floorTrackingEnabled = saved.floorTrackingEnabled
             appState.useUncheckedFloorLinks = saved.useUncheckedFloorLinks
+            appState.stepFreeRouting = saved.stepFreeRouting
             appState.mode = DataMode.valueOf(saved.dataMode.name)
             try {
                 if (appState.mode == DataMode.REAL_DEVICE) {
@@ -321,6 +346,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     darkTheme = appState.darkTheme,
                     floorTrackingEnabled = appState.floorTrackingEnabled,
                     useUncheckedFloorLinks = appState.useUncheckedFloorLinks,
+                    stepFreeRouting = appState.stepFreeRouting,
                 )
             }.distinctUntilChanged().collect { settings ->
                 try {
@@ -330,6 +356,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         normalizeDeviceOffset = settings.normalizeDeviceOffset, defaultStrideMetres = settings.defaultStrideMetres,
                         particleCount = settings.particleCount, darkTheme = settings.darkTheme,
                         floorTrackingEnabled = settings.floorTrackingEnabled, useUncheckedFloorLinks = settings.useUncheckedFloorLinks,
+                        stepFreeRouting = settings.stepFreeRouting,
                     ) }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (error: Exception) { appState.projectStatus = "Could not save preferences: ${error.message}" }
@@ -659,6 +686,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         if (switchingFloor) appState.floorTrackingStatus = null
         if (appState.buildingFloorMaps.values.firstOrNull()?.venue?.id != context.venueId) appState.buildingFloorMaps = emptyMap()
         appState.floorConnectors = runCatching { connectorRepository.connectors(context.venueId) }.getOrDefault(emptyList())
+        // Every floor's places for the destination search across floors; a failure only hides other floors.
+        appState.buildingPlaces = runCatching { loadBuildingPlaces(context.venueId) }.getOrDefault(emptyList())
         appState.projectStatus = "Opened ${venue.name} · ${floor.name}"
         if (!appState.mapEditorSupported) appState.editorStatus = "Map preserved. Editing multiple walkable regions or a custom origin is not supported yet."
     }
@@ -1231,6 +1260,9 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     }
                 }
                 sessionBuilding = building
+                // Directions between floors use the same frozen building, graphs and links as tracking.
+                sessionRouter = if (coordinator != null) com.turn.fieldtest.core.MultiFloorRouter(sessionGraphs, building.topology,
+                    floors = building.metricMap.floors) else null
                 sessionContext = context
                 floorCoordinator = coordinator
                 lastFloorEvent = null
@@ -1328,6 +1360,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     appState.liveSessionKey = context
                     appState.liveDestination = appState.destinations.firstOrNull { it.id == appState.selectedDestinationId }
                         ?.let { LiveDestination(it.id, context.floorId, it.name) }
+                        ?: appState.selectedPlaceOnOtherFloor()?.let { LiveDestination(it.id, it.floorId, it.name) }
                 } else { appState.liveSessionKey = null; appState.liveDestination = null }
                 if (chosenStart != null) {
                     try { eventMutex.withLock { initializeManual(chosenStart, context.floorId) } }
@@ -2166,6 +2199,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         sessionGraphs = emptyMap()
         sessionMagneticMaps = emptyMap()
         floorCoordinator = null
+        sessionRouter = null
         liveTrailsByFloor.clear()
         multiFloorRawPdrTrail = emptyList()
         userRelocalizePending = false
@@ -2311,6 +2345,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             val context = appState.activeProject
             appState.liveDestination = appState.destinations.firstOrNull { it.id == id }
                 ?.let { LiveDestination(it.id, context?.floorId ?: it.floorId, it.name) }
+                ?: appState.buildingPlaces.firstOrNull { it.id == id }?.let { LiveDestination(it.id, it.floorId, it.name) }
         }
         appState.clearRoute()
         updateRoute()
@@ -2324,13 +2359,18 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         val liveDestination = appState.liveDestination?.takeIf { floorCoordinator != null && it.id == destination }
         if (liveDestination != null && liveDestination.floorId != appState.realLiveFloorId) {
-            appState.clearRoute(); appState.routeStatus = destinationOnOtherFloorText(sessionFloorName(liveDestination.floorId)); return
+            routeToOtherFloor(liveDestination, MetricPoint(position.x.toDouble(), position.y.toDouble())); return
         }
+        appState.liveFloorRoute = null
         val graph = if (floorCoordinator != null) appState.realLiveFloorId?.let { sessionGraphs[it] } ?: sessionGraph
             else sessionGraph ?: savedNavigationGraph
         val node = graph?.nodes?.firstOrNull { it.poiId == destination }
         if (graph == null || node == null) {
-            appState.clearRoute(); appState.routeStatus = "Connect this destination to the saved path graph"; return
+            appState.clearRoute()
+            // A place picked from another floor in a session that tracks one floor has no directions there.
+            val elsewhere = appState.buildingPlaces.firstOrNull { it.id == destination && it.floorId != appState.realLiveFloorId }
+                ?.takeIf { floorCoordinator == null && appState.destinations.none { d -> d.id == destination } }
+            appState.routeStatus = elsewhere?.let { noLinkedFloorText(it) } ?: "Connect this destination to the saved path graph"; return
         }
         val route = graph.route(MetricPoint(position.x.toDouble(), position.y.toDouble()), node.id)
         if (route == null) {
@@ -2342,6 +2382,87 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             (appState.realLiveUncertaintyMetres ?: Double.POSITIVE_INFINITY) <= 3.0
         appState.routeStatus = if (appState.destinationReached) "Destination reached" else if (appState.realLiveConfidence < 0.35)
             "Route available · position uncertain" else "Follow the blue route"
+    }
+
+    /** Phase 3: the live route to [destination] on another floor than the tracked one, from the session's router. */
+    private fun routeToOtherFloor(destination: LiveDestination, start: MetricPoint) {
+        val fromFloorId = appState.realLiveFloorId
+        val building = sessionBuilding
+        val floorName = sessionFloorName(destination.floorId)
+        val result = if (fromFloorId == null || building == null) MultiFloorRouteResult.Unreachable(RouteFailure.NO_FLOOR_LINK)
+            else routeToPlace(sessionRouter, building.floorIds, sessionGraphs, fromFloorId, start, destination.id, destination.floorId,
+                appState.stepFreeRouting)
+        when (result) {
+            is MultiFloorRouteResult.Found -> {
+                val route = FloorRouteUi(result.route, destination.id, destination.floorId, destination.name, building!!.names)
+                appState.liveFloorRoute = route
+                appState.routePoints = floorLeg(route, appState.activeProject?.floorId)?.points.orEmpty().map { it.toUiOffset() }
+                appState.remainingDistanceMetres = result.route.walkMetres
+                // Arrival is only judged on the destination floor, by the same-floor route.
+                appState.destinationReached = false
+                appState.routeStatus = crossFloorRouteStatus(route)
+            }
+            is MultiFloorRouteResult.Unreachable -> {
+                appState.clearRoute()
+                appState.routeStatus = routeFailureText(result.reason, destination.name, floorName, appState.stepFreeRouting,
+                    appState.useUncheckedFloorLinks)
+            }
+        }
+    }
+
+    /** Status for a place on another floor when the session (or preview) has no linked way to that floor. */
+    private fun noLinkedFloorText(place: BuildingPlace): String =
+        if (!appState.floorTrackingEnabled) floorTrackingOffRouteText(place.floorName)
+        else routeFailureText(RouteFailure.NO_FLOOR_LINK, place.name, place.floorName, appState.stepFreeRouting, appState.useUncheckedFloorLinks)
+
+    private class PreviewBuilding(
+        val building: SessionBuilding, val graphs: Map<String, NavigationGraph>, val router: com.turn.fieldtest.core.MultiFloorRouter?,
+    )
+
+    /** What the route preview between floors depends on; any change re-plans it. */
+    private data class CrossFloorPreviewRequest(
+        val context: ProjectContext, val place: BuildingPlace, val start: MetricPoint?, val tracking: Boolean, val unchecked: Boolean,
+        val stepFree: Boolean, val connectors: List<com.turn.fieldtest.data.repository.FloorConnector>, val openFloorGraph: NavigationGraph?,
+    )
+
+    /**
+     * Phase 3 route preview without a session: from the start chosen on the open floor to a place on another floor.
+     * The building is read like a session start (same links and options), without writing, and kept until the open
+     * floor, its saved paths, the links or the link options change.
+     */
+    private suspend fun planCrossFloorPreview(request: CrossFloorPreviewRequest): CrossFloorPreview {
+        val place = request.place
+        fun result(route: FloorRouteUi?, problem: String?) = CrossFloorPreview(place.id, request.context.floorId, request.start, route, problem)
+        if (!request.tracking) return result(null, floorTrackingOffRouteText(place.floorName))
+        val start = request.start ?: return result(null, null)
+        val key = listOf(request.context, request.unchecked, request.connectors, request.openFloorGraph)
+        val loaded = previewBuilding?.takeIf { it.first == key }?.second ?: withContext(Dispatchers.IO) {
+            val building = sessionLoader.load(request.context, true, request.unchecked, persistStartRepairs = false)
+            val graphs = building.floorIds.mapNotNull { id ->
+                val saved = building.floorMaps[id] ?: return@mapNotNull null
+                val floor = building.metricMap.floors[id] ?: return@mapNotNull null
+                runCatching { NavigationGraph(floor, saved.nodes.map { it.core() }, saved.edges.map { it.core() }) }.getOrNull()?.let { id to it }
+            }.toMap()
+            val router = if (building.multiFloor) com.turn.fieldtest.core.MultiFloorRouter(graphs, building.topology, floors = building.metricMap.floors) else null
+            PreviewBuilding(building, graphs, router)
+        }.also { previewBuilding = key to it }
+        val outcome = withContext(Dispatchers.Default) {
+            routeToPlace(loaded.router, loaded.building.floorIds.takeIf { loaded.building.multiFloor }.orEmpty(), loaded.graphs,
+                request.context.floorId, start, place.id, place.floorId, request.stepFree)
+        }
+        return when (outcome) {
+            is MultiFloorRouteResult.Found -> result(FloorRouteUi(outcome.route, place.id, place.floorId, place.name, loaded.building.names), null)
+            is MultiFloorRouteResult.Unreachable -> result(null, routeFailureText(outcome.reason, place.name, place.floorName, request.stepFree, request.unchecked))
+        }
+    }
+
+    /** Places on every floor of [venueId], for the destination search across floors. Read only. */
+    private suspend fun loadBuildingPlaces(venueId: String): List<BuildingPlace> {
+        val dao = app.database.navigationDao()
+        return appState.projects.filter { it.venueId == venueId }.flatMap { floor ->
+            val connected = dao.nodes(floor.floorId).mapNotNull { it.poiId }.toSet()
+            dao.destinations(floor.floorId).map { BuildingPlace(it.id, it.name, floor.floorId, floor.floorName, floor.floorLevel, it.id in connected) }
+        }
     }
 
     private suspend fun initializeManual(point: MetricPoint, floorId: String) {

@@ -31,6 +31,7 @@ data class TurnSettings(
     val darkTheme: Boolean = false,
     val floorTrackingEnabled: Boolean = true,
     val useUncheckedFloorLinks: Boolean = false,
+    val stepFreeRouting: Boolean = false,
 ) {
     fun normalized(): TurnSettings = copy(
         wifiK = wifiK.coerceIn(1, 20),
@@ -88,6 +89,7 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         darkTheme = preferences[Keys.DARK_THEME] ?: false,
         floorTrackingEnabled = preferences[Keys.FLOOR_TRACKING] ?: true,
         useUncheckedFloorLinks = preferences[Keys.UNCHECKED_FLOOR_LINKS] ?: false,
+        stepFreeRouting = preferences[Keys.STEP_FREE_ROUTING] ?: false,
     ).normalized()
 
     private fun write(preferences: androidx.datastore.preferences.core.MutablePreferences, value: TurnSettings) {
@@ -105,6 +107,7 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         preferences[Keys.DARK_THEME] = value.darkTheme
         preferences[Keys.FLOOR_TRACKING] = value.floorTrackingEnabled
         preferences[Keys.UNCHECKED_FLOOR_LINKS] = value.useUncheckedFloorLinks
+        preferences[Keys.STEP_FREE_ROUTING] = value.stepFreeRouting
     }
 
     private object Keys {
@@ -122,5 +125,6 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val FLOOR_TRACKING = booleanPreferencesKey("floor_tracking_enabled")
         val UNCHECKED_FLOOR_LINKS = booleanPreferencesKey("use_unchecked_floor_links")
+        val STEP_FREE_ROUTING = booleanPreferencesKey("step_free_routing")
     }
 }

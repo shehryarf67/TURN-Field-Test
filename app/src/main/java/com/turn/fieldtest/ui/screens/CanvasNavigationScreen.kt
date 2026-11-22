@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -36,7 +37,12 @@ import com.turn.fieldtest.core.MapHeading
 import com.turn.fieldtest.core.MetricPoint
 import com.turn.fieldtest.ui.TurnAppActions
 import com.turn.fieldtest.ui.TurnAppState
+import com.turn.fieldtest.ui.connectorBannerText
 import com.turn.fieldtest.ui.floorBannerVisible
+import com.turn.fieldtest.ui.floorLeg
+import com.turn.fieldtest.ui.floorLegRows
+import com.turn.fieldtest.ui.floorTrackingOffRouteText
+import com.turn.fieldtest.ui.otherFloorPlaceGroups
 import com.turn.fieldtest.ui.model.TurnDestination
 import com.turn.fieldtest.ui.theme.TurnAmber
 import com.turn.fieldtest.ui.theme.TurnMint
@@ -102,9 +108,12 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
     val age = state.liveEstimateEpochMillis?.let { (now - it).coerceAtLeast(0) / 1000 }
     val confidence = navigationConfidence(state, age, now)
     val selected = state.destinations.firstOrNull { it.id == state.selectedDestinationId }
+    // Phase 3: a destination picked from another floor of the building (null for places on the open floor).
+    val otherFloorPlace = if (selected == null) state.selectedPlaceOnOtherFloor() else null
     // Multi-floor sessions: the destination keeps its name while the display shows another floor.
     val selectedName = selected?.name ?: state.liveDestination?.takeIf { state.liveRunning && it.id == state.selectedDestinationId }?.name
-    LaunchedEffect(selected?.id) { if (selected != null) positionOnly = false }
+        ?: otherFloorPlace?.name
+    LaunchedEffect(selected?.id, otherFloorPlace?.id) { if (selected != null || otherFloorPlace != null) positionOnly = false }
     // A start picked on the map no longer matches the label it was given when it changes elsewhere.
     LaunchedEffect(state.manualStartPoint) { if (state.manualStartPoint == null && !wifiStartChosen) { startLabel = null; startPlaceId = null } }
     val hasWalkableMap = state.allWalkablePolygons().any { it.size >= 3 }
@@ -126,16 +135,33 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 ?.let { node.poiId!! to it.distanceMetres }
         }.toMap()
     }
+    // Route preview to another floor: planned by the view model for the chosen start (phase 3).
+    val crossRoute = if (otherFloorPlace != null && !state.liveRunning) state.shownFloorRoute() else null
+    val crossPreview = state.crossFloorPreview?.takeIf { otherFloorPlace != null && it.destinationId == otherFloorPlace.id &&
+        it.floorId == state.activeProject?.floorId && it.start == previewStart?.let { p -> MetricPoint(p.x.toDouble(), p.y.toDouble()) } }
     val routeProblem = when {
         state.hasUnsavedMapChanges -> "Save map changes in Map setup to preview directions."
+        otherFloorPlace != null -> when {
+            !state.floorTrackingEnabled -> floorTrackingOffRouteText(otherFloorPlace.floorName)
+            previewStart == null && wifiStartChosen -> "The route appears once Wi-Fi finds you."
+            previewStart == null -> null
+            crossPreview == null -> "Finding a route to ${otherFloorPlace.floorName}…"
+            else -> crossPreview.problem
+        }
         selected == null -> null
         destinationNode == null -> "${selected.name} has no connected path yet. Connect its entrance in Map setup."
         previewStart == null && wifiStartChosen -> "The route appears once Wi-Fi finds you."
         previewStart != null && routePreview == null -> "No walkable route from this start. Choose another start or check paths in Map setup."
         else -> null
     }
+    // Whether the chosen destination can be navigated to from the chosen start (unchanged for places on this floor).
+    val destinationReady = when {
+        otherFloorPlace != null -> state.floorTrackingEnabled && (previewStart == null || crossRoute != null)
+        selected == null -> true
+        else -> destinationNode != null && (previewStart == null || routePreview != null)
+    }
     val canStart = !busy && !state.sessionLocked && !state.hasUnsavedMapChanges &&
-        (if (selected == null) positionOnly else destinationNode != null && (previewStart == null || routePreview != null))
+        (if (selected == null && otherFloorPlace == null) positionOnly else destinationReady)
     // Screen directions as drawn on this map, converted to and from the map frame used for headings.
     fun screenToMap(screenDegrees: Double) = (screenDegrees + 90.0 * state.mapQuarterTurns + 360.0) % 360.0
     fun mapToScreen(mapDegrees: Double) = (mapDegrees - 90.0 * state.mapQuarterTurns + 360.0) % 360.0
@@ -149,14 +175,14 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
     fun primaryAction() = when {
         state.liveRunning || state.liveCloseFailed -> actions.onRealLiveToggled()
         !startChosen -> openStart()
-        selected == null && !positionOnly -> openDestinations()
+        selected == null && otherFloorPlace == null && !positionOnly -> openDestinations()
         else -> openDirection()
     }
     fun selectStart(point: Offset, label: String, placeId: String? = null) {
         wifiStartChosen = false
         state.chooseKnownStart(point)
         startLabel = label; startPlaceId = placeId
-        sheet = if (selected == null && !positionOnly) { query = ""; category = null; "destinations" } else null
+        sheet = if (selected == null && otherFloorPlace == null && !positionOnly) { query = ""; category = null; "destinations" } else null
     }
     fun chooseDestination(id: String) {
         positionOnly = false
@@ -190,19 +216,25 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
         }
     }
     val live = state.liveRunning || state.liveStarting || state.liveCloseFailed
-    val instruction = if (state.liveRunning && selectedName != null && state.routePoints.size >= 2) nextInstruction(state.routePoints, selectedName) else null
+    // Phase 3: on a route to another floor, the shown floor's leg leads to its link rather than the destination.
+    val liveLeg = if (state.liveRunning) state.liveFloorRoute?.let { floorLeg(it, state.activeProject?.floorId) } else null
+    val instruction = if (state.liveRunning && selectedName != null && state.routePoints.size >= 2)
+        nextInstruction(state.routePoints, liveLeg?.target ?: selectedName) else null
     val floorBanner = live && floorBannerVisible(state.liveFloorTracking, now)
+    val connectorBanner = if (state.liveRunning) connectorBannerText(liveLeg,
+        state.realLivePosition?.let { MetricPoint(it.x.toDouble(), it.y.toDouble()) }) else null
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val landscape = maxWidth > maxHeight
         val density = LocalDensity.current
         val cardWidth = if (landscape) 340.dp else maxWidth.coerceAtMost(480.dp)
         val cardHeight = with(density) { cardHeightPx.toDp() }
-        val topInset = if (live) (if (floorBanner) 168.dp else 104.dp) else if (state.pickingStart || state.pickingHeading) 76.dp else 124.dp
+        val topInset = if (live) (if (floorBanner || connectorBanner != null) 168.dp else 104.dp) else if (state.pickingStart || state.pickingHeading) 76.dp else 124.dp
         val mapInsets = if (landscape) PaddingValues(start = cardWidth + 16.dp, top = topInset, end = 8.dp, bottom = 8.dp)
             else PaddingValues(top = topInset, bottom = cardHeight + 8.dp, start = 8.dp, end = 8.dp)
         NavigationMap(state, Modifier.fillMaxSize(), showPosition = true, showGraph = state.debugOverlays,
             showReferences = state.pickingStart, viewportPadding = mapInsets, compactControls = true,
-            previewRoute = if(!state.liveRunning) routePreview?.points?.map { Offset(it.x.toFloat(),it.y.toFloat()) } ?: emptyList() else null,
+            previewRoute = if(!state.liveRunning) (routePreview?.points ?: crossRoute?.let { floorLeg(it, state.activeProject?.floorId) }?.points)
+                ?.map { Offset(it.x.toFloat(),it.y.toFloat()) } ?: emptyList() else null,
             focusDestination = !state.pickingStart && !state.pickingHeading,
             controlsPadding = if (landscape) PaddingValues(12.dp) else PaddingValues(end = 12.dp, bottom = cardHeight + 16.dp),
             rotateToFit = true, roomLabels = true,
@@ -247,6 +279,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 }
                 val tracking = state.liveFloorTracking
                 if (floorBanner && tracking != null) LiveFloorBanner(tracking, actions.onRealLiveRelocalizationRequested)
+                else connectorBanner?.let { ConnectorBanner(it) }
             } else if (state.pickingStart || state.pickingHeading) {
                 Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -297,7 +330,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                     Text("Plan your route", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     FromToCard(
                         from = when { previewStart != null -> startLabel ?: "Point on map"; wifiStartChosen -> "Detect with Wi-Fi"; else -> null },
-                        to = selected?.name ?: if (positionOnly) "Just my position" else null,
+                        to = selected?.name ?: otherFloorPlace?.let { "${it.name} · ${it.floorName}" } ?: if (positionOnly) "Just my position" else null,
                         onFrom = { openStart() }, onTo = { openDestinations() },
                         onSwap = if (startPlaceId != null && destinationNode != null) ({ swap() }) else null,
                         enabled = !busy && !state.sessionLocked,
@@ -306,14 +339,21 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         RouteStat("%.0f m".format(routePreview.distanceMetres), "Walking distance", Modifier.weight(1f))
                         RouteStat(walkingTime(routePreview.distanceMetres), "At walking pace", Modifier.weight(1f))
                     }
+                    if (crossRoute != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            RouteStat("%.0f m".format(crossRoute.route.walkMetres), "Walking distance", Modifier.weight(1f))
+                            RouteStat("~${kotlin.math.ceil(crossRoute.route.seconds / 60.0).toInt().coerceAtLeast(1)} min",
+                                "With stairs or lifts", Modifier.weight(1f))
+                        }
+                        FloorLegList(floorLegRows(crossRoute, state.activeProject?.floorId))
+                    }
                     routeProblem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     if (selected != null && (destinationNode == null || (previewStart != null && routePreview == null)))
                         TextButton(onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Open Map setup") }
                     if (startAttempted || state.realWifiIssue != null) Text(state.realWifiIssue ?: state.realLiveStatus,
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = { if (hasWalkableMap) primaryAction() else state.selectDestination(TurnDestination.FLOOR_EDITOR) },
-                        enabled = !busy && !state.sessionLocked && (!hasWalkableMap || !state.hasUnsavedMapChanges) &&
-                            (selected == null || destinationNode != null && (previewStart == null || routePreview != null)),
+                        enabled = !busy && !state.sessionLocked && (!hasWalkableMap || !state.hasUnsavedMapChanges) && destinationReady,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)) {
                         Icon(Icons.Outlined.NearMe, null); Spacer(Modifier.width(8.dp))
                         Text(if (!hasWalkableMap) "Prepare this floor" else "Start navigation", fontWeight = FontWeight.Bold)
@@ -336,21 +376,36 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(query, { query = it }, placeholder = { Text("Search rooms & places") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
                         modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp))
-                    val shownCategories = placeCategories.map { it.first }.filter { c -> state.destinations.any { inCategory(it.name, c) } }
+                    // Phase 3: places on the building's other floors, grouped by floor below this floor's list.
+                    val otherFloorPlaces = state.buildingPlaces.filter { it.floorId != state.activeProject?.floorId }
+                    val shownCategories = placeCategories.map { it.first }.filter { c ->
+                        state.destinations.any { inCategory(it.name, c) } || otherFloorPlaces.any { inCategory(it.name, c) } }
                     if (shownCategories.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         shownCategories.forEach { c -> FilterChip(category == c, { category = if (category == c) null else c }, { Text(c) }) }
                     }
                     val filtered = state.destinations.filter { it.id != startPlaceId && it.name.contains(query.trim(), ignoreCase = true) && inCategory(it.name, category) }
                         .sortedWith(compareBy({ placeDistances[it.id] ?: Double.MAX_VALUE }, { it.name }))
-                    if (filtered.isEmpty()) {
-                        Text(if (state.destinations.isEmpty()) "There are no places on this floor yet." else "No places match your search.")
+                    val otherGroups = otherFloorPlaceGroups(state.activeProject?.floorId, otherFloorPlaces) {
+                        it.name.contains(query.trim(), ignoreCase = true) && inCategory(it.name, category) }
+                    if (filtered.isEmpty() && otherGroups.isEmpty()) {
+                        Text(if (state.destinations.isEmpty() && otherFloorPlaces.isEmpty()) "There are no places on this floor yet." else "No places match your search.")
                         TextButton(onClick = { sheet = null; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add places in Map setup") }
                     }
+                    if (otherGroups.isNotEmpty() && filtered.isNotEmpty()) FloorGroupHeader("${state.floorName} · this floor")
                     filtered.forEach { poi ->
                         val connected = state.navigationNodes.any { it.poiId == poi.id }
                         PlaceRow(poi.name, if (!connected) "Entrance not connected" else state.floorName,
                             trailing = placeDistances[poi.id]?.let { "%.0f m".format(it) }, selected = poi.id == state.selectedDestinationId,
                             badge = poi.name.filter { it.isDigit() }.takeLast(3).ifEmpty { null }) { chooseDestination(poi.id) }
+                    }
+                    otherGroups.forEach { group ->
+                        FloorGroupHeader("${levelBadge(group.level)} · ${group.floorName}")
+                        group.places.forEach { place ->
+                            PlaceRow(place.name, if (place.connected) "On ${place.floorName} · directions between floors"
+                                else "On ${place.floorName} · entrance not connected", trailing = null,
+                                selected = place.id == state.selectedDestinationId,
+                                badge = place.name.filter { it.isDigit() }.takeLast(3).ifEmpty { null }) { chooseDestination(place.id) }
+                        }
                     }
                     TextButton(onClick = {
                         actions.onDestinationSelected(null); positionOnly = true
@@ -454,6 +509,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         OverlayChoice("Wi-Fi fixes", state.showWifiFixes) { state.showWifiFixes = it }
                         OverlayChoice("Particles", state.showParticles) { state.showParticles = it }
                     }
+                    StepFreeRouteOption(state)
                     // Locked while tracking so a recorded session never mixes runs with and without magnetic evidence.
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -501,6 +557,8 @@ private fun LiveCard(state: TurnAppState, destination: String?, confidence: Stri
         RouteStat(state.realLiveUncertaintyMetres?.let { "±%.1f m".format(it) } ?: "–", "Accuracy", Modifier.weight(1f))
         RouteStat("${state.realLiveStepCount}", "Steps", Modifier.weight(1f))
     }
+    // Phase 3: the legs of a route to another floor; the confirmed floor's leg is bold and moves on with it.
+    state.liveFloorRoute?.let { FloorLegList(floorLegRows(it, state.activeProject?.floorId)) }
     TextButton(onClick = onDestination, contentPadding = PaddingValues(0.dp)) {
         Icon(Icons.Outlined.Place, null); Spacer(Modifier.width(6.dp)); Text(if (destination == null) "Choose destination" else "Change destination")
     }
@@ -632,4 +690,11 @@ private fun PlaceRow(name: String, subtitle: String, trailing: String?, selected
         if (selected) Icon(Icons.Outlined.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
         else if (trailing != null) Text(trailing, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/** Floor heading in the destination search across floors (phase 3). */
+@Composable
+private fun FloorGroupHeader(text: String) {
+    Text(text, Modifier.padding(top = 6.dp).semantics { heading() }, style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
 }

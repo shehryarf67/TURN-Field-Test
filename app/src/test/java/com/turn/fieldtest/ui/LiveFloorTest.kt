@@ -45,7 +45,8 @@ class LiveFloorTest {
         assertEquals("Barometer: ready", barometerStatusText(BarometerHealth.OK))
         assertEquals("Barometer: not on this phone", barometerStatusText(BarometerHealth.UNAVAILABLE))
         assertEquals("Barometer: no recent readings", barometerStatusText(BarometerHealth.STALE))
-        assertEquals("Destination is on Floor 3 · directions between floors come in a later update", destinationOnOtherFloorText("Floor 3"))
+        assertEquals("Destination is on Floor 3 · turn on Multi-floor tracking in Map options for directions between floors",
+            floorTrackingOffRouteText("Floor 3"))
         assertEquals("Wi-Fi suggests Floor 5 · waiting for more evidence", wifiSuggestsFloorText("Floor 5"))
     }
 

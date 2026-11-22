@@ -60,6 +60,13 @@ fun FullscreenNavigationScreen(state: TurnAppState) {
                         Text(if (age != null && age > 20) "Route based on last known position" else state.routeStatus,
                             maxLines = 2, style = MaterialTheme.typography.bodySmall)
                     }
+                    // Phase 3: near the link of a route to another floor, the same banner text as the explore screen.
+                    val leg = state.liveFloorRoute?.takeIf { state.liveRunning }?.let { com.turn.fieldtest.ui.floorLeg(it, state.activeProject?.floorId) }
+                    com.turn.fieldtest.ui.connectorBannerText(leg, state.realLivePosition?.let {
+                        com.turn.fieldtest.core.MetricPoint(it.x.toDouble(), it.y.toDouble()) })?.let {
+                        Text(it, maxLines = 2, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             if(!landscape) Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.medium) {

@@ -4,7 +4,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Accessibility
 import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.Stairs
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -15,6 +17,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.turn.fieldtest.core.FloorState
+import com.turn.fieldtest.ui.FloorLegRow
 import com.turn.fieldtest.ui.LiveFloorUi
 import com.turn.fieldtest.ui.TurnAppState
 import com.turn.fieldtest.ui.barometerStatusText
@@ -78,5 +81,51 @@ internal fun FloorTrackingOptions(state: TurnAppState, live: Boolean) {
     if (live) {
         state.liveFloorTracking?.let { Text(barometerStatusText(it.barometer), style = MaterialTheme.typography.bodySmall) }
         state.floorTrackingStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+/**
+ * Options-sheet switch for step-free routes (phase 3). It only changes routes between floors (lifts and ramps
+ * only), so same-floor routes stay as they are; it can change while tracking because it never touches the session.
+ */
+@Composable
+internal fun StepFreeRouteOption(state: TurnAppState) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.Accessibility, null)
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text("Step-free routes")
+            Text("Between floors, use only lifts and ramps", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(state.stepFreeRouting, { state.stepFreeRouting = it })
+    }
+}
+
+/** "Go up 2 floors to F4 by Stairs 1" near the link to take; shares the floor banner's slot. */
+@Composable
+internal fun ConnectorBanner(text: String) {
+    Surface(shape = RoundedCornerShape(18.dp), shadowElevation = 4.dp, color = MaterialTheme.colorScheme.primaryContainer) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Stairs, null, tint = MaterialTheme.colorScheme.primary)
+            Text(text, Modifier.weight(1f).padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+    }
+}
+
+/** The legs of a route between floors, the shown floor's leg in bold. */
+@Composable
+internal fun FloorLegList(rows: List<FloorLegRow>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        rows.forEachIndexed { i, row ->
+            Row(verticalAlignment = Alignment.Top) {
+                Text("${i + 1}.", Modifier.width(22.dp), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(row.text, style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (row.current) FontWeight.Bold else FontWeight.Normal,
+                    color = if (row.current) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }

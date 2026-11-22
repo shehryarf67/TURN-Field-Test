@@ -126,11 +126,14 @@ fun floorTrackingStartStatus(building: SessionBuilding, floorTrackingEnabled: Bo
 /**
  * Loads a [SessionBuilding] for a live session. The start floor is loaded exactly as before
  * ([ProjectRepository.load] with repairs persisted); other floors are read only when tracking is on, only those
- * the building's links reference, and without writing anything.
+ * the building's links reference, and without writing anything. The route preview between floors passes
+ * [persistStartRepairs] = false, so planning a route never writes to the open floor either.
  */
 class SessionBuildingLoader(private val projects: ProjectRepository, private val connectors: ConnectorRepository) {
-    suspend fun load(context: ProjectContext, floorTrackingEnabled: Boolean, useUnverifiedLinks: Boolean): SessionBuilding {
-        val start = projects.load(context)
+    suspend fun load(
+        context: ProjectContext, floorTrackingEnabled: Boolean, useUnverifiedLinks: Boolean, persistStartRepairs: Boolean = true,
+    ): SessionBuilding {
+        val start = projects.load(context, persistRepairs = persistStartRepairs)
         if (!floorTrackingEnabled) return assembleSessionBuilding(start, emptyList(), emptyList(), false, useUnverifiedLinks)
         val links = runCatching { connectors.connectors(context.venueId) }.getOrDefault(emptyList())
         val referenced = links.flatMap { listOf(it.entity.fromFloorId, it.entity.toFloorId) }.toSet() - context.floorId

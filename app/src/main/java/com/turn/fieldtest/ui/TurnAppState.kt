@@ -180,7 +180,7 @@ class TurnAppState {
         editorStatus = if (keepsRoom) "Entrance node removed · the room is kept; link it to another node" else "Node and its connections removed from draft"
     }
     fun clearRoute() {
-        routePoints = emptyList(); remainingDistanceMetres = null; destinationReached = false
+        routePoints = emptyList(); remainingDistanceMetres = null; destinationReached = false; liveFloorRoute = null
     }
 
     /**
@@ -579,6 +579,30 @@ class TurnAppState {
     var floorTrackingEnabled by mutableStateOf(true)
     /** Option "Use unchecked floor links"; saved with the other preferences. */
     var useUncheckedFloorLinks by mutableStateOf(false)
+    // Directions between floors (phase 3). Null or empty unless a destination lies on another floor.
+    /** Option "Step-free routes": routes between floors use only lifts and ramps; saved with the other preferences. */
+    var stepFreeRouting by mutableStateOf(false)
+    /** Every saved place of the open building, read when a floor is opened, for the destination search. */
+    var buildingPlaces by mutableStateOf<List<BuildingPlace>>(emptyList())
+    /** The live route to a destination on another floor; cleared with the route. */
+    var liveFloorRoute by mutableStateOf<FloorRouteUi?>(null)
+    /** The route preview to a destination on another floor, computed for the chosen start. */
+    var crossFloorPreview by mutableStateOf<CrossFloorPreview?>(null)
+
+    /** The selected destination when it lies on another floor than the open one (destination search across floors). */
+    fun selectedPlaceOnOtherFloor(): BuildingPlace? = selectedDestinationId?.takeIf { id -> destinations.none { it.id == id } }
+        ?.let { id -> buildingPlaces.firstOrNull { it.id == id && it.floorId != activeProject?.floorId } }
+
+    /** The route to another floor being shown: the live one while tracking, otherwise the preview for the current start. */
+    fun shownFloorRoute(): FloorRouteUi? = if (liveRunning) liveFloorRoute
+        else crossFloorPreview?.takeIf { p -> p.destinationId == selectedDestinationId && p.floorId == activeProject?.floorId &&
+            p.start == manualStartPoint?.let { com.turn.fieldtest.core.MetricPoint(it.x.toDouble(), it.y.toDouble()) } }?.route
+
+    /** The floor link to highlight on the open floor: the one the shown route takes from here. */
+    fun routeConnectorLinkId(): String? {
+        val floorId = activeProject?.floorId ?: return null
+        return shownFloorRoute()?.route?.connectorFrom(floorId)?.portals?.firstOrNull()?.linkId
+    }
     /** Start status of floor tracking for the running or last session (plan §5); null when there is nothing to say. */
     var floorTrackingStatus by mutableStateOf<String?>(null)
 

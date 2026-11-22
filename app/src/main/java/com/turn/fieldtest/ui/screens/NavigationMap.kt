@@ -266,6 +266,8 @@ internal fun NavigationMap(
                     // Floor links on this floor: a lettered badge (S, L, E, R) and where it leads. Links not yet
                     // checked on site get a dashed amber ring so they never look as trustworthy as checked ones.
                     val floorId = state.activeProject?.floorId
+                    // Phase 3: the link the route between floors takes from here gets a blue ring.
+                    val routeLinkId = state.routeConnectorLinkId()
                     if (floorId != null) state.floorConnectors.forEach { c ->
                         val e = c.entity
                         val (here, otherName, otherLevel) = when (floorId) {
@@ -275,6 +277,10 @@ internal fun NavigationMap(
                             else -> return@forEach
                         }
                         val p = project(here); val r = 8f * density.density / zoom
+                        if (e.id == routeLinkId) {
+                            drawCircle(TurnBlue.copy(alpha = 0.25f), r * 2.4f, p)
+                            drawCircle(TurnBlue, r * 2.4f, p, style = Stroke(3f * density.density / zoom))
+                        }
                         drawCircle(Color.White, r + 1.5f * density.density / zoom, p)
                         drawCircle(if (e.verifiedOnSite) TurnMint else TurnAmber, r, p)
                         if (!e.verifiedOnSite) drawCircle(TurnAmber, r + 4f * density.density / zoom, p, style = Stroke(1.5f * density.density / zoom,

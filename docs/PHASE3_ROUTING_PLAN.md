@@ -4,8 +4,8 @@ Directions between floors (roadmap row 3, design §2.3–2.4). Builds on phase 2
 
 ## Scope
 - **Core (done):** `core/MultiFloorRouting.kt`, a cross-floor router over each floor's path graph plus the session's floor links, with results split into floor legs and instruction text.
-- **UI (next):** use the router in `updateRoute()`, draw the current floor's leg, show a connector banner, add a step-free option, and show the leg list in the route preview.
-- **Later in phase 3:** cross-floor destination search grouped by floor (today the destination list is the open floor's).
+- **UI (done):** the router runs in `updateRoute()` for a live destination on another floor and in a view-model route preview without a session; the map draws the shown floor's leg and rings its link; a connector banner and leg list show in Explore and full screen; *Step-free routes* is a saved option.
+- **Cross-floor search (done):** *Search places* groups the building's other floors below the open floor.
 
 ## Invariants
 1. **Same floor means the same route as today.** When start and destination share a floor, the router delegates to `NavigationGraph.route` with the same arguments and returns that route as `singleFloor`. The VM keeps its current same-floor code path.
@@ -43,4 +43,12 @@ RouteLegText.instruction(leg, floorNames, destinationName) / instructions(route,
 
 ## Tests
 - **Done** (`MultiFloorRoutingTest`, JVM): same-floor parity with `NavigationGraph.route` (with and without step-free); stairs or lift chosen by total time; step-free avoids stairs and escalators, including flagged ones and non-step-free paths; one-way escalator; one-way paths; GF→F2 via F1 merged into one ride, and working without an F1 graph; different links split into five legs; unreachable reasons; disabled and unchecked links follow the option; leg text and summary.
-- **Next:** VM-level test that a same-floor route is unchanged with the router wired in; UI test for the banner and leg list; field courses GF→F4 by stairs and B1→F3 by lift, including the step-free variant (§2.7, phase 4).
+- **Done (app side):** `FloorRouteTest` (JVM): grouped search, leg of the confirmed floor (including a pass-through floor), leg rows, banner trigger, `routeToPlace` failures, failure and status text. `CrossFloorRouteUiTest` (androidTest): grouped search and picking another floor's place, one-floor search unchanged, preview legs and blocked start, step-free switch (and unlocked while live), banner near the link only, next leg after a floor change, full-screen banner.
+- **Next:** field courses GF→F4 by stairs and B1→F3 by lift, including the step-free variant (§2.7, phase 4).
+
+## App side (as built)
+- **Same-floor parity.** `updateRoute()` is unchanged except that its old placeholder branch (live destination on another floor than the tracked one) now calls `routeToOtherFloor()`. The same-floor preview stays in `CanvasNavigationScreen` (`previewGraph.route`). The new state (`liveFloorRoute`, `crossFloorPreview`, `buildingPlaces`) is null or empty unless a destination lies on another floor, so a one-floor building, tracking off, and every same-floor route look and behave as before.
+- **Live.** The router is built once per multi-floor session from the frozen `SessionBuilding` and `sessionGraphs`. Every particle update re-plans from `realLiveFloorId`, which is phase 2's confirmed floor, so the next leg takes over when the floor changes. `routePoints` hold the displayed floor's leg. `destinationReached` stays false until the destination floor, where the same-floor code takes over.
+- **Preview.** A `snapshotFlow` in the view model plans a preview when the selected place is on another floor and a start is chosen (`CrossFloorPreview`). It loads the building as a session start would, with the same links and *Use unchecked floor links*, but without writing (`persistStartRepairs = false`). The result is cached until the open floor, its saved paths, the links or the options change.
+- **Pure helpers** (`ui/FloorRoute.kt`): `otherFloorPlaceGroups`, `floorLeg`, `floorLegRows`, `connectorBannerText` (shown within the link radius, at least 5 m, by straight distance or remaining walk), `routeToPlace`, `routeFailureText` and `crossFloorRouteStatus`.
+- **Step-free.** `stepFreeRouting` is saved like the other map options. It applies only to routes between floors and can change while tracking, because it never touches the session.

@@ -71,10 +71,6 @@ fun barometerStatusText(health: BarometerHealth): String = "Barometer: " + when 
     BarometerHealth.STALE -> "no recent readings"
 }
 
-/** Route status when the live destination lies on another floor than the tracked one (phase 3 adds directions). */
-fun destinationOnOtherFloorText(floorName: String) =
-    "Destination is on $floorName · directions between floors come in a later update"
-
 /** Wi-Fi status while a match for another floor waits for confirmation. */
 fun wifiSuggestsFloorText(floorName: String) = "Wi-Fi suggests $floorName · waiting for more evidence"
 
