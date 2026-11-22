@@ -1,18 +1,27 @@
 package com.turn.fieldtest.core.replay
 
+import com.turn.fieldtest.core.AbsoluteFix
+import com.turn.fieldtest.core.AbsoluteFixSource
 import com.turn.fieldtest.core.ConnectorKind
+import com.turn.fieldtest.core.CrossFloorWifi
+import com.turn.fieldtest.core.FloorDetectionConfig
+import com.turn.fieldtest.core.FloorFixSource
 import com.turn.fieldtest.core.FloorLinkInput
 import com.turn.fieldtest.core.FloorState
 import com.turn.fieldtest.core.FloorTopologyBuilder
+import com.turn.fieldtest.core.FloorTrackingCoordinator
 import com.turn.fieldtest.core.FloorTrackingEventType
 import com.turn.fieldtest.core.MapFloor
 import com.turn.fieldtest.core.MetricMap
 import com.turn.fieldtest.core.MetricPoint
 import com.turn.fieldtest.core.MetricPolygon
+import com.turn.fieldtest.core.ParticleFilter
+import com.turn.fieldtest.core.ParticleFilterConfig
 import com.turn.fieldtest.core.WifiCorrectionKind
 import com.turn.fieldtest.core.WifiMatchResult
 import com.turn.fieldtest.core.WifiNeighbour
 import com.turn.fieldtest.core.WifiScanFreshness
+import com.turn.fieldtest.platform.sensors.TraceAccessPoint
 import com.turn.fieldtest.platform.sensors.TraceRow
 import kotlin.math.PI
 import kotlin.test.Test
@@ -55,7 +64,8 @@ class MultiFloorReplayTest {
     private val west = PI
 
     /** Fixture fingerprints: one BSSID per reference point; a strong RSSI gives a confident, floor-unanimous match. */
-    private val fingerprints = mapOf(F2_AP to ("F2" to MetricPoint(120.0, 5.0)))
+    private val fingerprints = mapOf(F2_AP to ("F2" to MetricPoint(120.0, 5.0)), F3_AP to ("F3" to MetricPoint(66.0, 55.0)),
+        F1_AP to ("F1" to MetricPoint(15.0, 5.0)))
 
     private fun matcher(scan: TraceRow.WifiScan): WifiMatchResult? {
         val ap = scan.accessPoints.maxByOrNull { it.rssiDbm } ?: return null
@@ -163,8 +173,87 @@ class MultiFloorReplayTest {
         }
     }
 
+    /** Phase 2 list (a) without a barometer: the stairs dwell cue and/or 3 strong F2 scans move the floor; no false change. */
+    @Test
+    fun stairsUpWithoutBarometerIsResolvedByDwellAndWifi() {
+        seeds.forEach { seed ->
+            val builder = SyntheticWalk(seed, barometer = false).arrived("F1")
+                .walk(19.8, east)
+                .stairs(1, "F2", headingA = east)
+            repeat(6) { builder.walk(3.0, west).wifi(F2_AP to -42) } // off the F2 landing at (135,5), scanning as it goes
+            val walk = builder.walk(4.0, west).build()
+            val run = harness.replay(walk.trace, ReplayStart("F1", MetricPoint(12.0, 5.0)), seed, walk::headingAt, ::matcher)
+            val m = run.metrics
+            assertEquals(listOf("F1", "F2"), run.confirmed.map { it.floorId }, "seed $seed: ${run.describe()}")
+            assertEquals(0, run.events.count { it.type == FloorTrackingEventType.VERTICAL_EVENT }, "seed $seed")
+            assertEquals(1, m.latenciesSeconds.size, "seed $seed: $m")
+            assertTrue(m.latenciesSeconds.single() in 0.0..NO_BAROMETER_LATENCY_SECONDS, "seed $seed: $m ${run.describe()}")
+            assertEquals(0, m.falseChanges, "seed $seed")
+            assertEquals(0, m.reverts, "seed $seed")
+            assertEquals(0, m.missedChanges, "seed $seed")
+            assertEquals("F2", run.decisions.last().second.floorId, "seed $seed")
+        }
+    }
+
+    /** Phase 2 list (b) without a barometer: the lift dwell cue seeds F3 through the lift and F3 Wi-Fi resolves it. */
+    @Test
+    fun twoFloorLiftWithoutBarometerIsResolvedByDwellAndWifi() {
+        seeds.forEach { seed ->
+            val builder = SyntheticWalk(seed, barometer = false).arrived("F1")
+                .walk(6.3, west) // (12,5) -> the lift at (4,5)
+                .stand(3.0)
+                .lift(2, "F3")
+                .stand(3.0)
+            repeat(5) { builder.walk(3.0, east).wifi(F3_AP to -42) } // out of the F3 lift at (56,55), scanning
+            val walk = builder.stand(5.0).walk(6.0, west).build()
+            val run = harness.replay(walk.trace, ReplayStart("F1", MetricPoint(12.0, 5.0)), seed, walk::headingAt, ::matcher)
+            val m = run.metrics
+            assertEquals(listOf("F1", "F3"), run.confirmed.map { it.floorId }, "seed $seed: ${run.describe()}")
+            assertEquals(0, run.events.count { it.type == FloorTrackingEventType.VERTICAL_EVENT }, "seed $seed")
+            assertEquals(1, m.latenciesSeconds.size, "seed $seed: $m")
+            assertTrue(m.latenciesSeconds.single() in 0.0..NO_BAROMETER_LATENCY_SECONDS, "seed $seed: $m ${run.describe()}")
+            assertEquals(0, m.falseChanges, "seed $seed")
+            assertEquals(0, m.reverts, "seed $seed")
+            assertEquals(0, m.missedChanges, "seed $seed")
+            assertEquals("F3", run.decisions.last().second.floorId, "seed $seed")
+        }
+    }
+
+    /**
+     * Phase 4 fix: Wi-Fi agreeing with the confirmed floor while the filter still leads on the old one is neither
+     * vetoed nor counted, so it never marks the floor uncertain (only vetoes do). No decide() here: with every particle
+     * on F1 the decision would follow the filter back at once; the state is the moment before it does.
+     */
+    @Test
+    fun wifiOnTheConfirmedFloorIsNeverVetoedWhileTheFilterLeadsElsewhere() {
+        val filter = ParticleFilter(map, ParticleFilterConfig(particleCount = 300), 5L, topology)
+        filter.initialize(AbsoluteFix(MetricPoint(15.0, 5.0), "F1", AbsoluteFixSource.MANUAL), 0.5)
+        val coordinator = requireNotNull(FloorTrackingCoordinator.createOrNull(topology, FloorDetectionConfig(), true, "F1"))
+        coordinator.onAbsoluteFix("F1", FloorFixSource.MANUAL, 0L)
+        coordinator.onAbsoluteFix("F2", FloorFixSource.MANUAL, 1L) // the display is on F2; every particle is still on F1
+        coordinator.drainEvents()
+        val match = assertNotNullMatch(F2_AP)
+        repeat(6) { i ->
+            val t = (i + 1) * 2_000_000_000L
+            assertEquals(CrossFloorWifi.DEFER, coordinator.crossFloorWifi(match, filter.summary(), t), "scan $i")
+        }
+        val events = coordinator.drainEvents().map { it.type }
+        assertTrue(FloorTrackingEventType.WIFI_CROSS_FLOOR_VETOED !in events, "$events")
+        assertTrue(FloorTrackingEventType.WIFI_CROSS_FLOOR_DEFERRED !in events, "$events")
+        // A match on the filter's own floor still needs no permission.
+        assertEquals(CrossFloorWifi.ALLOW, coordinator.crossFloorWifi(assertNotNullMatch(F1_AP), filter.summary(), 20_000_000_000L))
+    }
+
+    private fun assertNotNullMatch(bssid: String): WifiMatchResult =
+        requireNotNull(matcher(TraceRow.WifiScan(0L, 0L, true, listOf(TraceAccessPoint(bssid, -42, 2437, 0L)))))
+
     private companion object {
         const val F2_AP = "02:00:00:00:02:01"
+        const val F3_AP = "02:00:00:00:03:01"
+        const val F1_AP = "02:00:00:00:01:01"
+
+        /** No barometer: a dwell cue (or nothing) then 3 strong scans (matchesWithoutBarometer) about 3 s apart; loose. */
+        const val NO_BAROMETER_LATENCY_SECONDS = 20.0
 
         /** Settle (3 s) plus rate-window lag after arrival, then 3 decisions over 2 s: about 9 s; synthetic, so loose. */
         const val LATENCY_SECONDS = 15.0
