@@ -67,13 +67,16 @@ data class BarometerConfig(
     val stepLevelWindowSeconds: Double = 1.0,
     /** A fitted shift of at least this is a level shift whatever follows: a ride may start right after a real step. */
     val stepJumpHpa: Double = 0.16,
-    /** A smaller fitted shift, down to this share of the step (or of [stepRejectionHpa]), is one only if flat after. */
+    /** A smaller fitted shift, down to this share of the step (or of [stepRejectionHpa]), is one only if flat around. */
     val stepLevelShiftFraction: Double = 0.5,
-    /** "Flat after": the trend from the jump until judged (or the next step), in its direction, is at most this. */
+    /**
+     * "Flat": the trend before a jump, and after it in its direction until judged, is at most this. The level after a
+     * jump is the mean since the jump when its trend either way is at most this, otherwise a line taken at the jump.
+     */
     val stepFlatAfterRateMps: Double = 0.5,
     /**
-     * A step back while a step is pending closes a pulse (a door opening and closing) when the level after it is within
-     * this share of the rise from the level before; both steps are kept and the offset ends where it began.
+     * A step back while a step is pending (the return of a door pulse) becomes a candidate once it undoes all but this
+     * share of the pending step, even below [stepRejectionHpa]. The pending steps are then judged as one cluster.
      */
     val stepPulseMatchFraction: Double = 0.5,
     val staleAfterSeconds: Double = 3.0,

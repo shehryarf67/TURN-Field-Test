@@ -137,6 +137,55 @@ class VerticalMotionDetectorTest {
         assertEquals(emptyList(), failures, "${failures.size} of 960 step-then-ride traces")
     }
 
+    /** Two door pulses back to back, of the same sign or opposite (a door swinging then closing), add no height. */
+    @Test
+    fun backToBackDoorPulsesGiveNoEvent() {
+        val failures = mutableListOf<String>()
+        for (sampleHz in listOf(5.0, 8.0, 10.0)) for (hpa in listOf(0.3, -0.3)) for (second in listOf(hpa, -hpa)) {
+            for (gapSeconds in listOf(0.2, 1.0)) for (seed in 200L..211L) {
+                val trace = SyntheticPressure(seed, sampleHz).walk(10.0).pulse(hpa, 0.5).stand(gapSeconds).pulse(second, 0.5)
+                    .walk(20.0).build()
+                val events = replayPressure(trace, config).events
+                if (events.isNotEmpty()) {
+                    failures += "$hpa then $second hPa, gap $gapSeconds s, $sampleHz Hz, seed $seed: " +
+                        events.map { "${it.direction} ${it.floorCandidates} ${"%.2f".format(it.heightDeltaMetres)} m" }
+                }
+            }
+        }
+        assertEquals(emptyList(), failures, "${failures.size} of 576 double pulses")
+    }
+
+    /**
+     * A door step just before a fast lift ride in the opposite direction must not take the start of the ride for its
+     * step back: the whole ride counts as height.
+     */
+    @Test
+    fun aDoorStepBeforeARideTheOtherWayKeepsTheWholeRide() {
+        val failures = mutableListOf<String>()
+        // Seed 336 at 5 Hz once read a 2-floor ride after a 1 s gap as 1 floor; its 1-floor ride still reads as none
+        // (noise makes the ride a jump there), so it is only checked for 2 floors.
+        val cases = mutableListOf(listOf(5.0, 2.0, 1.0, 336.0))
+        for (sampleHz in listOf(5.0, 8.0, 10.0)) for (floors in listOf(1, -1, 2, -2)) for (gapSeconds in listOf(0.3, 1.0)) {
+            for (seed in (330L..340L) - 336L) cases += listOf(sampleHz, floors.toDouble(), gapSeconds, seed.toDouble())
+        }
+        for ((sampleHz, floorsD, gapSeconds, seedD) in cases) {
+            val floors = floorsD.toInt()
+            val seed = seedD.toLong()
+            run {
+                // A pressure rise (looks like going down) followed by a ride up, or a drop followed by a ride down.
+                val trace = SyntheticPressure(seed, sampleHz).walk(8.0).stand(3.0).pressureStep(if (floors > 0) 0.3 else -0.3)
+                    .stand(gapSeconds).lift(floors, 2.5).stand(6.0).walk(10.0).build()
+                val events = replayPressure(trace, config).events
+                val expected = if (floors > 0) VerticalDirection.UP else VerticalDirection.DOWN
+                if (events.size != 1 || events[0].floorCandidates != setOf(abs(floors)) || events[0].direction != expected) {
+                    failures += "gap $gapSeconds s, ride $floors floors, $sampleHz Hz, seed $seed: " +
+                        events.map { "${it.direction} ${it.floorCandidates} ${"%.2f".format(it.heightDeltaMetres)} m" }
+                }
+            }
+        }
+        assertEquals(emptyList(), failures, "${failures.size} of ${cases.size} step-then-ride traces")
+    }
+
     @Test
     fun aSecondFlightRightAfterAnEventIsFoundAfterTheBarometerIsReAnchored() {
         for (seed in 1L..10L) {

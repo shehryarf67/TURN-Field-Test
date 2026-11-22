@@ -39,14 +39,12 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
     private class Entry(val timestampNanos: Long, var median: Double, var ema: Double, var rateMps: Double)
 
     /** A tentatively absorbed step: [jumpNanos] is the first raw sample after the jump; [sizeHpa] is part of the offset. */
-    private class PendingStep(val absorbedNanos: Long, val jumpNanos: Long, val sizeHpa: Double) {
+    /** [absorbedHpa] is how much of the step the offset holds so far: all of it, or nothing for a hidden return. */
+    private class PendingStep(val absorbedNanos: Long, val jumpNanos: Long, val sizeHpa: Double, val absorbedHpa: Double = sizeHpa) {
         val sign get() = if (sizeHpa > 0.0) 1.0 else -1.0
     }
 
     private class Candidate(val jumpNanos: Long, val sizeHpa: Double)
-
-    /** Change of the raw-pressure means across a jump; [fittedShiftHpa] is what is left once a common slope is removed. */
-    private class LevelShift(val changeHpa: Double, val fittedShiftHpa: Double)
 
     private val window = ArrayList<Pair<Long, Double>>()
     private val rawSamples = ArrayList<Pair<Long, Double>>()
@@ -99,7 +97,6 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
         val discontinuity = settle(timestampNanos)
         val rawHpa = median(window.map { it.second })
         val candidate = stepCandidate(timestampNanos, rawHpa - offsetHpa)
-            ?.takeIf { pending.isEmpty() || (it.sizeHpa > 0.0) != (pending.last().sizeHpa > 0.0) }
         if (candidate != null) {
             pending += PendingStep(timestampNanos, candidate.jumpNanos, candidate.sizeHpa)
             offsetHpa += candidate.sizeHpa
@@ -114,11 +111,14 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
         compensateDrift(timestampNanos, dt)
         val rate = verticalRate(timestampNanos, ema, history.size)
         history.add(Entry(timestampNanos, corrected, ema, rate))
-        // Raw samples reach back to the stepConfirmSeconds before a step whose judgement waited for the step back.
-        val stepSpan = config.rateWindowSeconds + config.stepWindowSeconds + 3 * config.stepConfirmSeconds
-        val keep = nanos(maxOf(config.driftQuietSeconds, stepSpan) + 1.0)
-        prune(history, timestampNanos - keep) { it.timestampNanos }
-        prune(rawSamples, timestampNanos - keep) { it.first }
+        // Raw samples reach back to stepConfirmSeconds before the first pending step, however long its cluster lasts.
+        val stepSpan = config.rateWindowSeconds + config.stepWindowSeconds + 2 * config.stepConfirmSeconds
+        val keepFrom = minOf(
+            timestampNanos - nanos(maxOf(config.driftQuietSeconds, stepSpan) + 1.0),
+            (pending.firstOrNull()?.jumpNanos ?: Long.MAX_VALUE) - nanos(config.stepConfirmSeconds + 1.0),
+        )
+        prune(history, keepFrom) { it.timestampNanos }
+        prune(rawSamples, keepFrom) { it.first }
         return BarometerState(timestampNanos, ema, height(), rate, BarometerHealth.OK, discontinuity).also { lastState = it }
     }
 
@@ -139,24 +139,41 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
         return if (nowNanos - last > nanos(config.staleAfterSeconds)) BarometerHealth.STALE else BarometerHealth.OK
     }
 
-    /** A sharp step on flat pressure that may be a discontinuity, or null. [corrected] is the offset-free median. */
+    /**
+     * A sharp step on flat pressure that may be a discontinuity, or null. [corrected] is the offset-free median. While
+     * a step is pending, only a step back counts, and it needs to undo only most of the pending step: the return of a
+     * small door pulse can stay just below [BarometerConfig.stepRejectionHpa].
+     */
     private fun stepCandidate(timestampNanos: Long, corrected: Double): Candidate? {
         val span = nanos(config.stepWindowSeconds)
         val reference = history.lastOrNull { it.timestampNanos <= timestampNanos - span } ?: return null
         val jump = corrected - reference.ema
-        if (abs(jump) <= config.stepRejectionHpa || abs(reference.rateMps) > config.stepFlatRateMps) return null
+        val open = pending.lastOrNull()
+        val stepsBack = open != null && (jump > 0.0) != (open.sizeHpa > 0.0)
+        // A step on in the same direction joins the cluster only after it stepped back (a second door pulse); right
+        // after a lone step it would be a ride carrying on, which must stay height.
+        val returned = pending.size >= 2 && (pending[pending.size - 2].sizeHpa > 0.0) != (open!!.sizeHpa > 0.0)
+        if (open != null && !stepsBack && !returned) return null
+        val threshold = if (stepsBack) minOf(config.stepRejectionHpa, (1.0 - config.stepPulseMatchFraction) * abs(open!!.sizeHpa))
+        else config.stepRejectionHpa
+        if (abs(jump) <= threshold) return null
+        if (abs(reference.rateMps) > config.stepFlatRateMps) return null
+        // The median may show a first step late (a noisy sample can split it), so its jump is searched for from up to
+        // stepWindowSeconds before the reference, never before the last step. A later edge of a cluster is searched for
+        // only where the median window can have seen it, so an earlier, hidden edge of the same pulse is not taken for it.
+        val from = if (open != null) maxOf(open.jumpNanos, window.first().first - nanos(config.stepSharpSeconds))
+        else maxOf(lastStepNanos, reference.timestampNanos - span)
+        val sign = if (jump > 0.0) 1.0 else -1.0
+        val jumpAt = locateJump(from, Long.MAX_VALUE, sign) ?: return null
         val recent = history.filter { it.timestampNanos >= reference.timestampNanos }.map { it.timestampNanos to it.median }
         if (sharpestChange(recent + (timestampNanos to corrected)) < config.stepSharpFraction * abs(jump)) return null
-        // The median may show a step late (a noisy sample can split it), so the jump is searched for from the pending
-        // step it would close, or from up to stepWindowSeconds before the reference, never before the last step.
-        val from = pending.lastOrNull()?.jumpNanos ?: maxOf(lastStepNanos, reference.timestampNanos - span)
-        val jumpAt = locateJump(from, Long.MAX_VALUE, if (jump > 0.0) 1.0 else -1.0) ?: return null
         val jumpNanos = rawSamples[jumpAt].first
         // The median sits at an extreme of the post-step samples; raw means either side of the jump size it unbiased.
-        val before = rawSamples.filter { it.first in from until jumpNanos }
-        val after = rawSamples.filter { it.first >= jumpNanos }
+        val before = rawBetween(from, jumpNanos)
+        val after = rawBetween(jumpNanos, Long.MAX_VALUE)
         if (before.isEmpty()) return null
-        return Candidate(jumpNanos, after.map { it.second }.average() - before.map { it.second }.average())
+        val size = mean(after) - mean(before)
+        return Candidate(jumpNanos, size).takeIf { sign * size > config.stepLevelShiftFraction * config.stepRejectionHpa }
     }
 
     /** The largest change of the median within [BarometerConfig.stepSharpSeconds] (and at least one sample interval). */
@@ -206,30 +223,118 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
     }
 
     /**
-     * Judges the pending steps whose time has come, oldest first; true when one was confirmed. A step is due
-     * [BarometerConfig.stepConfirmSeconds] after its jump. While the step after it (opposite, by construction) is
-     * still pending, it waits for that one, so a pulse is judged as a whole.
+     * Judges the pending steps once the newest is [BarometerConfig.stepConfirmSeconds] old; true when a step was
+     * confirmed. Each pending step jumped within that time of the one before it (a later one is only a candidate
+     * while the earlier ones wait), so the edges of a door pulse, or of several, are judged together.
      */
     private fun settle(nowNanos: Long): Boolean {
-        val confirm = nanos(config.stepConfirmSeconds)
-        var confirmed = false
-        while (pending.isNotEmpty()) {
-            val step = pending[0]
-            val next = pending.getOrNull(1)
-            if (nowNanos < (next ?: step).jumpNanos + confirm) break
-            if (next != null && closePulse(step, next, pending.getOrNull(2)?.jumpNanos ?: Long.MAX_VALUE)) {
-                confirmed = true
-                continue
-            }
-            val size = judge(step, lastStepNanos, next?.jumpNanos ?: Long.MAX_VALUE)
-            if (size != null) {
-                confirm(step, size)
-                confirmed = true
+        val newest = pending.lastOrNull() ?: return false
+        if (nowNanos < newest.jumpNanos + nanos(config.stepConfirmSeconds)) return false
+        return judge()
+    }
+
+    /**
+     * Judges the pending steps as one cluster of edges, on raw samples that never reach back across the last confirmed
+     * step. The level before is the mean over up to [BarometerConfig.stepConfirmSeconds] before the first edge; the level
+     * after is the level right after the last edge ([levelAfter]).
+     *
+     * Every edge before the last must be a level shift ([isLevelShift]) between its neighbours. Door pulses (one,
+     * several, or overpressure then underpressure) are sharp jumps between flat plateaus, however short; a lift ride
+     * that a noisy median splits into edges is a ramp between them, so the cluster ends before the first edge that is not
+     * a jump: the ride starts there. An edge within 2 x [BarometerConfig.stepSharpSeconds] of the one before that is not a
+     * jump is the same jump seen again by the median, and is merged into it.
+     *
+     * Then the last edge must be a level shift in its own direction; if it is not (the start of a ride or a fast climb),
+     * it is dropped and the cluster without it is judged again. Kept edges are re-sized to the levels between them (the
+     * mean of each plateau), so they add up to the level after minus the level before: pulses that came and went add
+     * nothing. Dropped steps are handed back to the height retroactively, so a whole ride is measured.
+     */
+    private fun judge(): Boolean {
+        val edges = pending.toMutableList()
+        val hidden = hiddenReturn(edges)
+        if (hidden != null) edges += hidden
+        var i = 0
+        while (i < edges.size - 1) {
+            val previousNanos = if (i > 0) edges[i - 1].jumpNanos else lastStepNanos
+            if (isLevelShift(edges[i], previousNanos, edges[i + 1].jumpNanos)) {
+                i++
+            } else if (i > 0 && edges[i].jumpNanos - previousNanos < nanos(2 * config.stepSharpSeconds)) {
+                edges.removeAt(i)
             } else {
-                revert(step)
+                edges.subList(i, edges.size).clear()
             }
         }
-        return confirmed
+        var sizes = emptyList<Double>()
+        while (edges.isNotEmpty()) {
+            val first = edges.first()
+            val last = edges.last()
+            val previousNanos = edges.getOrNull(edges.size - 2)?.jumpNanos ?: lastStepNanos
+            val before = rawBetween(maxOf(lastStepNanos, first.jumpNanos - nanos(config.stepConfirmSeconds)), first.jumpNanos)
+            val after = rawBetween(last.jumpNanos, Long.MAX_VALUE)
+            if (before.isEmpty() || after.isEmpty()) {
+                edges.clear()
+                break
+            }
+            val levels = mutableListOf(mean(before))
+            for (k in 0 until edges.size - 1) levels += mean(rawBetween(edges[k].jumpNanos, edges[k + 1].jumpNanos))
+            levels += levelAfter(last.jumpNanos, after)
+            val lastSize = levels.last() - levels[levels.size - 2]
+            if (last === hidden || last.sign * lastSize > 0.0 && isLevelShift(last, previousNanos, Long.MAX_VALUE)) {
+                sizes = (0 until edges.size).map { levels[it + 1] - levels[it] }
+                break
+            }
+            edges.removeAt(edges.lastIndex)
+        }
+        for (step in pending + listOfNotNull(hidden)) {
+            val k = edges.indexOf(step)
+            val delta = if (k >= 0) sizes[k] - step.absorbedHpa else -step.absorbedHpa
+            offsetHpa += delta
+            shiftSince(step.absorbedNanos, -delta)
+        }
+        pending.clear()
+        if (edges.isEmpty()) return false
+        lastStepNanos = edges.last().jumpNanos
+        return true
+    }
+
+    /**
+     * The step back of the last of [edges] when it never became a candidate (a short or small door pulse can hide its
+     * return from the median), or null. The raw pressure must step back sharply (the raw means over
+     * [BarometerConfig.stepSharpSeconds] either side differ by [BarometerConfig.stepSharpFraction] of the step), then stay
+     * flat (no trend above [BarometerConfig.stepFlatAfterRateMps] over [BarometerConfig.stepLevelWindowSeconds]) within
+     * [BarometerConfig.stepPulseMatchFraction] of the step of the level before the first edge, which the pressure stood
+     * away from until then (a cluster that already returned has no step back to hide). A ride that starts the
+     * other way keeps moving, so it is never taken for one. It joins the cluster as an edge the offset does not hold yet.
+     */
+    private fun hiddenReturn(edges: List<PendingStep>): PendingStep? {
+        val first = edges.firstOrNull() ?: return null
+        val last = edges.last()
+        val back = locateJump(last.jumpNanos, Long.MAX_VALUE, -last.sign) ?: return null
+        val rise = last.sign * last.sizeHpa
+        if (-last.sign * sharpShift(back, last.jumpNanos, Long.MAX_VALUE) < config.stepSharpFraction * rise) return null
+        val backNanos = rawSamples[back].first
+        val after = rawBetween(backNanos, backNanos + nanos(config.stepLevelWindowSeconds))
+        val before = rawBetween(maxOf(lastStepNanos, first.jumpNanos - nanos(config.stepConfirmSeconds)), first.jumpNanos)
+        if (after.size < 2 || before.isEmpty() || abs(trendMps(after)) > config.stepFlatAfterRateMps) return null
+        val levelBefore = mean(before)
+        // The pressure stood away from the level before until the step back; a cluster that already returned has none.
+        val plateau = rawBetween(last.jumpNanos, backNanos)
+        if (plateau.isEmpty() || abs(mean(plateau) - levelBefore) < (1.0 - config.stepPulseMatchFraction) * rise) return null
+        if (abs(mean(after) - levelBefore) > config.stepPulseMatchFraction * rise) return null
+        return PendingStep(backNanos, backNanos, -last.sign * rise, absorbedHpa = 0.0)
+    }
+
+    /**
+     * The level right after a jump, from the raw samples [after] it (from the jump until now). When the pressure held
+     * level after the jump (no trend above [BarometerConfig.stepFlatAfterRateMps] either way) it is their mean;
+     * otherwise it is a line over [BarometerConfig.stepLevelWindowSeconds] after the jump, taken at the jump, so a ride
+     * that starts soon after does not count.
+     */
+    private fun levelAfter(jumpNanos: Long, after: List<Pair<Long, Double>>): Double {
+        if (abs(trendMps(after)) <= config.stepFlatAfterRateMps) return mean(after)
+        val near = after.filter { it.first < jumpNanos + nanos(config.stepLevelWindowSeconds) }
+        val sinceJump = (near.map { it.first }.average() - jumpNanos) / 1e9
+        return mean(near) - slopePerSecond(near) * sinceJump
     }
 
     /**
@@ -237,18 +342,16 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
      * [fromNanos, untilNanos) (the neighbouring steps), fitted with one common slope plus a level shift at the jump.
      * A ramp, a kink or a curve gives a fitted shift near zero; only a jump gives a large one.
      */
-    private fun levelShift(jumpNanos: Long, fromNanos: Long, untilNanos: Long): LevelShift? {
+    private fun levelShift(jumpNanos: Long, fromNanos: Long, untilNanos: Long): Double? {
         val span = nanos(config.stepLevelWindowSeconds)
-        val from = maxOf(jumpNanos - span, fromNanos)
-        val until = minOf(jumpNanos + span, untilNanos)
-        val before = rawSamples.filter { it.first in from until jumpNanos }
-        val after = rawSamples.filter { it.first in jumpNanos until until }
+        val before = rawBetween(maxOf(jumpNanos - span, fromNanos), jumpNanos)
+        val after = rawBetween(jumpNanos, minOf(jumpNanos + span, untilNanos))
         if (before.isEmpty() || after.isEmpty()) return null
         fun seconds(sample: Pair<Long, Double>) = (sample.first - jumpNanos) / 1e9
         val tBefore = before.map(::seconds).average()
         val tAfter = after.map(::seconds).average()
-        val pBefore = before.map { it.second }.average()
-        val pAfter = after.map { it.second }.average()
+        val pBefore = mean(before)
+        val pAfter = mean(after)
         var sxx = 0.0
         var sxy = 0.0
         for ((samples, t0, p0) in listOf(Triple(before, tBefore, pBefore), Triple(after, tAfter, pAfter))) {
@@ -258,114 +361,42 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
             }
         }
         val slope = if (sxx > 0.0) sxy / sxx else 0.0
-        return LevelShift(pAfter - pBefore, pAfter - pBefore - slope * (tAfter - tBefore))
+        return pAfter - pBefore - slope * (tAfter - tBefore)
     }
 
     /**
-     * The step's confirmed size, or null when it is not a level shift. Raw samples come from [fromNanos] (the previous
-     * step) until [untilNanos] (the next one, or now). The step must be sharp: the raw means over
-     * [BarometerConfig.stepSharpSeconds] either side of the jump differ by at least [BarometerConfig.stepSharpFraction]
-     * of the size (a short fast ride is a ramp of a second or more, not a jump). Then a fitted shift at the jump of at
-     * least [BarometerConfig.stepJumpHpa] is one whatever the pressure does next (a ride may start right after a real
+     * True when [step] is a level shift between [fromNanos] and [untilNanos] (its neighbouring steps, or now). It must
+     * be sharp, and the fitted shift at its jump ([levelShift]), in its direction, must be at least
+     * [BarometerConfig.stepJumpHpa]: then it is one whatever the pressure does next (a ride may start right after a real
      * step). A smaller one, down to [BarometerConfig.stepLevelShiftFraction] of the step, is one only if the pressure is
-     * flat around it: no trend above [BarometerConfig.stepFlatAfterRateMps] before it, nor after it in its direction, as
-     * a ride would show on one side or the other.
-     *
-     * The size is the level after minus the mean before (up to [BarometerConfig.stepConfirmSeconds]). When the pressure
-     * held level after the jump (no trend either way), the level after is the mean since the jump; otherwise it is a
-     * line over the judging window after the jump, taken at the jump, so a ride that starts soon after does not count.
+     * flat around it: no trend above [BarometerConfig.stepFlatAfterRateMps] before it, nor after it in its direction,
+     * as a ride would show on one side or the other.
      */
-    private fun judge(step: PendingStep, fromNanos: Long, untilNanos: Long): Double? {
-        if (stepsBackUnseen(step, fromNanos, untilNanos)) return null
-        val shift = levelShift(step.jumpNanos, fromNanos, untilNanos) ?: return null
-        val jump = step.sign * shift.fittedShiftHpa
-        val after = rawSamples.filter { it.first >= step.jumpNanos && it.first < untilNanos }
-        val beforeFrom = maxOf(step.jumpNanos - nanos(config.stepConfirmSeconds), fromNanos)
-        val before = rawSamples.filter { it.first in beforeFrom until step.jumpNanos }
-        val afterMps = step.sign * trendMps(after)
+    private fun isLevelShift(step: PendingStep, fromNanos: Long, untilNanos: Long): Boolean {
+        val jump = step.sign * (levelShift(step.jumpNanos, fromNanos, untilNanos) ?: return false)
         if (jump < config.stepJumpHpa) {
-            val floor = config.stepLevelShiftFraction * maxOf(step.sign * step.sizeHpa, config.stepRejectionHpa)
-            // A stretch cut short by an earlier step (a pulse's plateau) is too short to show a trend.
-            val cutShort = fromNanos > step.jumpNanos - nanos(config.stepConfirmSeconds)
-            val flatBefore = cutShort || abs(trendMps(before)) <= config.stepFlatAfterRateMps
-            val flat = afterMps <= config.stepFlatAfterRateMps && flatBefore
-            if (jump < floor || !flat) return null
+            val confirm = nanos(config.stepConfirmSeconds)
+            val before = rawBetween(maxOf(step.jumpNanos - confirm, fromNanos), step.jumpNanos)
+            val after = rawBetween(step.jumpNanos, untilNanos)
+            // A stretch cut short by an earlier step (a pulse plateau) is too short to show a trend.
+            val flatBefore = fromNanos > step.jumpNanos - confirm || abs(trendMps(before)) <= config.stepFlatAfterRateMps
+            val flat = flatBefore && step.sign * trendMps(after) <= config.stepFlatAfterRateMps
+            if (jump < config.stepLevelShiftFraction * maxOf(step.sign * step.sizeHpa, config.stepRejectionHpa) || !flat) return false
         }
-        val levelBefore = before.map { it.second }.average()
-        val size = if (abs(afterMps) <= config.stepFlatAfterRateMps) {
-            after.map { it.second }.average() - levelBefore
-        } else {
-            val near = after.filter { it.first < step.jumpNanos + nanos(config.stepLevelWindowSeconds) }
-            val sinceJump = (near.map { it.first }.average() - step.jumpNanos) / 1e9
-            near.map { it.second }.average() - slopePerSecond(near) * sinceJump - levelBefore
-        }
-        return size.takeIf { step.sign * it > 0.0 && isSharp(step, fromNanos, untilNanos, step.sign * it) }
-    }
-
-    /**
-     * The raw pressure stepped back sharply to about the level before [step] (within
-     * [BarometerConfig.stepPulseMatchFraction] of the rise) without that step back ever becoming a candidate, as a
-     * short or small door pulse can hide from the median. The pulse then came and went in the height, so [step] is
-     * handed back: no net change either way.
-     */
-    private fun stepsBackUnseen(step: PendingStep, fromNanos: Long, untilNanos: Long): Boolean {
-        val back = locateJump(step.jumpNanos, untilNanos, -step.sign) ?: return false
-        val rise = step.sign * step.sizeHpa
-        if (-step.sign * sharpShift(back, step.jumpNanos, untilNanos) < config.stepSharpFraction * rise) return false
-        val span = nanos(config.stepLevelWindowSeconds)
-        val backNanos = rawSamples[back].first
-        val before = rawSamples.filter { it.first in maxOf(step.jumpNanos - span, fromNanos) until step.jumpNanos }
-        val after = rawSamples.filter { it.first in backNanos until minOf(untilNanos, backNanos + span) }
-        if (before.isEmpty() || after.isEmpty()) return false
-        val level = after.map { it.second }.average() - before.map { it.second }.average()
-        return abs(level) <= config.stepPulseMatchFraction * rise
+        return isSharp(step, fromNanos, untilNanos, jump)
     }
 
     /** Least-squares vertical trend of raw samples in m/s, positive when pressure rises; 0 for fewer than two. */
     private fun trendMps(samples: List<Pair<Long, Double>>): Double =
         if (samples.size < 2) 0.0 else slopePerSecond(samples) * metresPerHpa(samples[0].second)
 
+    /** The raw means over [BarometerConfig.stepSharpSeconds] either side of the jump differ by [BarometerConfig.stepSharpFraction] of [sizeHpa]. */
     private fun isSharp(step: PendingStep, fromNanos: Long, untilNanos: Long, sizeHpa: Double): Boolean =
         step.sign * sharpShift(rawSamples.indexOfFirst { it.first >= step.jumpNanos }, fromNanos, untilNanos) >=
             config.stepSharpFraction * sizeHpa
 
-    /**
-     * Closes a pulse and returns true when [next] steps back to the level before [step] (a door opening and closing):
-     * [step] rose sharply from that level, [next] is itself a sharp level shift judged from [step]'s jump on, and the
-     * level after it is within [BarometerConfig.stepPulseMatchFraction] of the rise from the level before. A ride that
-     * starts the other way soon after a real step is a ramp, so it never closes one. Both steps are kept: the plateau
-     * takes its measured level and the offset ends where it began.
-     */
-    private fun closePulse(step: PendingStep, next: PendingStep, untilNanos: Long): Boolean {
-        val opening = levelShift(step.jumpNanos, lastStepNanos, next.jumpNanos) ?: return false
-        val rise = step.sign * opening.changeHpa
-        if (rise <= 0.0 || !isSharp(step, lastStepNanos, next.jumpNanos, rise)) return false
-        val back = judge(next, step.jumpNanos, untilNanos) ?: return false
-        if (abs(opening.changeHpa + back) > config.stepPulseMatchFraction * rise) return false
-        pending.remove(step)
-        pending.remove(next)
-        offsetHpa -= step.sizeHpa + next.sizeHpa
-        shiftSince(step.absorbedNanos, step.sizeHpa - opening.changeHpa)
-        shiftSince(next.absorbedNanos, opening.changeHpa + next.sizeHpa)
-        lastStepNanos = next.jumpNanos
-        return true
-    }
+    private fun rawBetween(fromNanos: Long, untilNanos: Long) = rawSamples.filter { it.first >= fromNanos && it.first < untilNanos }
 
-    /** Keeps the step absorbed, re-sized to the level change measured around the jump. */
-    private fun confirm(step: PendingStep, sizeHpa: Double) {
-        pending.removeAt(0)
-        val delta = sizeHpa - step.sizeHpa
-        offsetHpa += delta
-        shiftSince(step.absorbedNanos, -delta)
-        lastStepNanos = step.jumpNanos
-    }
-
-    /** Hands a tentatively absorbed step back to the height, as if it had never been absorbed. */
-    private fun revert(step: PendingStep) {
-        pending.removeAt(0)
-        offsetHpa -= step.sizeHpa
-        shiftSince(step.absorbedNanos, step.sizeHpa)
-    }
 
     /**
      * Adds [deltaHpa] to the corrected pressure from [fromNanos] on and recomputes the EMA and rates from there, so
@@ -419,6 +450,8 @@ class BarometerTracker(private val config: BarometerConfig, private val sensorPr
             val sorted = values.sorted()
             return if (sorted.size % 2 == 1) sorted[sorted.size / 2] else (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2.0
         }
+
+        fun mean(samples: List<Pair<Long, Double>>) = samples.sumOf { it.second } / samples.size
 
         fun insertSorted(list: MutableList<Pair<Long, Double>>, sample: Pair<Long, Double>) =
             list.add(list.indexOfFirst { it.first > sample.first }.let { if (it < 0) list.size else it }, sample)
