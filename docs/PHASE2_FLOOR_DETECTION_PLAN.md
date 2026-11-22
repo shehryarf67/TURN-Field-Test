@@ -428,7 +428,7 @@ All times use the elapsedRealtimeNanos base; sensor timestamps share it (SensorS
 **Tests:**
 - `RawSensorTraceTest`: round trip of samples, markers and Wi-Fi batches; header rejection. It extends the recorder test at FloorConnectorsTest.kt:91-110.
 - `FloorTrackEvaluatorTest`: hand-built timelines.
-- `MultiFloorReplayTest` (asymmetric frames; one stair link F1↔F2, one lift F1↔F3, F2↔F3 stairs). **As built it has four scenarios only, by the user's decision to save time, each run with a barometer over three seeds:** (1) walk to the stairs, climb one floor, walk on; (2) a two-floor lift ride; (3) near miss: walking past right beside the stairs on the same floor with door and HVAC pressure blips, no change; (4) strong Wi-Fi for another floor while the user stays put, vetoed, no change, then UNCERTAIN. The original list below is kept for phase 4:
+- `MultiFloorReplayTest` (asymmetric frames; one stair link F1↔F2, one lift F1↔F3, F2↔F3 stairs). **As built it has four scenarios only, by the user's decision to save time, each run with a barometer over three seeds:** (1) walk to the stairs, climb one floor, walk on; (2) a two-floor lift ride; (3) near miss: walking past right beside the stairs on the same floor with door and HVAC pressure blips, no change; (4) strong Wi-Fi for another floor while the user stays put, vetoed, no change, then UNCERTAIN. Phase 4 added the no-barometer variants of (a) and (b). The original list below is kept for the rest:
   - (a) Walk, stairs up, walk off with a barometer: exactly one CONFIRMED F1→F2 within 6 s of ARRIVED and 0 false changes. Without a barometer, with F2 fingerprints: F2 within 3 fresh scans.
   - (b) A two-floor lift with a barometer gives F3. Without one, the dwell cue plus Wi-Fi resolve it.
   - (c) 20 min of corridor walking past the stairs 6 times, plus drift and HVAC steps: 0 confirmed changes and 0 reverts.
@@ -668,6 +668,16 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 - **Step 11.** *Diagnostics → Raw sensor recording* has `RawRecordingMarkers` (DiagnosticsScreen.kt) calling `TurnRuntimeViewModel.addRawMarker` → `RawSensorRecorder.marker`: Start stairs up/down, **Enter lift up/down** (the grammar needs a direction, so "Enter lift" is one button per direction), Standing still, and "Arrived on…" chips for the open building's floors in level order (floor ids the grammar cannot carry are skipped). All are disabled unless a recording runs. `docs/MULTI_FLOOR_NAVIGATION.md` §6 has the phase 4 entry.
 - **Tests.** JVM `FloorTransitionExportTest` (1:1 mapping and wall clock, CONFIG held then numbered from 0, schema-4 round trip, schema-3 import with an empty list, unknown session/floor/link and duplicate sequences rejected, CSV dataset). androidTest `FloorTransitionMigrationTest` (v6 rows including link label and verifiedOnSite survive; table and 4 indices exist; `foreign_key_check` clean; session delete cascades; DAO round trip in sequence order, export includes the rows, a deleted floor nulls `toFloorId` and `linkId`) and `RawRecordingMarkersUiTest` (disabled until recording; buttons write the grammar; only this building's floors). The androidTests compile but were not run on a device.
 
+### Phase 4 field tooling and review fixes (as built)
+
+- **Field replay.** `core/replay/FieldReplay.kt` and `FieldReplayTest` (JVM, test sources). Each `*.json` with a `startFloorId` in `app/src/test/resources/field/` names a raw sensor CSV and the building: floors, walls and links from a complete database JSON (`database`), or written by hand, plus optional Wi-Fi anchors. Each recording is replayed per seed through `FloorReplayHarness` and scored by `FloorTrackEvaluator` against its `TraceMarkers`; the report goes to stdout and `app/build/reports/field-replay/report.txt`. Heading comes from the game rotation vector (else the rotation vector) relative to `startHeadingRadians`; `dropBarometer` replays the same walk without pressure rows. The test is skipped when the folder holds no recordings. Layout and how to run it: `docs/FIELD_TEST_PROTOCOL.md`.
+- **Replay scenarios.** `MultiFloorReplayTest` adds the no-barometer variants of (a) stairs up and (b) the two-floor lift: dwell cues and three strong scans of the arrival floor's access point resolve the floor, with no VERTICAL_EVENT, one confirmed change, 0 false changes and 0 missed, within 20 s (synthetic, loose). Six scenarios now.
+- **Review fixes.**
+  - `crossFloorWifi` compares against the confirmed floor. A match on the filter's leading floor is ALLOW as before; a match on the confirmed floor while the filter still leads elsewhere is a quiet DEFER (no veto, no count, no UNCERTAIN; the filter only reweights). Before, Wi-Fi agreeing with the displayed floor right after a change could be vetoed and mark the floor uncertain.
+  - `ParticleFilter.summary(floorId)` is cached until the particles change, so the 1 Hz multi-floor tick on Main no longer recomputes the O(n²) cluster summary.
+  - `MultiFloorRouter` remembers which graphs validate and where each link end attaches (per step-free choice). The session router is already built once per session, so live re-planning no longer re-runs `validationErrors()` for every floor on each particle update. Results are unchanged (tested against a fresh router).
+  - `updateRoute` in a multi-floor session uses only the tracked floor's own graph (`liveRouteGraph`); a floor without one shows "This floor has no saved paths · add paths in Map setup" instead of drawing the start floor's graph in the wrong frame. Single-floor sessions are unchanged.
+
 ---
 
 ## 3. Defaults (all in `FloorDetectionConfig` / `ParticleFilterConfig`, with require checks, snapshotted per session)
@@ -736,7 +746,8 @@ Floor names come from the saved floor names; "Floor 4" above is an example.
   - highlighting the link in use on the map.
 - **Phase 4:**
   - ~~Step 10 (schema 7 `floor_transition_events`, export schema 4) and Step 11 (Diagnostics marker buttons, docs), moved here by the user's decision~~ (done);
-  - the remaining Step 6 replay scenarios (no-barometer variants, pending-height resolution, Wi-Fi start probation, STALE barometer, links-disabled parity);
+  - ~~the field replay tool, the field test protocol and the no-barometer stairs and lift scenarios~~ (done, see "Phase 4 field tooling and review fixes");
+  - the remaining Step 6 replay scenarios (pending-height resolution, Wi-Fi start probation, STALE barometer, links-disabled parity, the 20-minute corridor walk);
   - threshold tuning from C-block recordings through the Step 6 harness;
   - a Diagnostics threshold editor or DataStore override;
   - per-venue floor height, `floors.elevationMetres` and reference pressure on reference points (§2.6);
