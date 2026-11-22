@@ -192,8 +192,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private var multiFloorRawPdrTrail: List<Offset> = emptyList()
     private var userRelocalizePending = false
     private var lastFloorTickNanos = Long.MIN_VALUE
-    /** Latest coordinator event, kept for diagnostics until events are persisted (phase 4). */
+    /** Latest coordinator event, kept for diagnostics; every event is also persisted (floor_transition_events). */
     private var lastFloorEvent: com.turn.fieldtest.core.FloorTrackingEvent? = null
+    /** Numbers and holds coordinator events until the session row exists (CONFIG is emitted before it is saved). */
+    private val floorEventLog = com.turn.fieldtest.data.repository.FloorEventLog()
 
     fun captureCheckpoint(input: CheckpointInput) {
         val context = appState.activeProject ?: return
@@ -877,6 +879,16 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         if (foreground) startRealSources()
     }
 
+    /** Writes a ground-truth marker (TraceMarkers grammar) into the running recording; ignored when none runs. */
+    fun addRawMarker(text: String) {
+        val recorder = rawRecorder ?: return
+        recordRaw { recorder.marker(text, System.currentTimeMillis()) }
+        if (rawRecorder === recorder) {
+            appState.rawRecordingRows = recorder.rows
+            appState.rawRecordingStatus = "Recording · marker added: $text"
+        }
+    }
+
     private inline fun recordRaw(block: () -> Unit) {
         try {
             block()
@@ -1266,6 +1278,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 sessionContext = context
                 floorCoordinator = coordinator
                 lastFloorEvent = null
+                floorEventLog.reset()
                 coordinator?.let { drainFloorEvents() }
                 appState.floorTrackingStatus = floorTrackingStartStatus(building, appState.floorTrackingEnabled, barometerPresent)
                 liveWifiEvidence.reset(android.os.SystemClock.elapsedRealtimeNanos() / 1_000L)
@@ -1303,6 +1316,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.liveStarting = false
                 activeSensorSession = sensorSession
                 activePositioningSession = positioningSession
+                // The session row now exists: write the held CONFIG event (multi-floor sessions only).
+                eventMutex.withLock { drainFloorEvents() }
                 appState.mapHasMeasurements = true
                 if (!foreground || appState.mode != DataMode.REAL_DEVICE || !appState.liveRunning) {
                     eventMutex.withLock { finishActiveLive("Stopped because TURN left the foreground while starting") }
@@ -2199,6 +2214,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         sessionGraphs = emptyMap()
         sessionMagneticMaps = emptyMap()
         floorCoordinator = null
+        floorEventLog.reset()
         sessionRouter = null
         liveTrailsByFloor.clear()
         multiFloorRawPdrTrail = emptyList()
@@ -2208,9 +2224,23 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.liveSessionKey = null
     }
 
-    /** Coordinator events are kept in memory only until phase 4 persists them; the latest stays for diagnostics. */
+    /**
+     * Drains the coordinator's events, keeps the latest for diagnostics and persists them to floor_transition_events
+     * off the main thread (plan Step 10). Events before the session row exists (CONFIG) are held and written with
+     * the first drain after it is saved. A failed write is logged and never stops tracking.
+     */
     private fun drainFloorEvents() {
-        floorCoordinator?.drainEvents()?.lastOrNull()?.let { lastFloorEvent = it }
+        val events = floorCoordinator?.drainEvents().orEmpty()
+        events.lastOrNull()?.let { lastFloorEvent = it }
+        if (floorCoordinator == null) return
+        val rows = floorEventLog.add(events, activePositioningSession?.id, System.currentTimeMillis(),
+            android.os.SystemClock.elapsedRealtimeNanos())
+        if (rows.isEmpty()) return
+        val dao = app.database.floorTransitionEventDao()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { dao.insert(rows) }
+                .onFailure { android.util.Log.w("TURN", "Could not save ${rows.size} floor events", it) }
+        }
     }
 
     private fun sessionFloorName(floorId: String?): String = floorId?.let { id ->

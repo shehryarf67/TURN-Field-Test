@@ -39,6 +39,7 @@ interface BackupDao {
     @Query("SELECT * FROM beacon_definitions ORDER BY id") suspend fun beaconDefinitions(): List<BeaconDefinitionEntity>
     @Query("SELECT * FROM ble_observations ORDER BY id") suspend fun bleObservations(): List<BleObservationEntity>
     @Query("SELECT * FROM aggregated_ble_fingerprints ORDER BY id") suspend fun aggregatedBleFingerprints(): List<AggregatedBleFingerprintEntity>
+    @Query("SELECT * FROM floor_transition_events ORDER BY positioningSessionId, sequence") suspend fun floorTransitionEvents(): List<FloorTransitionEventEntity>
 
     @Upsert suspend fun upsertVenues(values: List<VenueEntity>)
     @Upsert suspend fun upsertFloors(values: List<FloorEntity>)
@@ -64,6 +65,7 @@ interface BackupDao {
     @Upsert suspend fun upsertBeaconDefinitions(values: List<BeaconDefinitionEntity>)
     @Upsert suspend fun upsertBleObservations(values: List<BleObservationEntity>)
     @Upsert suspend fun upsertAggregatedBleFingerprints(values: List<AggregatedBleFingerprintEntity>)
+    @Upsert suspend fun upsertFloorTransitionEvents(values: List<FloorTransitionEventEntity>)
 
     @Transaction
     suspend fun createExport(exportedAtEpochMillis: Long): TurnDatabaseExport = TurnDatabaseExport(
@@ -95,6 +97,7 @@ interface BackupDao {
         beaconDefinitions = beaconDefinitions(),
         bleObservations = bleObservations(),
         aggregatedBleFingerprints = aggregatedBleFingerprints(),
+        floorTransitionEvents = floorTransitionEvents(),
     )
 
     @Transaction
@@ -122,6 +125,7 @@ interface BackupDao {
         upsertPositioningSessions(value.positioningSessions)
         upsertPositionEstimates(value.positionEstimates)
         upsertCorrectionEvents(value.correctionEvents)
+        upsertFloorTransitionEvents(value.floorTransitionEvents)
         upsertTestRuns(value.testRuns)
         upsertTestCheckpoints(value.testCheckpoints)
         upsertTestSamples(value.testSamples)

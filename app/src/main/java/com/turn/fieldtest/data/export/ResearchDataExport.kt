@@ -17,6 +17,7 @@ enum class ResearchDataset(val label: String, val table: String?) {
     PDR_EVENTS("PDR events", "pdrEvents"),
     POSITIONS("Position estimates", "positionEstimates"),
     CORRECTIONS("Correction events", "correctionEvents"),
+    FLOOR_TRANSITIONS("Floor change log", "floorTransitionEvents"),
     TEST_SAMPLES("Independent test samples", "testSamples"),
 }
 

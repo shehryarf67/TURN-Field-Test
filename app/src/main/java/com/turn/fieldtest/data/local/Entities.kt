@@ -561,3 +561,37 @@ data class AggregatedBleFingerprintEntity(
     val excludedFromMatching: Boolean = false,
     val calculatedAtEpochMillis: Long,
 )
+
+/**
+ * One floor-tracking event of a multi-floor positioning session (schema 7). Sequence 0 is the CONFIG row, whose
+ * detail holds the session's floor-detection config and barometer presence, so sessions need no new columns.
+ * Rows are written only for multi-floor sessions; single-floor sessions never have any.
+ */
+@Entity(
+    tableName = "floor_transition_events",
+    foreignKeys = [
+        ForeignKey(entity = PositioningSessionEntity::class, parentColumns = ["id"], childColumns = ["positioningSessionId"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = FloorEntity::class, parentColumns = ["id"], childColumns = ["fromFloorId"], onDelete = ForeignKey.SET_NULL),
+        ForeignKey(entity = FloorEntity::class, parentColumns = ["id"], childColumns = ["toFloorId"], onDelete = ForeignKey.SET_NULL),
+        ForeignKey(entity = VerticalTransitionEntity::class, parentColumns = ["id"], childColumns = ["linkId"], onDelete = ForeignKey.SET_NULL),
+    ],
+    indices = [Index(value = ["positioningSessionId", "sequence"], unique = true), Index("fromFloorId"), Index("toFloorId"), Index("linkId")],
+)
+@Serializable
+data class FloorTransitionEventEntity(
+    @PrimaryKey val id: String,
+    val positioningSessionId: String,
+    val sequence: Long,
+    val type: String,
+    val fromFloorId: String? = null,
+    val toFloorId: String? = null,
+    val linkId: String? = null,
+    val movedShare: Double? = null,
+    val floorVoteAfter: Double? = null,
+    val heightDeltaMetres: Double? = null,
+    val pressureHpa: Double? = null,
+    val barometerHealth: String,
+    val sensorTimestampNanos: Long? = null,
+    val timestampEpochMillis: Long,
+    val detail: String = "",
+)

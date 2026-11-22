@@ -35,6 +35,8 @@ data class TurnDatabaseExport(
     val bleObservations: List<BleObservationEntity> = emptyList(),
     val aggregatedBleFingerprints: List<AggregatedBleFingerprintEntity> = emptyList(),
     val scanDrafts: List<com.turn.fieldtest.mapper.data.ScanDraftEntity> = emptyList(),
+    /** Export schema 4: floor-tracking events of multi-floor sessions (empty in older exports). */
+    val floorTransitionEvents: List<FloorTransitionEventEntity> = emptyList(),
 ) {
     /** Validate identity and ownership before any repository writes occur. */
     fun validationErrors(): List<String> = buildList {
@@ -104,6 +106,14 @@ data class TurnDatabaseExport(
         bleObservations.filter { it.surveySessionId !in surveyIds }.forEach { add("BLE observation ${it.id} references unknown survey") }
         aggregatedBleFingerprints.filter { it.surveySessionId !in surveyIds || it.referencePointId !in referenceIds }
             .forEach { add("BLE fingerprint ${it.id} has an invalid owner") }
+        checkUnique("floor transition event", floorTransitionEvents.map(FloorTransitionEventEntity::id))
+        floorTransitionEvents.groupBy { it.positioningSessionId to it.sequence }.filterValues { it.size > 1 }.keys
+            .forEach { (session, sequence) -> add("Duplicate floor transition event $sequence in session $session") }
+        val linkIds = verticalTransitions.mapTo(hashSetOf(), VerticalTransitionEntity::id)
+        floorTransitionEvents.filter { it.positioningSessionId !in positioningIds ||
+            (it.fromFloorId != null && it.fromFloorId !in floorIds) || (it.toFloorId != null && it.toFloorId !in floorIds) ||
+            (it.linkId != null && it.linkId !in linkIds) }
+            .forEach { add("Floor transition event ${it.id} has an invalid session, floor or link") }
     }
 
     private fun MutableList<String>.checkUnique(label: String, ids: List<String>) {
@@ -113,7 +123,7 @@ data class TurnDatabaseExport(
     }
 
     companion object {
-        const val CURRENT_EXPORT_SCHEMA = 3
+        const val CURRENT_EXPORT_SCHEMA = 4
     }
 }
 

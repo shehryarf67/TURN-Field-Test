@@ -310,3 +310,13 @@ interface BleDao {
     @Query("SELECT * FROM aggregated_ble_fingerprints WHERE referencePointId = :referencePointId ORDER BY stableIdentifier")
     fun observeAggregatedFingerprints(referencePointId: String): Flow<List<AggregatedBleFingerprintEntity>>
 }
+
+/** Floor-tracking events of multi-floor sessions (schema 7). Upsert keeps a retried write idempotent. */
+@Dao
+interface FloorTransitionEventDao {
+    @Upsert
+    suspend fun insert(events: List<FloorTransitionEventEntity>)
+
+    @Query("SELECT * FROM floor_transition_events WHERE positioningSessionId = :sessionId ORDER BY sequence")
+    suspend fun forSession(sessionId: String): List<FloorTransitionEventEntity>
+}

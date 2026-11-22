@@ -39,6 +39,7 @@ import com.turn.fieldtest.data.export.BackupDao
         AggregatedBleFingerprintEntity::class,
         MagneticCellEntity::class,
         MagneticWalkEntity::class,
+        FloorTransitionEventEntity::class,
     ],
     version = TurnDatabase.SCHEMA_VERSION,
     exportSchema = true,
@@ -55,9 +56,10 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun bleDao(): BleDao
     abstract fun backupDao(): BackupDao
     abstract fun magneticDao(): MagneticDao
+    abstract fun floorTransitionEventDao(): FloorTransitionEventDao
 
     companion object {
-        const val SCHEMA_VERSION = 6
+        const val SCHEMA_VERSION = 7
         const val DATABASE_NAME = "turn-field-test.db"
 
         fun build(context: Context, databaseName: String = DATABASE_NAME): TurnDatabase =
@@ -126,5 +128,15 @@ object TurnDatabaseMigrations {
             db.execSQL("UPDATE `vertical_transitions` SET `accessible` = 1 WHERE `kind` IN ('LIFT', 'ELEVATOR', 'RAMP')")
         }
     }
-    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4,FROM_4_TO_5,FROM_5_TO_6)
+    /** Additive: the floor-tracking event log of multi-floor sessions. No existing table changes. */
+    val FROM_6_TO_7 = object : Migration(6, 7) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `floor_transition_events` (`id` TEXT NOT NULL, `positioningSessionId` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `type` TEXT NOT NULL, `fromFloorId` TEXT, `toFloorId` TEXT, `linkId` TEXT, `movedShare` REAL, `floorVoteAfter` REAL, `heightDeltaMetres` REAL, `pressureHpa` REAL, `barometerHealth` TEXT NOT NULL, `sensorTimestampNanos` INTEGER, `timestampEpochMillis` INTEGER NOT NULL, `detail` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`positioningSessionId`) REFERENCES `positioning_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`fromFloorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL , FOREIGN KEY(`toFloorId`) REFERENCES `floors`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL , FOREIGN KEY(`linkId`) REFERENCES `vertical_transitions`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_floor_transition_events_positioningSessionId_sequence` ON `floor_transition_events` (`positioningSessionId`, `sequence`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_floor_transition_events_fromFloorId` ON `floor_transition_events` (`fromFloorId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_floor_transition_events_toFloorId` ON `floor_transition_events` (`toFloorId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_floor_transition_events_linkId` ON `floor_transition_events` (`linkId`)")
+        }
+    }
+    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4,FROM_4_TO_5,FROM_5_TO_6,FROM_6_TO_7)
 }

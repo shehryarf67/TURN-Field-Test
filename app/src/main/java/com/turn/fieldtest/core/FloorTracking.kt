@@ -27,13 +27,13 @@ enum class CrossFloorWifi { ALLOW, DEFER, VETO }
 /** Where an absolute fix came from (each one is allowed to change floor without a link, invariant I2). */
 enum class FloorFixSource { MANUAL, QR, WIFI_INIT, USER_RELOCALIZE, WIFI_CROSS_FLOOR }
 
-/** Event types persisted 1:1 in phase 4 (floor_transition_events; plan Step 10, moved to phase 4). */
+/** Event types persisted 1:1 in floor_transition_events (schema 7, plan Step 10). */
 enum class FloorTrackingEventType {
     CONFIG, VERTICAL_EVENT, DWELL_CUE, APPLIED, REJECTED, PENDING_EXPIRED, CONFIRMED, UNCERTAIN, ABSOLUTE_FIX,
     WIFI_CROSS_FLOOR_RELOCALIZATION, WIFI_CROSS_FLOOR_DEFERRED, WIFI_CROSS_FLOOR_VETOED, BAROMETER_HEALTH,
 }
 
-/** One coordinator event; the fields mirror the planned floor_transition_events columns. */
+/** One coordinator event; the fields mirror the floor_transition_events columns (see FloorEventLog). */
 data class FloorTrackingEvent(
     val type: FloorTrackingEventType,
     val atNanos: Long,
