@@ -9,7 +9,9 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -229,6 +231,22 @@ class ParticleFilterMultiFloorTest {
         assertTrue(f2.isWalkable(upstairs.position) && upstairs.position.distanceTo(MetricPoint(15.0, 8.0)) < 2.0)
         assertNull(pf.summary("F3"))
         assertNull(filter().summary("F1")) // lost filter
+    }
+
+    @Test
+    fun floorSummariesAreCachedUntilTheParticlesChange() {
+        val pf = filter().start(2.0, 2.0).apply { applyVerticalEvidence(up(share = 0.3)) }
+        val twin = filter().start(2.0, 2.0).apply { applyVerticalEvidence(up(share = 0.3)) }
+        val first = assertNotNull(pf.summary("F2"))
+        assertSame(first, pf.summary("F2"))
+        assertNull(pf.summary("F3"))
+        assertNull(pf.summary("F3"))
+        listOf(pf, twin).forEach { it.predictStep(0.7, 0.0, false) }
+        val moved = assertNotNull(pf.summary("F2"))
+        assertNotSame(first, moved)
+        // The cache never changes the answer: the twin computes it fresh after the same step.
+        assertEquals(twin.summary("F2"), moved)
+        assertEquals(twin.summary("F1"), pf.summary("F1"))
     }
 
     @Test

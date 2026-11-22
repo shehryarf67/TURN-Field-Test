@@ -69,6 +69,24 @@ class MultiFloorRoutingTest {
     }
 
     @Test
+    fun aReusedRouterAnswersExactlyAsAFreshOne() {
+        // Phase 4: the session router caches graph validation and link attachments; re-planning must not drift.
+        val escalator = link("esc", ConnectorKind.ESCALATOR, "GF", "F1", 10.0, 12.0, "Escalator", accessible = true)
+        val links = listOf(stairsGf, stairsF1, escalator, lift())
+        val reused = router(links)
+        repeat(2) {
+            listOf(MetricPoint(3.0, 2.0), MetricPoint(12.0, 2.0), MetricPoint(27.0, 2.0)).forEach { from ->
+                listOf(false, true, false).forEach { stepFree ->
+                    listOf("F1" to "F1-room", "F2" to "F2-room").forEach { (floorId, node) ->
+                        assertEquals(router(links).route("GF", from, floorId, node, stepFree), reused.route("GF", from, floorId, node, stepFree),
+                            "from $from step-free $stepFree to $floorId")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun picksStairsOrLiftByTotalTime() {
         // Stairs: 2 m + 15 s + 23 m = 35 s. Lift at 25 s: 22 m + 25 s + 3 m = 45 s.
         val viaStairs = found(router(listOf(stairsGf, lift())).route("GF", start, "F1", "F1-room"))

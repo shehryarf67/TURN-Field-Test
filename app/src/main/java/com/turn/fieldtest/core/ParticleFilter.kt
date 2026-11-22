@@ -243,8 +243,10 @@ class ParticleFilter(
     private val random = Random(seed)
     private val multiFloor = !floorTopology.isEmpty
     private var cachedSummary: ParticleSummary? = null
+    /** Per-floor summaries since the last particle update (phase 4: the 1 Hz live tick asked for them uncached). */
+    private val cachedFloorSummaries = mutableMapOf<String, ParticleSummary?>()
     private var mutableParticles: List<Particle> = emptyList()
-        set(value) { field = value; cachedSummary = null }
+        set(value) { field = value; cachedSummary = null; cachedFloorSummaries.clear() }
     private val mutableEvents = mutableListOf<FilterEvent>()
     private var nextEventSequence = 1L
 
@@ -570,15 +572,15 @@ class ParticleFilter(
 
     /**
      * The same summary as [summary] but restricted to [floorId]'s particles, whatever the strongest floor is.
-     * Not cached. Null when the filter is lost or [floorId] holds no weight.
+     * Cached until the particles next change. Null when the filter is lost or [floorId] holds no weight.
      */
     fun summary(floorId: String): ParticleSummary? {
         if (mutableParticles.isEmpty()) return null
+        if (floorId in cachedFloorSummaries) return cachedFloorSummaries[floorId]
         val normalized = normalizeWeights(mutableParticles)
         // Summed in particle order, exactly as summary() sums its groups, so the argmax floor matches bit for bit.
         val vote = normalized.filter { it.floorId == floorId }.sumOf { it.weight }
-        if (vote <= 0.0) return null
-        return summarize(normalized, floorId, vote)
+        return (if (vote <= 0.0) null else summarize(normalized, floorId, vote)).also { cachedFloorSummaries[floorId] = it }
     }
 
     /** Normalised weight per floor, keyed in floor-id order. Empty when the filter is lost. */

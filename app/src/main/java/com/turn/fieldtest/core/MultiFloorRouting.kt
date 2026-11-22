@@ -89,8 +89,15 @@ class MultiFloorRouter(
         return CrossFloorSearch(start, startFloorId, destinationFloorId, destinationNodeId, stepFreeOnly).run()
     }
 
-    private fun usableGraph(floorId: String): NavigationGraph? =
-        graphs[floorId]?.takeIf { it.floor.id == floorId && it.validationErrors().isEmpty() }
+    // Phase 4: a live session re-plans on every particle update, so what never changes for this router is worked out once:
+    // which graphs validate, and where each link end attaches to its floor's paths (per step-free choice).
+    private val usableGraphs = mutableMapOf<String, NavigationGraph?>()
+    private val linkAttachments = mutableMapOf<Triple<String, String, Boolean>, Attachment?>()
+
+    private fun usableGraph(floorId: String): NavigationGraph? = synchronized(usableGraphs) {
+        if (floorId in usableGraphs) usableGraphs[floorId]
+        else graphs[floorId]?.takeIf { it.floor.id == floorId && it.validationErrors().isEmpty() }.also { usableGraphs[floorId] = it }
+    }
 
     /** A walk step: the polyline it adds and its length. */
     private class Step(val parent: String, val points: List<MetricPoint>, val floorId: String?, val portal: FloorPortal?) {
@@ -141,7 +148,7 @@ class MultiFloorRouter(
                 }
                 val sinks = portals.filter { it.fromFloorId == floorId }.map { entryKey(it) to it.fromCentre }
                 val attachments = if (graph == null) emptyMap() else (sources + sinks).mapNotNull { (key, point) ->
-                    attach(graph, point)?.let { key to it }
+                    cachedAttach(floorId, key, graph, point)?.let { key to it }
                 }.toMap()
                 if (graph != null) addGraphEdges(floorId, graph, sources, sinks, attachments)
                 if (floor != null) sources.forEach { (s, sp) ->
@@ -212,6 +219,14 @@ class MultiFloorRouter(
         }
 
         private fun usable(graph: NavigationGraph) = graph.edges.filter { it.walkable && (!stepFreeOnly || it.accessible) }
+
+        /** [attach], remembered for link ends (their points never change); the start is attached afresh each time. */
+        private fun cachedAttach(floorId: String, key: String, graph: NavigationGraph, point: MetricPoint): Attachment? {
+            if (key == START) return attach(graph, point)
+            val cacheKey = Triple(floorId, key, stepFreeOnly)
+            synchronized(linkAttachments) { if (cacheKey in linkAttachments) return linkAttachments[cacheKey] }
+            return attach(graph, point).also { synchronized(linkAttachments) { linkAttachments[cacheKey] = it } }
+        }
 
         /** The nearest wall-free attachment within reach, as [NavigationGraph.route] attaches its start. */
         private fun attach(graph: NavigationGraph, point: MetricPoint): Attachment? {

@@ -198,17 +198,27 @@ class FloorTrackingCoordinator(
     }
 
     /**
-     * Policy for a Wi-Fi match whose floor differs from the current estimate ([current], else the confirmed floor). It
-     * counts consecutive fresh strong matches on the same other floor; any other result resets the count.
-     * Same-floor (or not fresh, or floorless) matches are ALLOW: they need no cross-floor permission.
+     * Policy for a Wi-Fi match whose floor differs from the confirmed (displayed) floor. It counts consecutive fresh
+     * strong matches on the same other floor; any other result resets the count.
+     * - A match on the filter's leading floor ([current], else the confirmed floor), or a stale or floorless match, is
+     *   ALLOW: the filter needs no cross-floor permission for it.
+     * - A match on the confirmed floor while the filter still leads on another one (a moment around a floor change) is a
+     *   quiet DEFER: no veto, no count and no UNCERTAIN, and the filter only reweights towards it.
+     * Phase 4 fix: the vetoes compared against the leading floor alone, so Wi-Fi agreeing with the displayed floor right
+     * after a change could be vetoed and mark the floor uncertain.
      */
     fun crossFloorWifi(match: WifiMatchResult, current: ParticleSummary?, nowNanos: Long): CrossFloorWifi {
         see(nowNanos)
         val target = match.estimatedFloorId
-        val from = current?.floorId ?: decision.floorId
-        if (match.freshness != WifiScanFreshness.FRESH || target == null || target == from) {
+        val from = decision.floorId
+        val leading = current?.floorId ?: from
+        if (match.freshness != WifiScanFreshness.FRESH || target == null || target == leading) {
             resetWifiCounts()
             return CrossFloorWifi.ALLOW
+        }
+        if (target == from) {
+            resetWifiCounts()
+            return CrossFloorWifi.DEFER
         }
         val w = config.wifi
         val strong = !match.unlikeDatabase && match.confidence >= w.strongConfidence && match.floorAgreement >= w.strongFloorAgreement

@@ -2392,8 +2392,10 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             routeToOtherFloor(liveDestination, MetricPoint(position.x.toDouble(), position.y.toDouble())); return
         }
         appState.liveFloorRoute = null
-        val graph = if (floorCoordinator != null) appState.realLiveFloorId?.let { sessionGraphs[it] } ?: sessionGraph
-            else sessionGraph ?: savedNavigationGraph
+        val graph = liveRouteGraph(floorCoordinator != null, appState.realLiveFloorId, sessionGraphs, sessionGraph, savedNavigationGraph)
+        if (graph == null && floorCoordinator != null) {
+            appState.clearRoute(); appState.routeStatus = NO_FLOOR_PATHS_TEXT; return
+        }
         val node = graph?.nodes?.firstOrNull { it.poiId == destination }
         if (graph == null || node == null) {
             appState.clearRoute()

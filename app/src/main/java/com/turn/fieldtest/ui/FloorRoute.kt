@@ -153,3 +153,16 @@ fun floorTrackingOffRouteText(floorName: String) =
 fun crossFloorRouteStatus(route: FloorRouteUi): String =
     (RouteLegText.instructions(route.route, route.floorNames, route.destinationName).firstOrNull() ?: "Follow the blue route") +
         " · " + RouteLegText.summary(route.route)
+
+/**
+ * The path graph a live route on the tracked floor uses. A multi-floor session uses only that floor's own graph: the
+ * start floor's graph is in another frame, so falling back to it (as before phase 4) drew a route in the wrong place.
+ * Null then means [NO_FLOOR_PATHS_TEXT]. Single-floor sessions are unchanged.
+ */
+fun liveRouteGraph(
+    multiFloor: Boolean, trackedFloorId: String?, sessionGraphs: Map<String, NavigationGraph>,
+    sessionGraph: NavigationGraph?, savedGraph: NavigationGraph?,
+): NavigationGraph? = if (multiFloor) trackedFloorId?.let { sessionGraphs[it] } else sessionGraph ?: savedGraph
+
+/** Status when the tracked floor of a multi-floor session has no usable saved paths. */
+const val NO_FLOOR_PATHS_TEXT = "This floor has no saved paths · add paths in Map setup"

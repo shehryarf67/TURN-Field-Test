@@ -48,6 +48,19 @@ class FloorRouteTest {
         return FloorRouteUi(assertIs<MultiFloorRouteResult.Found>(result).route, "POI-F2", "F2", "Lab 2", names)
     }
 
+    @Test fun liveRoutesNeverBorrowAnotherFloorsGraph() {
+        val start = graphs.getValue("GF")
+        val partial = mapOf("GF" to start, "F2" to graphs.getValue("F2"))
+        // Multi-floor: only the tracked floor's own graph; a floor without one gets the "no saved paths" status.
+        assertEquals(graphs.getValue("F2"), liveRouteGraph(true, "F2", partial, start, null))
+        assertNull(liveRouteGraph(true, "F1", partial, start, start))
+        assertNull(liveRouteGraph(true, null, partial, start, start))
+        assertTrue(NO_FLOOR_PATHS_TEXT.contains("no saved paths"))
+        // Single-floor sessions keep the session graph, else the saved one, exactly as before.
+        assertEquals(start, liveRouteGraph(false, "F1", partial, start, null))
+        assertEquals(graphs.getValue("F1"), liveRouteGraph(false, null, emptyMap(), null, graphs.getValue("F1")))
+    }
+
     @Test fun otherFloorsAreGroupedHighestFirstWithoutTheOpenFloor() {
         val places = listOf(
             BuildingPlace("a", "Lab 1", "GF", "Ground floor", 0, true),
