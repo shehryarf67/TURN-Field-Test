@@ -599,9 +599,9 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 
 ### Steps 7 to 9 as built (progress)
 
-**Status: Steps 7, 8 and 9 are done.** Steps 10 and 11 moved to phase 4.
+**Status: Steps 7, 8 and 9 are done.** Steps 10 and 11 moved to phase 4 and are now done (below).
 
-- **Step 7.** `data/repository/SessionBuilding.kt` holds `SessionBuilding`, the pure `assembleSessionBuilding`, `SessionBuilding.singleFloor()`, `floorTrackingStartStatus` (§5 start status) and `SessionBuildingLoader`. `ProjectRepository.load(context, persistRepairs = true)`; other floors load with `false`. The VM builds the coordinator with `FloorTrackingCoordinator.createOrNull`; if it returns null the building is reduced with `singleFloor()`, so the legacy path never sees other floors. Wi-Fi corrections go through `coordinator.correctWithWifi` (which applies the cross-floor gate and records the absolute fix) instead of a separate `crossFloorRelocalizationAllowed` call. Coordinator events are drained after every call and only the latest is kept in memory; persisting them (`persistFloorEvents`, CONFIG event) is part of Step 10, now phase 4. QR has no live initialisation path in the VM today, so only manual start, Wi-Fi init and user relocalise call `onAbsoluteFix`.
+- **Step 7.** `data/repository/SessionBuilding.kt` holds `SessionBuilding`, the pure `assembleSessionBuilding`, `SessionBuilding.singleFloor()`, `floorTrackingStartStatus` (§5 start status) and `SessionBuildingLoader`. `ProjectRepository.load(context, persistRepairs = true)`; other floors load with `false`. The VM builds the coordinator with `FloorTrackingCoordinator.createOrNull`; if it returns null the building is reduced with `singleFloor()`, so the legacy path never sees other floors. Wi-Fi corrections go through `coordinator.correctWithWifi` (which applies the cross-floor gate and records the absolute fix) instead of a separate `crossFloorRelocalizationAllowed` call. Coordinator events are drained after every call; the latest is kept in memory and, since phase 4, all are persisted (Step 10). QR has no live initialisation path in the VM today, so only manual start, Wi-Fi init and user relocalise call `onAbsoluteFix`.
 - **Step 8.** `applyFloorDisplay` is extracted from `loadProject`; `followLiveFloor` swaps the displayed floor from the frozen building with no database access and no live reset. The display follows whenever the decision's floor differs from the displayed floor (`floorToFollow`), which after the first decision only happens on a confirmed change (I3). Fused trails and Wi-Fi fixes are kept per floor; raw PDR stays on its start floor. `LiveDestination` keeps the destination's name and floor; on another floor the route shows the §5 text.
 - **Step 9.** `ui/LiveFloor.kt` holds `LiveFloorUi`, `SessionFloorUi`, `LiveDestination`, `FloorTrails` and the pure text and display helpers; `ui/screens/LiveFloorViews.kt` holds `FloorChip`, `LiveFloorBanner` and `FloorTrackingOptions`. `LiveFloorUi` also carries the session floors' sizes (checkpoint bounds) and the start floor (checkpoint default). `liveSessionKey` is a `ProjectContext`. "Multi-floor tracking" (default on) and "Use unchecked floor links" (default off) are saved with the other preferences in DataStore. Capture is refused while the floor is CHANGING.
 - **Tests.** JVM `SessionBuildingAssemblyTest` (legacy parity by data-class equality, unchecked/disabled links, skipped floors, start status) and `LiveFloorTest` (chip, banner, suffix, follow and dot decisions, checkpoint default, screen key). androidTest `LiveFloorUiTest` (chip, banner and Relocalize, no floor UI in single-floor sessions, locked and toggling switches, options sheet survives a follow, fullscreen suffix, checkpoint floor chips); `CanvasWorkflowTest.magneticCorrectionSwitchIsLockedDuringTracking` now counts three locked switches. Not built: the androidTest `SessionBuildingLoaderTest` and `ApplyFloorDisplayTest` (the VM is not testable on the JVM); the androidTests compile but were not run on a device.
@@ -610,7 +610,7 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 
 ### Step 10: Schema 7, export 4
 
-> **Moved to phase 4** by the user's decision. Until then the coordinator only keeps its events in memory (`drainEvents()`); `FloorTrackingEvent` already has the columns of the entity below.
+> **Moved to phase 4** by the user's decision. **Done in phase 4** (see "Steps 10 and 11 as built" below).
 
 **Entity:**
 
@@ -648,7 +648,7 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 
 ### Step 11: Diagnostics markers and documentation
 
-> **Moved to phase 4** by the user's decision (marker buttons and the MULTI_FLOOR_NAVIGATION.md update). The marker grammar itself already exists in `TraceMarkers`.
+> **Moved to phase 4** by the user's decision (marker buttons and the MULTI_FLOOR_NAVIGATION.md update). **Done in phase 4** (see "Steps 10 and 11 as built" below).
 
 - Diagnostics → Raw sensor recording gets marker buttons that call the existing `RawSensorRecorder.marker` (:37) with the Step 6 grammar: "Start stairs up", "Start stairs down", "Enter lift", "Standing still", and "Arrived on…" with chips for the building's floors.
 - Update `docs/MULTI_FLOOR_NAVIGATION.md` §6:
@@ -657,6 +657,16 @@ var useUncheckedFloorLinks by mutableStateOf(false)
   - FUSED rows keep the argmax floor, and the displayed floor is in `floor_transition_events`;
   - the settings snapshot persists the followed floor;
   - recommend link radii that cover the stairwell landing.
+
+### Steps 10 and 11 as built (phase 4)
+
+**Status: Steps 10 and 11 are done.**
+
+- **Step 10, database.** `FloorTransitionEventEntity` (Entities.kt) exactly as specified; `SCHEMA_VERSION = 7`; `TurnDatabaseMigrations.FROM_6_TO_7` creates the table and its 4 indices and is appended to `ALL`; `app/schemas/.../7.json` exported. `FloorTransitionEventDao.insert` is an `@Upsert` (a retried write is harmless) and `forSession` orders by sequence.
+- **Step 10, mapping and VM.** `data/repository/FloorEventLog.kt`: `FloorTrackingEvent.toEntity` maps 1:1; the wall-clock time comes from one (epoch, elapsed-realtime) pair read at drain time; CONFIG (emitted at construction, `atNanos = 0`) gets no sensor time; `linkId` is null because the coordinator does not name the link. Row ids are `FTE-<session>-<sequence>`, so a re-imported export merges onto the same rows. `FloorEventLog` numbers events from 0 and holds them until the session row exists, because the coordinator (and CONFIG) is built before the session is saved. `drainFloorEvents()` (every existing drain point) now passes events to the log and writes the released rows on `Dispatchers.IO`; failures are logged only. The start path drains once more right after `activePositioningSession` is set, which writes CONFIG. The log resets with each new coordinator and in `clearMultiFloorSession`. Single-floor sessions have no coordinator and write nothing.
+- **Step 10, export.** `TurnDatabaseExport.floorTransitionEvents` (default empty), `CURRENT_EXPORT_SCHEMA = 4` (1..4 accepted; older fields unchanged). Validation: unique ids, unique (session, sequence), and a known session and known-or-null floors and link. BackupDao reads them in `createExport` and upserts them after positioning sessions and corrections in `mergeValidated`. `ResearchDataset.FLOOR_TRANSITIONS` ("Floor change log").
+- **Step 11.** *Diagnostics → Raw sensor recording* has `RawRecordingMarkers` (DiagnosticsScreen.kt) calling `TurnRuntimeViewModel.addRawMarker` → `RawSensorRecorder.marker`: Start stairs up/down, **Enter lift up/down** (the grammar needs a direction, so "Enter lift" is one button per direction), Standing still, and "Arrived on…" chips for the open building's floors in level order (floor ids the grammar cannot carry are skipped). All are disabled unless a recording runs. `docs/MULTI_FLOOR_NAVIGATION.md` §6 has the phase 4 entry.
+- **Tests.** JVM `FloorTransitionExportTest` (1:1 mapping and wall clock, CONFIG held then numbered from 0, schema-4 round trip, schema-3 import with an empty list, unknown session/floor/link and duplicate sequences rejected, CSV dataset). androidTest `FloorTransitionMigrationTest` (v6 rows including link label and verifiedOnSite survive; table and 4 indices exist; `foreign_key_check` clean; session delete cascades; DAO round trip in sequence order, export includes the rows, a deleted floor nulls `toFloorId` and `linkId`) and `RawRecordingMarkersUiTest` (disabled until recording; buttons write the grammar; only this building's floors). The androidTests compile but were not run on a device.
 
 ---
 
@@ -725,7 +735,7 @@ Floor names come from the saved floor names; "Floor 4" above is an example.
   - in-session browsing of other floors (the FloorSwitcher stays locked, FloorSwitcher.kt:31);
   - highlighting the link in use on the map.
 - **Phase 4:**
-  - Step 10 (schema 7 `floor_transition_events`, export schema 4) and Step 11 (Diagnostics marker buttons, docs), moved here by the user's decision;
+  - ~~Step 10 (schema 7 `floor_transition_events`, export schema 4) and Step 11 (Diagnostics marker buttons, docs), moved here by the user's decision~~ (done);
   - the remaining Step 6 replay scenarios (no-barometer variants, pending-height resolution, Wi-Fi start probation, STALE barometer, links-disabled parity);
   - threshold tuning from C-block recordings through the Step 6 harness;
   - a Diagnostics threshold editor or DataStore override;

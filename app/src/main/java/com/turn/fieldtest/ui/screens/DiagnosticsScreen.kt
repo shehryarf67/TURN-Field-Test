@@ -54,6 +54,7 @@ fun DiagnosticsScreen(
     onToggleDiagnosticWalk: () -> Unit = {},
     onToggleRawRecording: () -> Unit = {},
     onSaveRawRecording: () -> Unit = {},
+    onRawMarker: (String) -> Unit = {},
 ) {
     val simulated = state.mode == DataMode.DEMO
     // The walk's only Stop button lives here; leaving the screen must not leave it recording and locking Settings.
@@ -127,6 +128,12 @@ fun DiagnosticsScreen(
                 OutlinedButton(onClick = onSaveRawRecording, enabled = !state.rawRecording && state.rawRecordingSaveable && !state.rawRecordingSaving,
                     modifier = Modifier.weight(1f)) { Text("Save recording…") }
             }
+            val venueId = state.activeProject?.venueId
+            RawRecordingMarkers(
+                floors = state.projects.filter { it.venueId == venueId }.sortedBy { it.floorLevel }.map { it.floorId to it.floorName },
+                enabled = state.rawRecording,
+                onMarker = onRawMarker,
+            )
         }
 
         SectionCard(
@@ -362,5 +369,39 @@ private fun FailureRow(label: String, healthy: Boolean, detail: String) {
         Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(if (healthy) TurnMint else TurnAmber))
         Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
         Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * Ground-truth markers for stair and lift walks (plan Step 11), written into the recording with the
+ * [com.turn.fieldtest.platform.sensors.TraceMarkers] grammar the replay harness reads. A lift's direction is part of
+ * the grammar, so "Enter lift" is one button per direction. Usable only while a recording runs.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun RawRecordingMarkers(floors: List<Pair<String, String>>, enabled: Boolean, onMarker: (String) -> Unit) {
+    val markers = com.turn.fieldtest.platform.sensors.TraceMarkers
+    val stairs = com.turn.fieldtest.core.ConnectorKind.STAIRS
+    val lift = com.turn.fieldtest.core.ConnectorKind.LIFT
+    Text("Markers", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+    Text(if (enabled) "Tap as it happens; they mark the true floor in the recording" else "Start recording to add markers",
+        style = MaterialTheme.typography.bodySmall)
+    FlowRow(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            "Start stairs up" to markers.verticalStart(stairs, up = true),
+            "Start stairs down" to markers.verticalStart(stairs, up = false),
+            "Enter lift up" to markers.verticalStart(lift, up = true),
+            "Enter lift down" to markers.verticalStart(lift, up = false),
+            "Standing still" to markers.STILL,
+        ).forEach { (label, text) -> OutlinedButton(onClick = { onMarker(text) }, enabled = enabled) { Text(label) } }
+    }
+    // Floor ids the grammar cannot carry (commas, semicolons, outer spaces) are left out rather than written wrongly.
+    val arrivals = floors.mapNotNull { (id, name) -> runCatching { markers.arrived(id) }.getOrNull()?.let { name to it } }
+    Text("Arrived on…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+    if (arrivals.isEmpty()) Text("Open a project to mark its floors", style = MaterialTheme.typography.bodySmall)
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        arrivals.forEach { (name, text) ->
+            androidx.compose.material3.AssistChip(onClick = { onMarker(text) }, enabled = enabled, label = { Text(name) })
+        }
     }
 }

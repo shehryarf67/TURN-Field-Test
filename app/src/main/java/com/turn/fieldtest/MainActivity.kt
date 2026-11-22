@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity() {
                     onRawRecordingToggled = {
                         withMotionPermissions(runtimeViewModel::toggleRawRecording)
                     },
+                    onRawMarker = runtimeViewModel::addRawMarker,
                     onRawRecordingSaveRequested = {
                         rawRecordingLauncher.launch("turn-raw-sensors-${java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date())}.csv")
                     },

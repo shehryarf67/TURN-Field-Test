@@ -28,6 +28,7 @@ data class TurnAppActions(
     val onDiagnosticWalkToggled: () -> Unit = {},
     val onRawRecordingToggled: () -> Unit = {},
     val onRawRecordingSaveRequested: () -> Unit = {},
+    val onRawMarker: (String) -> Unit = {},
     val onRealSurveyStarted: (SurveyCaptureMetadata) -> Unit = {},
     val onRealSurveyFinished: () -> Unit = {},
     val onFloorLinksRefresh: () -> Unit = {},
@@ -79,6 +80,7 @@ internal fun TurnScreen(state: TurnAppState, actions: TurnAppActions, compact: B
             onToggleDiagnosticWalk = actions.onDiagnosticWalkToggled,
             onToggleRawRecording = actions.onRawRecordingToggled,
             onSaveRawRecording = actions.onRawRecordingSaveRequested,
+            onRawMarker = actions.onRawMarker,
         )
         TurnDestination.SURVEY -> if (state.mode == DataMode.REAL_DEVICE) com.turn.fieldtest.ui.screens.FieldSurveyScreen(state, actions) else SurveyScreen(
             state,
