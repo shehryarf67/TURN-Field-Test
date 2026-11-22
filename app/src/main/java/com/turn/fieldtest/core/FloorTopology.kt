@@ -8,6 +8,8 @@ data class FloorLinkInput(
     val radiusMetres: Double, val bidirectional: Boolean,
     val enabled: Boolean, val verifiedOnSite: Boolean,
     val travelTimeSeconds: Double, val label: String,
+    /** Step-free: usable on step-free routes. Defaults to the kind (lifts and ramps) for links saved before the flag. */
+    val accessible: Boolean = kind.stepFree,
 )
 
 /**
@@ -21,6 +23,7 @@ data class FloorPortal(
     val toFloorId: String, val toCentre: MetricPoint,
     val radiusMetres: Double, val levelDelta: Int,
     val travelTimeSeconds: Double, val verifiedOnSite: Boolean, val label: String,
+    val accessible: Boolean = kind.stepFree,
 ) {
     init {
         require(index >= 0) { "Portal index must not be negative" }
@@ -107,7 +110,7 @@ object FloorTopologyBuilder {
             val delta = levels.getValue(link.toFloorId) - levels.getValue(link.fromFloorId)
             fun add(fromId: String, from: MetricPoint, toId: String, to: MetricPoint, levelDelta: Int) {
                 portals += FloorPortal(portals.size, link.id, link.kind, fromId, from, toId, to, link.radiusMetres,
-                    levelDelta, link.travelTimeSeconds, link.verifiedOnSite, link.label)
+                    levelDelta, link.travelTimeSeconds, link.verifiedOnSite, link.label, link.accessible)
             }
             add(link.fromFloorId, link.from, link.toFloorId, link.to, delta)
             if (link.bidirectional) add(link.toFloorId, link.to, link.fromFloorId, link.from, -delta)

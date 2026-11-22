@@ -100,7 +100,7 @@ fun FloorConnector.toLinkInput() = FloorLinkInput(
     toFloorId = entity.toFloorId, to = MetricPoint(entity.toXMetres, entity.toYMetres),
     radiusMetres = entity.activationRadiusMetres, bidirectional = entity.bidirectional,
     enabled = entity.enabled, verifiedOnSite = entity.verifiedOnSite,
-    travelTimeSeconds = entity.travelTimeSeconds, label = entity.label,
+    travelTimeSeconds = entity.travelTimeSeconds, label = entity.label, accessible = entity.accessible,
 )
 
 /**
