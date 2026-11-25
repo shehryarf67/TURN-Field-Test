@@ -60,7 +60,7 @@ expect it to be slower to change floor.
 
 - **Recordings:** the CSV files from *Save recording…* (one per course).
 - **Sessions:** *Data & export → Save complete database JSON*. It holds the positioning sessions and the floor change
-  log (`floorTransitionEvents`, export schema 4). *Analysis CSV files → Floor change log* gives the same events as CSV.
+  log (`floorTransitionEvents`, export schema 4 and later). *Analysis CSV files → Floor change log* gives the same events as CSV.
 
 Copy them to the computer.
 
@@ -107,6 +107,8 @@ Optional keys:
 | `seeds` | `[11, 23, 37]` | One replay per seed. The particle filter is random, so look at all of them |
 | `wifiAnchors` | none | `[{"bssid": "aa:bb:…", "floorId": "…", "x": 0, "y": 0}]`. A strong access point stands for "here, on this floor" (BSSIDs are under *Diagnostics → Visible Wi-Fi access points*). Without anchors, Wi-Fi is ignored |
 | `floors`, `links` | none | Write floors (`{"id", "level", "walkable": [[[x, y], …]]}`) and links by hand instead of using `database`, or add to it |
+| `elevations` | from `database` | Floor heights in metres, `{"<floorId>": 2.7, …}`, on top of the database's floor heights. Used only when every linked floor has one |
+| `thresholds` | none | Threshold overrides as the Diagnostics editor stores them, e.g. `{"vertical.floorHeightMetres": 2.8}`; copy them from the session's CONFIG event to replay with the same values |
 
 Run the replay from the repository root:
 
@@ -137,3 +139,33 @@ When a result misses a target, the database JSON's floor change log shows why. A
 means the climb happened away from a link (check the link position and radius). REJECTED followed by PENDING_EXPIRED
 means the height was never explained. WIFI_CROSS_FLOOR_VETOED means Wi-Fi pointed at another floor while the barometer
 was flat.
+
+## 7. Home testing (two-storey house)
+
+A house is a good first test: storeys are low (about 2.6-2.8 m), each floor is mapped in its own Walk Mapper session,
+and furniture hides many corners. Set it up in this order.
+
+1. **Map each floor with the Walk Mapper** (WALK_MAPPER.md). Where a wardrobe, sofa or bed hides a corner, either aim
+   at the wall or ceiling straight above the corner (it is projected down to the floor), or use **Hidden corner (two
+   walls)**: tap two or more visible points along each of the two walls, then *Place corner*. Both kinds are flagged in
+   the quality report; check them with a tape. Save each floor into the same building (level 0 and level 1).
+2. **Set the storey height.** *Tools → Link floors → Floor heights*: measure floor to floor (e.g. count the steps and
+   multiply by the riser height, or tape the stairwell), type it into *Storey height*, tap *Fill all floors* and *Save
+   heights*. Stairs and lift rides are then judged against your real storey, so a 2.7 m climb is one floor (the standard
+   3.5 m storey reads it as 0.77 of a floor and a barometer that under-reads can miss it). The live status line ends with
+   "floor heights set" when a session uses them. *Clear heights* goes back to the standard storey.
+3. **Align the floors at the stairs.** *Link floors → Align two floors*: on the ground floor tap two spots you can also
+   find upstairs (the two corners of the stairwell opening, or the bottom and top newel posts in plan), then the same two
+   spots, in the same order, on the upper floor. The screen shows the turn and shift between the two maps, the residual
+   (aim for under 0.2 m) and a warning if the two distances differ by more than 5 % (one floor's scale is off, or the
+   picks are not the same spots). *Save alignment*.
+4. **Link the stairs.** *New link*, tap the foot of the stairs on the ground floor, then use *Place To directly
+   above/below From* and move the point to the top landing if needed. Each link card then says how far apart its ends
+   are in plan: under 1 m for a lift, a few metres for a straight flight. Mark the link checked on site.
+5. **Thresholds (optional).** *Diagnostics → Floor detection thresholds* shows every floor-detection value with its
+   default and allowed range. A change is used from the next *Live locate* start (a running session keeps its values) and
+   is written into that session's CONFIG floor event, so a recording always says which thresholds it ran with. *Reset to
+   defaults* removes every override. Change one value at a time and replay the same recording with `thresholds` to
+   compare.
+6. **Courses.** Record stairs up, stand 10 s, stairs down, and a 5 minute walk around the ground floor past the foot of
+   the stairs (false changes), with the markers as in §2. Targets are those of §6.

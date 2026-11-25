@@ -685,7 +685,7 @@ var useUncheckedFloorLinks by mutableStateOf(false)
 | Group | Value |
 |---|---|
 | Barometer | valid 300-1100 hPa; out-of-order tolerance 50 ms; median 5; EMA τ 1.0 s; gap reset 5 s; scale height 8434 m; step candidate > 0.15 hPa within 1 s while flat (≤ 0.12 m/s), half of it within 0.2 s; judged 2 s after the jump on ±1 s of raw samples, kept when the fitted shift is ≥ 0.16 hPa, or ≥ half the step with no trend above 0.5 m/s around it; a step back within half the rise closes a pulse; STALE after 3 s; drift τ 300 s after 20 s with \|rate\| ≤ 0.03 m/s |
-| Vertical detector | floor height 3.5 m (doc §4.3 pending); rate window 4 s; enter 0.12 m/s; exit 0.05 m/s; settle 3 s; minimum 0.6 floor (2.1 m); integer tolerance 0.35; lift ≥ 0.6 m/s with ≤ 2 steps; max segment 180 s; return-to-start 0.5 m |
+| Vertical detector | floor height 3.5 m (nominal; real per-floor elevations, schema 8, replace it when every session floor has one); rate window 4 s; enter 0.12 m/s; exit 0.05 m/s; settle 3 s; minimum 0.6 floor (2.1 m); integer tolerance 0.35; lift ≥ 0.6 m/s with ≤ 2 steps; max segment 180 s; return-to-start 0.5 m |
 | No-barometer cues | stairs: ≥ 6 steps and ≥ max(5 s, 0.4·travelTime) with ≥ 0.5 portal weight; lift: ≥ 8 s with ≤ 1 step, emitted on the next step; seed share 0.2 stairs / 0.3 lift; cooldown 20 s |
 | Transition | barometric share 0.85; outside-portal likelihood 0.1 (1.0 for seeds); unverified factor 0.5; slack 1.0 m; portal memory 10 steps; stairs stride factor 0.5; exit σ min(r/2, 1 m); 20 exit tries; max 4 hops; ≥ 10 particles per floor; prune below 1e-3 |
 | Wi-Fi across floors | `crossFloorLikelihood` 0.01 (unchanged, :45); strong ≥ 0.68 with agreement ≥ 0.85; 3 consecutive matches (no barometer, or probation); 2 when the pending height is barometer-consistent; otherwise vetoed; probation 120 s after a Wi-Fi start; 4 vetoes give UNCERTAIN; pending window 120 s; cross-floor injection always off; init gate unchanged at 0.55/0.7 (:1822) |
@@ -749,8 +749,8 @@ Floor names come from the saved floor names; "Floor 4" above is an example.
   - ~~the field replay tool, the field test protocol and the no-barometer stairs and lift scenarios~~ (done, see "Phase 4 field tooling and review fixes");
   - the remaining Step 6 replay scenarios (pending-height resolution, Wi-Fi start probation, STALE barometer, links-disabled parity, the 20-minute corridor walk);
   - threshold tuning from C-block recordings through the Step 6 harness;
-  - a Diagnostics threshold editor or DataStore override;
-  - per-venue floor height, `floors.elevationMetres` and reference pressure on reference points (§2.6);
+  - ~~a Diagnostics threshold editor or DataStore override~~ (done: Diagnostics → Floor detection thresholds, see MULTI_FLOOR_NAVIGATION.md §6);
+  - ~~per-venue floor height, `floors.elevationMetres`~~ (done, schema 8) and reference pressure on reference points (§2.6, still deferred);
   - per-phone-class metrics UI;
   - wrong-floor horizontal-error semantics (FieldEvaluation.kt:14);
   - the WIFI_ONLY/RAW_PDR `floorConfidence` fix (:1953, :2416);

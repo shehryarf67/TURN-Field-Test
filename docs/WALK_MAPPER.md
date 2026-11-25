@@ -10,12 +10,30 @@ Walk Mapper is an alternative source of map data inside TURN. It creates a one-f
 4. Choose **Start camera**. TURN requests camera permission at this point and checks Google Play Services for AR. Accept its install/update prompt when required, then return to TURN. No camera recording is stored.
 5. Move slowly while looking at the actual floor. Once tracking is stable, tap a visible floor point, inspect its height below the camera, and **Confirm floor / origin**. Reject a table, bed or other incorrect horizontal surface. The app cannot reliably identify the floor for you.
 6. Tap another point on that same floor, at least 0.5 m away, in the direction you want to be map **Up**. This declares drawing orientation, not magnetic north. It does not automatically calibrate TURN's live-navigation heading.
-7. Use **Corner** and tap each room corner in perimeter order. Floor/wall surfaces must produce a reliable hit. A failed hit stores nothing: improve lighting/viewpoint or use measured drawing after pausing. **Boundary corner** and **Entrance corner** also contribute to the ordered room outline; they are not automatic door detection.
+7. Use **Corner** and tap each room corner in perimeter order. Floor/wall surfaces must produce a reliable hit. A failed hit stores nothing: improve lighting/viewpoint or use measured drawing after pausing. **Boundary corner** and **Entrance corner** also contribute to the ordered room outline; they are not automatic door detection. If furniture hides a corner, aim at the wall or ceiling straight above it, or use **Hidden corner (two walls)** (see *Corners hidden by furniture*).
 8. Inspect **2D preview** while capture continues. Cyan indicates confirmed geometry; amber indicates drafts/candidates; green marks walkable openings. The blue camera marker and optional path are observation history, not live PDR or an inferred wall. Pinch to zoom, drag to pan, and **Fit map** to reset. Map rotation is an explicit saved geometry correction in Review.
 9. **Confirm outline** only after marking the complete perimeter. Three corners are a minimum, not evidence of complete coverage. The screen reports corner count and extent; observed surface coverage is unknown. Real non-rectangular outlines are retained.
 10. Automatically proposed walls require explicit confirmation in **Review → Select wall**. Quality/height/observation count are evidence summaries, not calibrated probabilities. Reject wardrobes, furniture, mirrors and glass mistaken for walls. Room outlines already create boundary walls: avoid confirming redundant/conflicting interior candidates.
 11. Use **Wall endpoints** for missing internal wall segments. Select a confirmed wall in the preview/selector, choose **Door endpoints**, and mark both ends of its opening. The opening must lie on the selected wall. Review its coordinates, measured width, walkability and room links.
 12. To continue into a corridor with uninterrupted tracking, start a named next room and mark its perimeter in the same coordinate frame. Reuse physically consistent shared boundaries. In Review, tick both adjacent rooms for their shared doorway. A one-room entrance can link only that room.
+
+## Corners hidden by furniture
+
+A corner normally needs a reliable floor or wall hit at the corner itself. In furnished rooms a wardrobe, sofa or bed often hides it. Two ways round that, both recorded in the draft so nothing is silently guessed:
+
+- **Aim above the corner.** A hit on the wall or ceiling straight above the corner (up to 3.5 m above the confirmed floor) is accepted and projected vertically to the floor: AR +Y is gravity-up, so dropping the height is exact. A hit more than 0.3 m above the floor is saved with `provenance = PROJECTED` and its `heightAboveFloor`. Make sure the hit is on the wall itself, not on the top of the furniture in front of it.
+- **Hidden corner (two walls).** Choose the tool (*More tools → Hidden corner (two walls)* in guided capture, *Hidden corner* under Advanced). Tap two or more visible points along the first wall (spread at least 0.3 m; wall face or wall base), tap *Next wall*, tap two or more along the second wall, then *Place corner*. Each wall gets a total-least-squares line; the corner is where they meet, projected to the floor. TURN refuses walls closer than 30° to parallel, points that are not on one straight wall (more than 0.08 m RMS off the line), and a corner more than 5 m beyond the tapped points. The corner is saved with `provenance = INFERRED` and an `inference` record: the wall points, the angle between the walls, each wall's RMS fit and the extrapolation distance. It works with measured drawing too (enter wall points as measured points).
+
+Both kinds are drawn with an amber ring in the 2D preview (inferred corners also show their wall points), and the quality report lists them per room as a non-blocking note: "Living room: 1 corner inferred from two walls, 1 projected down from a high wall or ceiling hit; check them with a tape measure". Map corrections (rotation, section transform, scale) move the wall points with the corner. Drafts saved before this change read every corner as `OBSERVED`; the fields are additive and the draft version is unchanged.
+
+## Several floors of one building
+
+Each floor is mapped in its own AR session, so each has its own origin and "up". TURN keeps it that way (tracking and routing move between floors only through floor links), but *Tools → Link floors* has two building tools that help a multi-storey home:
+
+- **Floor heights** (schema 8, `floors.elevationMetres`): the height of each floor above the ground floor, filled from one storey height. Floor detection then judges stairs and lift rides against the real storey instead of the standard 3.5 m.
+- **Align two floors** (schema 8, `floors.frameAlignmentJson`): pick the same two physical spots on two floors (e.g. stairwell corners) and TURN fits a rotation and translation (scale stays 1; a distance disagreement over 5 % is reported as a warning) with its residual. The link editor can then place a link's far end straight above or below the first one, and each link card shows how far apart its ends are in plan.
+
+See MULTI_FLOOR_NAVIGATION.md §6 and FIELD_TEST_PROTOCOL.md §7.
 
 ## Measured drawing without ARCore
 
@@ -70,6 +88,7 @@ The repository audit reused `MainActivity`, `TurnApp`/`TurnRuntimeViewModel`, `M
 - `mapper/WalkMapperActivity.kt`: support/install/permission checks, optional session lifecycle, pause/cleanup, SAF exports and result handoff to MainActivity.
 - `mapper/WalkMapperViewModel.kt`: guided capture/edit state, asynchronous serialized saves, bounded undo, explicit new-section alignment and publication.
 - `mapper/core/{ScanModels,ScanGeometry,DepthGeometry,CaptureGuard}.kt`: serializable metric contract, transformations, geometry/door/QA/graph proposals, stride-aware back-projection, bounded robust fitting and lost-session guard.
+- `mapper/core/HiddenCorners.kt`: corner from two fitted wall lines (parallel, straightness and extrapolation gates), vertical projection of elevated hits, corner provenance and its quality note (tests: `HiddenCornersTest`).
 - `mapper/data/{ScanDraftEntity,ScanRepository}.kt`: draft DAO, transactional publication and private PNG rendering.
 - `mapper/ui/{WalkMapperScreen,ScanPreview}.kt`: capture/review/verification UI and responsive map surface.
 - `MainActivity.kt`, `ui/{TurnApp,TurnAppState,TurnRuntimeViewModel}.kt`, `ui/screens/{MapSetupScreen,NavigationMap,FloorEditorScreen}.kt`: entry/result and safe multi-region editing/rendering.
