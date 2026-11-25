@@ -61,21 +61,22 @@ class SyntheticWalk(seed: Long, private val barometer: Boolean = true, private v
      * turns between [headingA] and [headingA] + PI every [flightSeconds], so the track stays inside the stairwell.
      * Ends with ARRIVED [arrivalFloorId].
      */
-    fun stairs(floors: Int, arrivalFloorId: String, headingA: Double, secondsPerFloor: Double = 12.0, flightSeconds: Double = 3.0) = apply {
+    fun stairs(floors: Int, arrivalFloorId: String, headingA: Double, secondsPerFloor: Double = 12.0, flightSeconds: Double = 3.0,
+               floorHeightMetres: Double = 3.5) = apply {
         markers += pressure.nowNanos to TraceMarkers.verticalStart(ConnectorKind.STAIRS, floors > 0)
         val total = abs(floors) * secondsPerFloor
         val parts = (total / flightSeconds).toInt().coerceAtLeast(1)
         repeat(parts) { i ->
             heading(if (i % 2 == 0) headingA else headingA + PI)
-            pressure.climb(floors * 3.5 / parts, total / parts)
+            pressure.climb(floors * floorHeightMetres / parts, total / parts)
         }
         arrived(arrivalFloorId)
     }
 
     /** A step-free lift ride; ends with ARRIVED [arrivalFloorId] when the doors open. */
-    fun lift(floors: Int, arrivalFloorId: String, speedMps: Double = 1.0) = apply {
+    fun lift(floors: Int, arrivalFloorId: String, speedMps: Double = 1.0, floorHeightMetres: Double = 3.5) = apply {
         markers += pressure.nowNanos to TraceMarkers.verticalStart(ConnectorKind.LIFT, floors > 0)
-        pressure.lift(floors, speedMps)
+        pressure.lift(floors, speedMps, floorHeightMetres)
         arrived(arrivalFloorId)
     }
 

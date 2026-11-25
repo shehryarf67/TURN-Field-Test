@@ -1,6 +1,8 @@
 package com.turn.fieldtest.data.repository
 
 import androidx.room.withTransaction
+import com.turn.fieldtest.core.FloorAlignment
+import com.turn.fieldtest.core.FloorElevations
 import com.turn.fieldtest.core.MapFloor
 import com.turn.fieldtest.core.MetricMap
 import com.turn.fieldtest.core.MetricPoint
@@ -113,6 +115,39 @@ class ProjectRepository(private val database: TurnDatabase) {
         repositories.floorPlans.save(FloorEntity(context.floorId, venueId, name, levelNumber = levelNumber,
             widthMetres = 42.0, heightMetres = 28.0, createdAtEpochMillis = now, updatedAtEpochMillis = now))
         context
+    }
+
+    /**
+     * Saves every floor's elevation in one building (schema 8). Either all are null (cleared: nominal storey height)
+     * or every floor of the building gets a valid elevation ([FloorElevations.validationError]).
+     */
+    suspend fun setFloorElevations(venueId: String, elevations: Map<String, Double?>, now: Long) = database.withTransaction {
+        val floors = database.floorPlanDao().observeFloors(venueId).first()
+        require(elevations.keys.all { id -> floors.any { it.id == id } }) { "A floor is not part of this building" }
+        val values = floors.associate { it.id to elevations[it.id] }
+        if (values.values.any { it != null }) {
+            FloorElevations.validationError(floors.associate { it.id to it.levelNumber }, values, floors.associate { it.id to it.name })
+                ?.let { throw IllegalArgumentException(it) }
+        }
+        floors.filter { it.elevationMetres != values[it.id] }
+            .forEach { repositories.floorPlans.save(it.copy(elevationMetres = values[it.id], updatedAtEpochMillis = now)) }
+    }
+
+    /**
+     * Saves (or with null removes) [floorId]'s alignment onto another floor of the same building (schema 8). An
+     * alignment the other way round between the same two floors is removed, so each pair has one.
+     */
+    suspend fun setFloorAlignment(floorId: String, alignment: FloorAlignment?, now: Long) = database.withTransaction {
+        val floor = requireNotNull(repositories.floorPlans.floor(floorId)) { "Saved floor is unavailable" }
+        if (alignment != null) {
+            require(alignment.toFloorId != floorId) { "Align a floor to another floor" }
+            val target = requireNotNull(repositories.floorPlans.floor(alignment.toFloorId)) { "The other floor no longer exists" }
+            require(target.venueId == floor.venueId) { "Floors can only be aligned within one building" }
+            if (FloorAlignment.fromJsonOrNull(target.frameAlignmentJson)?.toFloorId == floorId) {
+                repositories.floorPlans.save(target.copy(frameAlignmentJson = null, updatedAtEpochMillis = now))
+            }
+        }
+        repositories.floorPlans.save(floor.copy(frameAlignmentJson = alignment?.toJson(), updatedAtEpochMillis = now))
     }
 
     /**

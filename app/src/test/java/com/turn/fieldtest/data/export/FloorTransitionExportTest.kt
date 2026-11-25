@@ -66,7 +66,7 @@ class FloorTransitionExportTest {
     }
 
     @Test fun schemaFourCarriesTheEventsAndOlderExportsReadWithAnEmptyList() {
-        assertEquals(4, TurnDatabaseExport.CURRENT_EXPORT_SCHEMA)
+        assertEquals(5, TurnDatabaseExport.CURRENT_EXPORT_SCHEMA)
         val value = export(row(0, from = null, to = null), row(1, link = "l"))
         assertTrue(value.validationErrors().isEmpty(), value.validationErrors().toString())
         val decoded = Json.decodeFromString<TurnDatabaseExport>(Json.encodeToString(value))
@@ -75,7 +75,14 @@ class FloorTransitionExportTest {
         val schema3 = Json.decodeFromString<TurnDatabaseExport>("""{"schemaVersion":3,"exportedAtEpochMillis":1}""")
         assertTrue(schema3.floorTransitionEvents.isEmpty())
         assertTrue(schema3.validationErrors().isEmpty())
-        assertTrue(TurnDatabaseExport(schemaVersion = 5, exportedAtEpochMillis = 0).validationErrors().isNotEmpty())
+        assertTrue(TurnDatabaseExport(schemaVersion = 6, exportedAtEpochMillis = 0).validationErrors().isNotEmpty())
+        // Export schema 5 (database schema 8) adds floor elevation and alignment; schema 4 floors read with both null.
+        val schema4 = Json.decodeFromString<TurnDatabaseExport>("""{"schemaVersion":4,"exportedAtEpochMillis":1,"venues":[{"id":"v","name":"Home","createdAtEpochMillis":1,"updatedAtEpochMillis":1}],"floors":[{"id":"f","venueId":"v","name":"G","levelNumber":0,"widthMetres":10.0,"heightMetres":8.0,"createdAtEpochMillis":1,"updatedAtEpochMillis":1}]}""")
+        assertTrue(schema4.validationErrors().isEmpty(), schema4.validationErrors().toString())
+        assertEquals(null, schema4.floors.single().elevationMetres)
+        assertEquals(null, schema4.floors.single().frameAlignmentJson)
+        val withHeights = schema4.copy(schemaVersion = 5, floors = schema4.floors.map { it.copy(elevationMetres = 2.7, frameAlignmentJson = "{}") })
+        assertEquals(withHeights.floors, Json.decodeFromString<TurnDatabaseExport>(Json.encodeToString(withHeights)).floors)
     }
 
     @Test fun unknownSessionFloorOrLinkAndDuplicateSequencesAreRejected() {

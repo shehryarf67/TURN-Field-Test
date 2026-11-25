@@ -123,7 +123,8 @@ data class TurnDatabaseExport(
     }
 
     companion object {
-        const val CURRENT_EXPORT_SCHEMA = 4
+        /** 5: floors carry elevationMetres and frameAlignmentJson (schema 8); older exports import with both null. */
+        const val CURRENT_EXPORT_SCHEMA = 5
     }
 }
 

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.turn.fieldtest.BuildConfig
+import com.turn.fieldtest.core.FloorDetectionOverrides
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -32,12 +33,15 @@ data class TurnSettings(
     val floorTrackingEnabled: Boolean = true,
     val useUncheckedFloorLinks: Boolean = false,
     val stepFreeRouting: Boolean = false,
+    /** Diagnostics overrides of floor-detection thresholds (key -> value); empty = FloorDetectionConfig() defaults. */
+    val floorDetectionOverrides: Map<String, Double> = emptyMap(),
 ) {
     fun normalized(): TurnSettings = copy(
         wifiK = wifiK.coerceIn(1, 20),
         missingRssiDbm = missingRssiDbm.coerceIn(-120, -30),
         defaultStrideMetres = defaultStrideMetres.coerceIn(0.25, 1.5),
         particleCount = particleCount.coerceIn(100, 5_000),
+        floorDetectionOverrides = FloorDetectionOverrides.sanitize(floorDetectionOverrides),
     )
 }
 
@@ -58,7 +62,7 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
             if (error is IOException) emit(androidx.datastore.preferences.core.emptyPreferences())
             else throw error
         }
-        .map(::fromPreferences)
+        .map { fromPreferences(it) }
 
     override suspend fun update(transform: (TurnSettings) -> TurnSettings) {
         dataStore.edit { preferences ->
@@ -72,7 +76,9 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         it.copy(bleFeatureEnabled = enabled)
     }
 
-    private fun fromPreferences(preferences: Preferences): TurnSettings = TurnSettings(
+    companion object {
+    /** Reads settings from DataStore preferences (internal for the round-trip test). */
+    internal fun fromPreferences(preferences: Preferences): TurnSettings = TurnSettings(
         dataMode = preferences[Keys.DATA_MODE]
             ?.let { stored -> TurnDataMode.entries.firstOrNull { it.name == stored } }
             ?: TurnDataMode.REAL_DEVICE,
@@ -90,9 +96,11 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         floorTrackingEnabled = preferences[Keys.FLOOR_TRACKING] ?: true,
         useUncheckedFloorLinks = preferences[Keys.UNCHECKED_FLOOR_LINKS] ?: false,
         stepFreeRouting = preferences[Keys.STEP_FREE_ROUTING] ?: false,
+        floorDetectionOverrides = FloorDetectionOverrides.decode(preferences[Keys.FLOOR_DETECTION_OVERRIDES]),
     ).normalized()
 
-    private fun write(preferences: androidx.datastore.preferences.core.MutablePreferences, value: TurnSettings) {
+    /** Writes [value] into DataStore preferences (internal for the round-trip test). */
+    internal fun write(preferences: androidx.datastore.preferences.core.MutablePreferences, value: TurnSettings) {
         preferences[Keys.DATA_MODE] = value.dataMode.name
         value.activeVenueId?.let { preferences[Keys.ACTIVE_VENUE] = it } ?: preferences.remove(Keys.ACTIVE_VENUE)
         value.activeFloorId?.let { preferences[Keys.ACTIVE_FLOOR] = it } ?: preferences.remove(Keys.ACTIVE_FLOOR)
@@ -108,6 +116,8 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         preferences[Keys.FLOOR_TRACKING] = value.floorTrackingEnabled
         preferences[Keys.UNCHECKED_FLOOR_LINKS] = value.useUncheckedFloorLinks
         preferences[Keys.STEP_FREE_ROUTING] = value.stepFreeRouting
+        FloorDetectionOverrides.encode(value.floorDetectionOverrides).takeIf { it.isNotEmpty() }
+            ?.let { preferences[Keys.FLOOR_DETECTION_OVERRIDES] = it } ?: preferences.remove(Keys.FLOOR_DETECTION_OVERRIDES)
     }
 
     private object Keys {
@@ -126,5 +136,7 @@ class DataStoreTurnSettingsRepository(context: Context) : TurnSettingsRepository
         val FLOOR_TRACKING = booleanPreferencesKey("floor_tracking_enabled")
         val UNCHECKED_FLOOR_LINKS = booleanPreferencesKey("use_unchecked_floor_links")
         val STEP_FREE_ROUTING = booleanPreferencesKey("step_free_routing")
+        val FLOOR_DETECTION_OVERRIDES = stringPreferencesKey("floor_detection_overrides")
     }
+}
 }

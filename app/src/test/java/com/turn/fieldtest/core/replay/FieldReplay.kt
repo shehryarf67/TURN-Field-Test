@@ -56,6 +56,10 @@ data class FieldCase(
     val floors: List<FieldFloor> = emptyList(),
     val links: List<FieldLink> = emptyList(),
     val wifiAnchors: List<FieldWifiAnchor> = emptyList(),
+    /** Floor elevations in metres (floor id -> height), on top of the database's floors.elevationMetres (schema 8). */
+    val elevations: Map<String, Double> = emptyMap(),
+    /** Threshold overrides as the Diagnostics editor stores them (key -> value), e.g. copied from a CONFIG event. */
+    val thresholds: Map<String, Double> = emptyMap(),
 )
 
 /** One floor: its id (as in ARRIVED markers), level number and walkable polygons as [[x, y], ...]. */
@@ -138,7 +142,12 @@ object FieldReplay {
         val heading = headingOverride ?: gyroHeading(loaded.trace, case.startHeadingRadians)
         val matcher = anchorMatcher(case.wifiAnchors)
         val barometer = loaded.trace.rows.any { it is TraceRow.Sensor && it.type == TurnSensorType.BAROMETER }
-        val harness = FloorReplayHarness(map, build.topology)
+        val dbElevations = db?.floors.orEmpty().filter { it.venueId == venueId }.associate { it.id to it.elevationMetres }
+        val elevations = com.turn.fieldtest.core.FloorElevations.of(build.topology.levels,
+            build.topology.levels.keys.associateWith { case.elevations[it] ?: dbElevations[it] })
+        val detection = com.turn.fieldtest.core.FloorDetectionOverrides.apply(case.thresholds)
+        require(detection.rejected.isEmpty()) { "${loaded.name}: thresholds not usable: ${detection.rejected}" }
+        val harness = FloorReplayHarness(map, build.topology, detectionConfig = detection.config, elevations = elevations)
         val start = ReplayStart(case.startFloorId, MetricPoint(case.startX, case.startY), case.startStdMetres)
         return case.seeds.map { seed ->
             FieldRun(loaded.name, seed, barometer, harness.replay(loaded.trace, start, seed, heading, matcher, case.strideMetres))

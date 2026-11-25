@@ -1,10 +1,7 @@
 package com.turn.fieldtest.core
 
 import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.ln
-import kotlin.math.roundToInt
 
 enum class VerticalDirection { UP, DOWN, UNKNOWN }
 
@@ -34,7 +31,15 @@ data class VerticalEvent(
  * pressure, not from the tracker's anchored height, so re-anchoring the barometer at any time (for example right after
  * an event) needs no [reset]; that only drops an open segment.
  */
-class VerticalMotionDetector(private val config: VerticalMotionConfig) {
+class VerticalMotionDetector(
+    private val config: VerticalMotionConfig,
+    /**
+     * Turns a settled height change into floor counts (null = not a floor change). Null uses the nominal storey
+     * ([VerticalMotionConfig.floorHeightMetres]) exactly as before; a session with [FloorElevations] judges against the
+     * real height between the floors involved.
+     */
+    private val judge: FloorCountJudge? = null,
+) {
     /** BLOCKED follows an over-long segment: nothing starts until the rate has dropped to the exit threshold. */
     private enum class Phase { IDLE, MOVING, SETTLING, BLOCKED }
 
@@ -126,17 +131,16 @@ class VerticalMotionDetector(private val config: VerticalMotionConfig) {
         phase = Phase.IDLE
         val delta = config.scaleHeightMetres * ln(startHpa / hpa)
         if (abs(delta) <= config.returnToStartMetres) return null
-        val floors = abs(delta) / config.floorHeightMetres
-        if (floors < config.minimumFloorFraction) return null
-        val nearest = floors.roundToInt()
-        val candidates = if (abs(floors - nearest) > config.integerTolerance) {
-            setOf(floor(floors).toInt(), ceil(floors).toInt()) - 0
-        } else {
-            setOf(maxOf(1, nearest))
-        }
+        val candidates = (if (judge != null) judge.candidates(delta)
+            else floorCountCandidates(abs(delta) / config.floorHeightMetres, config)) ?: return null
         val direction = if (delta > 0.0) VerticalDirection.UP else VerticalDirection.DOWN
         return VerticalEvent(direction, candidates, kind(), delta, startNanos, now)
     }
+}
+
+/** Floor counts for a settled signed height change in metres; null when it is not a floor change. */
+fun interface FloorCountJudge {
+    fun candidates(heightDeltaMetres: Double): Set<Int>?
 }
 
 /** A no-barometer hint that much of the filter weight dwelt in links of this [kind]. */

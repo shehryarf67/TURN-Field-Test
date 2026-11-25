@@ -45,6 +45,18 @@ data class FloorEntity(
     val updatedAtEpochMillis: Long,
     /** TURN-Mapper source for this floor (schema 5); older imports kept it in the venue notes. */
     val mapperSourceJson: String? = null,
+    /**
+     * Schema 8: height of this floor above a common building datum (e.g. ground floor = 0). When every linked floor of
+     * a session has one, floor detection judges stairs and lift rides against the real storey heights; null keeps the
+     * nominal storey height.
+     */
+    val elevationMetres: Double? = null,
+    /**
+     * Schema 8: a [com.turn.fieldtest.core.FloorAlignment] (JSON) mapping this floor's coordinates into another floor's
+     * frame, from matching points picked on both floors (e.g. stairwell corners). Used to place and check floor-link
+     * endpoints; tracking and routing never read it.
+     */
+    val frameAlignmentJson: String? = null,
 )
 
 @Entity(

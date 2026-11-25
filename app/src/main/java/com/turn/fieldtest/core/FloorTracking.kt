@@ -69,16 +69,31 @@ class FloorTrackingCoordinator(
     barometerPresent: Boolean,
     startFloorId: String,
     private val tracking: FloorTrackingConfig = FloorTrackingConfig(),
+    /**
+     * Real floor elevations of the session floors. Null (the default) judges vertical events against the nominal
+     * storey ([VerticalMotionConfig.floorHeightMetres]) exactly as before; with elevations, the floor count of an event
+     * and the pending-height checks use the actual height between the floors involved.
+     */
+    val elevations: FloorElevations? = null,
+    /** User threshold overrides already applied to [config] (Diagnostics); listed in the CONFIG event when present. */
+    configOverrides: Map<String, Double> = emptyMap(),
 ) {
     init {
         require(!topology.isEmpty) { "A floor tracking coordinator needs a multi-floor topology (single-floor sessions have none)" }
         require(startFloorId in topology.levels) { "Start floor $startFloorId is not in the session topology" }
+        require(elevations == null || topology.levels.keys.all { it in elevations.elevationMetres }) {
+            "Floor elevations must cover every session floor"
+        }
     }
 
     private class Pending(val heightMetres: Double, val untilNanos: Long)
 
     private val barometer = BarometerTracker(config.barometer, barometerPresent)
-    private val detector = VerticalMotionDetector(config.vertical)
+    /** The filter of the [onPressure] call in progress: an elevation judge reads its floor votes at settle time. */
+    private var judgeFilter: ParticleFilter? = null
+    private val detector = VerticalMotionDetector(config.vertical, elevations?.let { e ->
+        FloorCountJudge { delta -> e.candidates(judgeFloors(), delta, config.vertical) }
+    })
     private val cues = MotionContextTracker(
         config.cues, topology.portals.associate { it.index to CuePortal(it.kind, it.travelTimeSeconds) },
     )
@@ -102,7 +117,10 @@ class FloorTrackingCoordinator(
 
     init {
         val json = Json.encodeToString(FloorDetectionConfig.serializer(), config)
-        emit(FloorTrackingEventType.CONFIG, 0L, detail = "barometerPresent=$barometerPresent; config=$json")
+        // Both suffixes are absent unless used, so a default session's CONFIG row reads exactly as before.
+        val elevationText = elevations?.let { "; elevations=${it.describe()}" }.orEmpty()
+        val overrideText = if (configOverrides.isEmpty()) "" else "; overrides=${FloorDetectionOverrides.describe(configOverrides)}"
+        emit(FloorTrackingEventType.CONFIG, 0L, detail = "barometerPresent=$barometerPresent; config=$json$elevationText$overrideText")
     }
 
     /** Barometer health at the newest input time. */
@@ -128,7 +146,8 @@ class FloorTrackingCoordinator(
     fun onPressure(tsNanos: Long, hpa: Double, filter: ParticleFilter?): FloorTransitionResult? {
         see(tsNanos)
         val state = barometer.add(tsNanos, hpa) ?: return null
-        val event = detector.onBarometer(state, stepsInWindow(tsNanos)) ?: return null
+        judgeFilter = filter
+        val event = try { detector.onBarometer(state, stepsInWindow(tsNanos)) } finally { judgeFilter = null } ?: return null
         emit(
             FloorTrackingEventType.VERTICAL_EVENT, tsNanos, heightDeltaMetres = event.heightDeltaMetres,
             detail = "${event.direction} ${event.floorCandidates.sorted().joinToString("/")} floor(s) ${event.kind}",
@@ -345,7 +364,7 @@ class FloorTrackingCoordinator(
 
     private fun reject(tsNanos: Long, reason: String) {
         val height = barometer.heightSinceAnchorMetres
-        val h = config.vertical.floorHeightMetres
+        val h = elevations?.smallestStoreyMetres ?: config.vertical.floorHeightMetres
         if (pending != null && abs(height) < config.vertical.minimumFloorFraction * h) {
             // Back at the anchored height (e.g. up and down again away from links): nothing is unexplained any more.
             clearPending(tsNanos)
@@ -381,8 +400,21 @@ class FloorTrackingCoordinator(
         val levels = topology.levels
         val fromLevel = levels[from] ?: return false
         val toLevel = levels[target] ?: return false
+        val e = elevations
+        if (e != null && from in e.elevationMetres && target in e.elevationMetres) {
+            return abs(p.heightMetres - e.expectedHeight(from, target)) <= config.wifi.pendingHeightToleranceFloors * e.storeyMetres(from, target)
+        }
         val h = config.vertical.floorHeightMetres
         return abs(p.heightMetres - (toLevel - fromLevel) * h) <= config.wifi.pendingHeightToleranceFloors * h
+    }
+
+    /**
+     * Floors an elevation-judged event may have started on: every floor holding at least [JUDGE_MIN_VOTE] of the
+     * filter's weight, plus the confirmed floor.
+     */
+    private fun judgeFloors(): Set<String> {
+        val votes = judgeFilter?.takeUnless { it.isLost }?.floorVotes().orEmpty()
+        return votes.filterValues { it >= JUDGE_MIN_VOTE }.keys + decision.floorId
     }
 
     private fun resetWifiCounts() {
@@ -419,12 +451,17 @@ class FloorTrackingCoordinator(
     private fun nanos(seconds: Double) = (seconds * 1e9).toLong()
 
     companion object {
+        /** A floor with at least this share of the weight may be where an elevation-judged event started. */
+        const val JUDGE_MIN_VOTE = 0.1
+
         /** Null for [FloorTopology.NONE]: the session is single-floor and runs today's code (invariant I1). */
         fun createOrNull(
             topology: FloorTopology, config: FloorDetectionConfig, barometerPresent: Boolean, startFloorId: String,
-            tracking: FloorTrackingConfig = FloorTrackingConfig(),
+            tracking: FloorTrackingConfig = FloorTrackingConfig(), elevations: FloorElevations? = null,
+            configOverrides: Map<String, Double> = emptyMap(),
         ): FloorTrackingCoordinator? =
             if (topology.isEmpty || startFloorId !in topology.levels) null
-            else FloorTrackingCoordinator(topology, config, barometerPresent, startFloorId, tracking)
+            else FloorTrackingCoordinator(topology, config, barometerPresent, startFloorId, tracking,
+                elevations?.takeIf { e -> topology.levels.keys.all { it in e.elevationMetres } }, configOverrides)
     }
 }

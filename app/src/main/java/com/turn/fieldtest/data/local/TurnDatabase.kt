@@ -59,7 +59,7 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun floorTransitionEventDao(): FloorTransitionEventDao
 
     companion object {
-        const val SCHEMA_VERSION = 7
+        const val SCHEMA_VERSION = 8
         const val DATABASE_NAME = "turn-field-test.db"
 
         fun build(context: Context, databaseName: String = DATABASE_NAME): TurnDatabase =
@@ -138,5 +138,12 @@ object TurnDatabaseMigrations {
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_floor_transition_events_linkId` ON `floor_transition_events` (`linkId`)")
         }
     }
-    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4,FROM_4_TO_5,FROM_5_TO_6,FROM_6_TO_7)
+    /** Additive: per-floor elevation and the optional floor-to-floor frame alignment. Existing rows keep NULL (unchanged behaviour). */
+    val FROM_7_TO_8 = object : Migration(7, 8) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `floors` ADD COLUMN `elevationMetres` REAL")
+            db.execSQL("ALTER TABLE `floors` ADD COLUMN `frameAlignmentJson` TEXT")
+        }
+    }
+    val ALL: Array<Migration> = arrayOf(FROM_1_TO_2,FROM_2_TO_3,FROM_3_TO_4,FROM_4_TO_5,FROM_5_TO_6,FROM_6_TO_7,FROM_7_TO_8)
 }

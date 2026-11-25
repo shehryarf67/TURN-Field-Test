@@ -50,6 +50,8 @@ class FloorReplayHarness(
     private val topology: FloorTopology,
     private val filterConfig: ParticleFilterConfig = ParticleFilterConfig(particleCount = 300),
     private val detectionConfig: FloorDetectionConfig = FloorDetectionConfig(),
+    /** Real floor elevations; null judges vertical events against the nominal storey (the behaviour before schema 8). */
+    private val elevations: com.turn.fieldtest.core.FloorElevations? = null,
 ) {
     fun replay(
         trace: RawSensorTrace,
@@ -64,7 +66,8 @@ class FloorReplayHarness(
         require(rows.isNotEmpty()) { "empty trace" }
         val t0 = rows.first().timeNanos
         val filter = ParticleFilter(map, filterConfig, seed, topology)
-        val coordinator = requireNotNull(FloorTrackingCoordinator.createOrNull(topology, detectionConfig, barometerPresent, start.floorId))
+        val coordinator = requireNotNull(FloorTrackingCoordinator.createOrNull(topology, detectionConfig, barometerPresent, start.floorId,
+            elevations = elevations))
         val fixSource = when (start.source) {
             FloorFixSource.QR -> AbsoluteFixSource.QR
             FloorFixSource.WIFI_INIT, FloorFixSource.USER_RELOCALIZE, FloorFixSource.WIFI_CROSS_FLOOR -> AbsoluteFixSource.WIFI

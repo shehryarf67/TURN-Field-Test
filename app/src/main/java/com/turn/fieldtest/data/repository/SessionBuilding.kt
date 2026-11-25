@@ -2,6 +2,7 @@ package com.turn.fieldtest.data.repository
 
 import com.turn.fieldtest.core.ExcludedLink
 import com.turn.fieldtest.core.ExclusionReason
+import com.turn.fieldtest.core.FloorElevations
 import com.turn.fieldtest.core.FloorLinkInput
 import com.turn.fieldtest.core.FloorTopology
 import com.turn.fieldtest.core.FloorTopologyBuilder
@@ -29,6 +30,8 @@ data class SessionBuilding(
     val linkCount: Int = 0,
     /** Ids of the considered links that touch the start floor. */
     val startLinkIds: Set<String> = emptySet(),
+    /** Real elevations of every session floor, or null (nominal storey height, the behaviour before schema 8). */
+    val elevations: FloorElevations? = null,
 ) {
     val multiFloor: Boolean get() = !topology.isEmpty
 
@@ -42,7 +45,7 @@ data class SessionBuilding(
         return copy(
             floorMaps = mapOf(start.floorId to saved), metricMap = saved.metricMap(), topology = FloorTopology.NONE,
             floorIds = setOf(start.floorId), names = mapOf(start.floorId to saved.floor.name),
-            levels = mapOf(start.floorId to saved.floor.levelNumber),
+            levels = mapOf(start.floorId to saved.floor.levelNumber), elevations = null,
         )
     }
 }
@@ -90,6 +93,7 @@ fun assembleSessionBuilding(
         skippedFloors = skipped,
         linkCount = connectors.size,
         startLinkIds = startLinks,
+        elevations = FloorElevations.of(ids.associateWith { levels.getValue(it) }, ids.associateWith { usable.getValue(it).floor.elevationMetres }),
     )
 }
 
@@ -113,7 +117,8 @@ fun floorTrackingStartStatus(building: SessionBuilding, floorTrackingEnabled: Bo
         val floors = building.floorIds.size
         val links = building.topology.portals.map { it.linkId }.distinct().size
         val barometer = if (barometerPresent) "barometer ready" else "no barometer: floor from Wi-Fi and stairs/lift"
-        return "Multi-floor tracking · $floors floors · $links ${if (links == 1) "link" else "links"} · $barometer"
+        val heights = if (building.elevations != null) " · floor heights set" else ""
+        return "Multi-floor tracking · $floors floors · $links ${if (links == 1) "link" else "links"} · $barometer$heights"
     }
     val unchecked = building.excluded.count { it.reason == ExclusionReason.UNVERIFIED && it.linkId in building.startLinkIds }
     if (unchecked > 0) {

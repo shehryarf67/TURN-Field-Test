@@ -26,9 +26,10 @@ class PressureTrace(val samples: List<PressureSample>, val stepNanos: List<Long>
 data class PressureReplay(val states: List<BarometerState>, val events: List<VerticalEvent>)
 
 /** Runs [trace] in sensor-time order through a fresh [BarometerTracker] and [VerticalMotionDetector]. */
-fun replayPressure(trace: PressureTrace, config: FloorDetectionConfig = FloorDetectionConfig()): PressureReplay {
+fun replayPressure(trace: PressureTrace, config: FloorDetectionConfig = FloorDetectionConfig(),
+                   judge: com.turn.fieldtest.core.FloorCountJudge? = null): PressureReplay {
     val tracker = BarometerTracker(config.barometer, sensorPresent = true)
-    val detector = VerticalMotionDetector(config.vertical)
+    val detector = VerticalMotionDetector(config.vertical, judge)
     val states = mutableListOf<BarometerState>()
     val events = mutableListOf<VerticalEvent>()
     for (sample in trace.samples) {

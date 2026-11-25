@@ -101,3 +101,35 @@ class SessionBuildingAssemblyTest {
         }
     }
 }
+
+/** Schema 8 floor elevations reach the session only when every session floor has one. */
+class SessionBuildingElevationsTest {
+    private val square = """[{"x":0,"y":0},{"x":20,"y":0},{"x":20,"y":20},{"x":0,"y":20}]"""
+
+    private fun saved(floor: String, level: Int, elevation: Double?) = SavedFloorMap(VenueEntity("home", "Home", null, 1, 1),
+        FloorEntity("f-$floor", "home", floor, level, 20.0, 20.0, createdAtEpochMillis = 1, updatedAtEpochMillis = 1, elevationMetres = elevation), null,
+        listOf(WalkableRegionEntity("r-$floor", "f-$floor", "Walkable", square, true, 1)), emptyList(), emptyList(), emptyList(), false)
+
+    private val link = FloorConnector(VerticalTransitionEntity(id = "L", fromFloorId = "f-G", toFloorId = "f-F1",
+        kind = "STAIRS", fromXMetres = 5.0, fromYMetres = 5.0, toXMetres = 6.0, toYMetres = 6.0, label = "Stairs",
+        travelTimeSeconds = 12.0, verifiedOnSite = true), ConnectorKind.STAIRS, "G", 0, "F1", 1)
+
+    @Test fun unsetOrPartialElevationsKeepTheNominalStorey() {
+        val unset = assembleSessionBuilding(saved("G", 0, null), listOf(saved("F1", 1, null)), listOf(link), true, false)
+        assertTrue(unset.multiFloor)
+        assertNull(unset.elevations)
+        assertEquals("Multi-floor tracking · 2 floors · 1 link · barometer ready", floorTrackingStartStatus(unset, true, true))
+        val partial = assembleSessionBuilding(saved("G", 0, 0.0), listOf(saved("F1", 1, null)), listOf(link), true, false)
+        assertNull(partial.elevations)
+        assertNull(partial.singleFloor().elevations)
+    }
+
+    @Test fun completeElevationsReachTheSession() {
+        val building = assembleSessionBuilding(saved("G", 0, 0.0), listOf(saved("F1", 1, 2.7)), listOf(link), true, false)
+        assertEquals(mapOf("f-G" to 0.0, "f-F1" to 2.7), building.elevations?.elevationMetres)
+        assertEquals("Multi-floor tracking · 2 floors · 1 link · barometer ready · floor heights set", floorTrackingStartStatus(building, true, true))
+        assertNull(building.singleFloor().elevations, "the single-floor reduction is the legacy session")
+        val trackingOff = assembleSessionBuilding(saved("G", 0, 0.0), listOf(saved("F1", 1, 2.7)), listOf(link), false, false)
+        assertNull(trackingOff.elevations)
+    }
+}
