@@ -80,6 +80,10 @@ data class FloorAlignment(
 
     fun toJson(): String = json.encodeToString(serializer(), this)
 
+    /** The same alignment stored on [toFloorId], mapping its frame onto [thisFloorId] (picks swapped, inverse transform). */
+    fun reversed(thisFloorId: String): FloorAlignment = copy(toFloorId = thisFloorId, transform = transform.inverse(),
+        scaleRatio = 1.0 / scaleRatio, pointsHere = pointsThere, pointsThere = pointsHere)
+
     companion object {
         private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
@@ -164,6 +168,41 @@ object FloorAlignmentSolver {
             }
         }
         return null
+    }
+
+    /**
+     * A new pick on one floor of the alignment panel: added until there are [count] picks, then it replaces the
+     * nearest existing pick in place. Picks are never reordered, so point 1 stays point 1 (a shifted list would pair
+     * point 1 with point 2 on the other floor and give a 180° turn with no residual).
+     */
+    fun repick(picks: List<MetricPoint>, p: MetricPoint, count: Int = 2): List<MetricPoint> {
+        if (picks.size < count) return picks + p
+        val nearest = picks.indices.minBy { picks[it].distanceTo(p) }
+        return picks.toMutableList().also { it[nearest] = p }
+    }
+
+    /** Where an alignment of [floorId] onto [alignment]'s floor is saved, and what it replaces. */
+    data class Placement(val storeOnFloorId: String, val stored: FloorAlignment, val clearFloorId: String?)
+
+    /**
+     * Each floor has one alignment slot. The new alignment goes on [floorId] when that slot is free or already points at
+     * the same floor; otherwise its reverse goes on the reference floor when that slot is free (or points back). If
+     * both slots hold alignments to other floors, saving would silently drop one: refused with a message instead.
+     * [clearFloorId] is the other floor of the pair when it holds the opposite alignment (one alignment per pair).
+     */
+    fun placement(floorId: String, alignment: FloorAlignment, existingHere: FloorAlignment?, existingThere: FloorAlignment?,
+        names: Map<String, String> = emptyMap()): Placement {
+        val target = alignment.toFloorId
+        require(target != floorId) { "Align a floor to another floor" }
+        fun name(id: String) = names[id] ?: id
+        val hereFree = existingHere == null || existingHere.toFloorId == target
+        val thereFree = existingThere == null || existingThere.toFloorId == floorId
+        return when {
+            hereFree -> Placement(floorId, alignment, target.takeIf { existingThere?.toFloorId == floorId })
+            thereFree -> Placement(target, alignment.reversed(floorId), null)
+            else -> throw IllegalArgumentException("${name(floorId)} is already aligned to ${name(existingHere!!.toFloorId)} and " +
+                "${name(target)} to ${name(existingThere!!.toFloorId)}: remove one of those alignments first")
+        }
     }
 
     private fun centroid(points: List<MetricPoint>) = MetricPoint(points.sumOf { it.x } / points.size, points.sumOf { it.y } / points.size)

@@ -133,4 +133,35 @@ class HiddenCornersTest {
         close(P2(-3.0, 4.0), moved.p, 1e-9)
         close(Alignment(radians = Math.PI / 2, tx = 1.0).apply(inference.wallA.first()), moved.inference!!.wallA.first(), 1e-9)
     }
+
+    @Test
+    fun undoWhileTappingWallsRemovesTheLastWallPoint() {
+        var draft = HiddenCornerDraft().add(P2(0.0, 0.0)).add(P2(1.0, 0.0)).add(P2(2.0, 0.0))
+        draft = draft.undo()
+        assertEquals(listOf(P2(0.0, 0.0), P2(1.0, 0.0)), draft.wallA)
+        draft = draft.next().add(P2(3.0, 1.0))
+        assertEquals(listOf(P2(3.0, 1.0)), draft.wallB)
+        draft = draft.undo()
+        assertEquals(emptyList(), draft.wallB)
+        draft = draft.undo() // back to wall 1
+        assertNull(draft.wallB)
+        draft = draft.undo().undo()
+        assertTrue(draft.isEmpty)
+        assertFailsWith<IllegalArgumentException> { HiddenCornerDraft().add(P2(0.0, 0.0)).next() }
+    }
+
+    @Test
+    fun onlyCornerToolsAcceptHighHitsAndWallPointsTakeNoAnchor() {
+        listOf("CORNER", "ENTRANCE", "BOUNDARY", "WALL_CORNER").forEach { tool ->
+            assertTrue(HiddenCorners.acceptsHitHeight(3.0, tool), tool)
+            assertTrue(!HiddenCorners.acceptsHitHeight(3.6, tool), tool)
+        }
+        listOf("WALL", "DOOR").forEach { tool ->
+            assertTrue(HiddenCorners.acceptsHitHeight(2.4, tool), tool)
+            assertTrue(!HiddenCorners.acceptsHitHeight(2.6, tool), "$tool endpoints keep the 2.5 m limit")
+            assertTrue(HiddenCorners.anchorsTap(tool))
+        }
+        assertTrue(!HiddenCorners.anchorsTap("WALL_CORNER"))
+        assertTrue(HiddenCorners.anchorsTap("CORNER"))
+    }
 }

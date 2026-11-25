@@ -55,7 +55,20 @@ object HiddenCorners {
     const val MIN_HIT_HEIGHT_METRES = -0.15
     const val MAX_HIT_HEIGHT_METRES = 3.5
 
+    /** Highest accepted hit for tools that are not room corners (wall and door endpoints), as before hidden corners. */
+    const val MAX_ENDPOINT_HIT_HEIGHT_METRES = 2.5
+    /** Tools whose hits may be projected down from a wall or the ceiling. */
+    val CORNER_TOOLS = setOf("CORNER", "ENTRANCE", "BOUNDARY", "WALL_CORNER")
+
     fun acceptsHitHeight(height: Double): Boolean = height.isFinite() && height in MIN_HIT_HEIGHT_METRES..MAX_HIT_HEIGHT_METRES
+
+    /** Corner tools accept wall and ceiling hits up to 3.5 m; wall and door endpoints keep the 2.5 m limit. */
+    fun acceptsHitHeight(height: Double, tool: String): Boolean =
+        if (tool in CORNER_TOOLS) acceptsHitHeight(height)
+        else height.isFinite() && height in MIN_HIT_HEIGHT_METRES..MAX_ENDPOINT_HIT_HEIGHT_METRES
+
+    /** Wall points of the two-wall tool are only positions: they get no ARCore anchor (anchors are capped per section). */
+    fun anchorsTap(tool: String): Boolean = tool != "WALL_CORNER"
 
     /** Provenance of a direct AR corner hit at [height] above the floor (null for measured points). */
     fun provenanceForHeight(height: Double?): String =
@@ -124,5 +137,23 @@ object HiddenCorners {
             projected.takeIf { it > 0 }?.let { "$it projected down from a high wall or ceiling hit" },
         )
         return "${room.name}: ${parts.joinToString(", ")}; check them with a tape measure"
+    }
+}
+
+/**
+ * Wall points of the "Hidden corner (two walls)" tool while they are being tapped: [wallA], then (after [next])
+ * [wallB]. Immutable; [undo] removes the last tapped point (or steps back from wall 2 to wall 1 when wall 2 is empty).
+ */
+data class HiddenCornerDraft(val wallA: List<P2> = emptyList(), val wallB: List<P2>? = null) {
+    val isEmpty: Boolean get() = wallA.isEmpty() && wallB == null
+    fun add(p: P2) = if (wallB == null) copy(wallA = wallA + p) else copy(wallB = wallB + p)
+    fun next(): HiddenCornerDraft {
+        require(wallB == null && wallA.size >= 2) { "Tap at least two points along the first wall" }
+        return copy(wallB = emptyList())
+    }
+    fun undo(): HiddenCornerDraft = when {
+        wallB == null -> copy(wallA = wallA.dropLast(1))
+        wallB.isEmpty() -> copy(wallB = null)
+        else -> copy(wallB = wallB.dropLast(1))
     }
 }

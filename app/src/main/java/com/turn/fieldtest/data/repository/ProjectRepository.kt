@@ -2,6 +2,7 @@ package com.turn.fieldtest.data.repository
 
 import androidx.room.withTransaction
 import com.turn.fieldtest.core.FloorAlignment
+import com.turn.fieldtest.core.FloorAlignmentSolver
 import com.turn.fieldtest.core.FloorElevations
 import com.turn.fieldtest.core.MapFloor
 import com.turn.fieldtest.core.MetricMap
@@ -139,15 +140,19 @@ class ProjectRepository(private val database: TurnDatabase) {
      */
     suspend fun setFloorAlignment(floorId: String, alignment: FloorAlignment?, now: Long) = database.withTransaction {
         val floor = requireNotNull(repositories.floorPlans.floor(floorId)) { "Saved floor is unavailable" }
-        if (alignment != null) {
-            require(alignment.toFloorId != floorId) { "Align a floor to another floor" }
-            val target = requireNotNull(repositories.floorPlans.floor(alignment.toFloorId)) { "The other floor no longer exists" }
-            require(target.venueId == floor.venueId) { "Floors can only be aligned within one building" }
-            if (FloorAlignment.fromJsonOrNull(target.frameAlignmentJson)?.toFloorId == floorId) {
-                repositories.floorPlans.save(target.copy(frameAlignmentJson = null, updatedAtEpochMillis = now))
-            }
+        if (alignment == null) {
+            repositories.floorPlans.save(floor.copy(frameAlignmentJson = null, updatedAtEpochMillis = now))
+            return@withTransaction
         }
-        repositories.floorPlans.save(floor.copy(frameAlignmentJson = alignment?.toJson(), updatedAtEpochMillis = now))
+        require(alignment.toFloorId != floorId) { "Align a floor to another floor" }
+        val target = requireNotNull(repositories.floorPlans.floor(alignment.toFloorId)) { "The other floor no longer exists" }
+        require(target.venueId == floor.venueId) { "Floors can only be aligned within one building" }
+        // One slot per floor: never silently replace this floor's alignment to a third floor (see FloorAlignmentSolver.placement).
+        val placement = FloorAlignmentSolver.placement(floorId, alignment, FloorAlignment.fromJsonOrNull(floor.frameAlignmentJson),
+            FloorAlignment.fromJsonOrNull(target.frameAlignmentJson), mapOf(floor.id to floor.name, target.id to target.name))
+        val byId = mapOf(floor.id to floor, target.id to target)
+        placement.clearFloorId?.let { repositories.floorPlans.save(byId.getValue(it).copy(frameAlignmentJson = null, updatedAtEpochMillis = now)) }
+        repositories.floorPlans.save(byId.getValue(placement.storeOnFloorId).copy(frameAlignmentJson = placement.stored.toJson(), updatedAtEpochMillis = now))
     }
 
     /**

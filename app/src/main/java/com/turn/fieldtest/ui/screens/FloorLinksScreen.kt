@@ -216,7 +216,8 @@ private fun AlignFloorsPanel(state: TurnAppState, floors: List<ProjectSummary>, 
     var moving by remember { mutableStateOf(floors.sortedBy { it.floorLevel }.getOrNull(1)?.floorId) }
     var here by remember(moving) { mutableStateOf(listOf<MetricPoint>()) }
     var there by remember(reference) { mutableStateOf(listOf<MetricPoint>()) }
-    fun pick(list: List<MetricPoint>, p: MetricPoint) = if (list.size < 2) list + p else listOf(list[1], p)
+    // Point 1 stays point 1: once two are picked, a tap moves the nearest pick in place (never a reordering shift).
+    fun pick(list: List<MetricPoint>, p: MetricPoint) = FloorAlignmentSolver.repick(list, p)
     val solved = if (reference != null && moving != null && reference != moving && here.size == 2 && there.size == 2)
         runCatching { FloorAlignmentSolver.solve(reference!!, here, there, System.currentTimeMillis()) } else null
     BackHandlerCompat(onClose)
@@ -248,13 +249,23 @@ private fun AlignFloorsPanel(state: TurnAppState, floors: List<ProjectSummary>, 
                     Text("${c.entity.label}: ${check.message}", style = MaterialTheme.typography.bodySmall,
                         color = if (check.consistent) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
                 } }
-                Button(onClick = { onSave(moving!!, a) }, enabled = !locked, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                // One alignment slot per floor: say where it goes, and refuse to drop an alignment to a third floor.
+                val names = floors.associate { it.floorId to it.floorName }
+                val placement = runCatching { FloorAlignmentSolver.placement(moving!!, a, alignments[moving!!], alignments[reference!!], names) }
+                placement.exceptionOrNull()?.let { Text(it.message ?: "Cannot save this alignment", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error) }
+                placement.getOrNull()?.let { p ->
+                    if (p.storeOnFloorId != moving) Text("${names[moving] ?: moving} already has an alignment to another floor, so this one is saved the other way round on ${names[reference] ?: reference}.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Button(onClick = { onSave(moving!!, a) }, enabled = !locked && placement.isSuccess, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                     shape = RoundedCornerShape(16.dp)) { Text("Save alignment") }
             }
         }
-        val existing = moving?.let { alignments[it] }
-        if (existing != null) OutlinedButton(onClick = { onSave(moving!!, null) }, enabled = !locked, modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)) { Text("Remove this floor's alignment") }
+        // The pair's alignment may be stored on either floor.
+        val storedOn = listOfNotNull(moving, reference).firstOrNull { id -> alignments[id]?.toFloorId == (if (id == moving) reference else moving) }
+        if (storedOn != null) OutlinedButton(onClick = { onSave(storedOn, null) }, enabled = !locked, modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)) { Text("Remove these floors' alignment") }
     }
 }
 

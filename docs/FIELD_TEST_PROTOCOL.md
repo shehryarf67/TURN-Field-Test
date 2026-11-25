@@ -146,7 +146,7 @@ A house is a good first test: storeys are low (about 2.6-2.8 m), each floor is m
 and furniture hides many corners. Set it up in this order.
 
 1. **Map each floor with the Walk Mapper** (WALK_MAPPER.md). Where a wardrobe, sofa or bed hides a corner, either aim
-   at the wall or ceiling straight above the corner (it is projected down to the floor), or use **Hidden corner (two
+   at the wall or ceiling straight above the corner (it is projected down to the floor; corner tools only, wall and door endpoints keep the 2.5 m limit), or use **Hidden corner (two
    walls)**: tap two or more visible points along each of the two walls, then *Place corner*. Both kinds are flagged in
    the quality report; check them with a tape. Save each floor into the same building (level 0 and level 1).
 2. **Set the storey height.** *Tools → Link floors → Floor heights*: measure floor to floor (e.g. count the steps and

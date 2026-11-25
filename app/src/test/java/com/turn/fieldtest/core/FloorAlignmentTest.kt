@@ -132,4 +132,45 @@ class FloorAlignmentTest {
         // An unaligned (identity) pair of frames is checked as-is.
         assertNotNull(FloorLinkAlignment.check(ConnectorKind.STAIRS, stairFootG, stairFootG, Rigid2D.IDENTITY).takeIf { it.consistent })
     }
+
+    @Test
+    fun aThirdTapMovesTheNearestPickInPlaceAndNeverSwapsThePairs() {
+        val p1 = MetricPoint(1.0, 1.0); val p2 = MetricPoint(5.0, 1.0)
+        var picks = FloorAlignmentSolver.repick(FloorAlignmentSolver.repick(emptyList(), p1), p2)
+        assertEquals(listOf(p1, p2), picks)
+        // Correcting point 1 keeps it first (the old shift made it [p2, new] and paired it with the other floor's point 1).
+        picks = FloorAlignmentSolver.repick(picks, MetricPoint(1.2, 1.1))
+        assertEquals(listOf(MetricPoint(1.2, 1.1), p2), picks)
+        picks = FloorAlignmentSolver.repick(picks, MetricPoint(4.9, 0.9))
+        assertEquals(listOf(MetricPoint(1.2, 1.1), MetricPoint(4.9, 0.9)), picks)
+        // Regression: with point 1 retapped, the fit still finds the true (0°) turn, not a 180° one.
+        val there = listOf(MetricPoint(11.2, 1.1), MetricPoint(14.9, 0.9))
+        assertEquals(0.0, FloorAlignmentSolver.solve("G", picks, there).alignment.transform.rotationDegrees, 1e-6)
+    }
+
+    @Test
+    fun savingNeverSilentlyDropsAnAlignmentToAThirdFloor() {
+        fun aligned(to: String) = FloorAlignmentSolver.solve(to, listOf(MetricPoint(0.0, 0.0), MetricPoint(2.0, 0.0)),
+            listOf(MetricPoint(1.0, 1.0), MetricPoint(1.0, 3.0))).alignment
+        val f1ToF2 = aligned("F2")
+        // F1 is free: stored on F1.
+        assertEquals("F1", FloorAlignmentSolver.placement("F1", f1ToF2, null, null).storeOnFloorId)
+        // F1 already points at F0: stored the other way round on F2, F1 -> F0 kept.
+        val reversed = FloorAlignmentSolver.placement("F1", f1ToF2, aligned("F0"), null)
+        assertEquals("F2", reversed.storeOnFloorId)
+        assertEquals("F1", reversed.stored.toFloorId)
+        assertEquals(null, reversed.clearFloorId)
+        val p = MetricPoint(3.0, -1.0)
+        assertTrue(f1ToF2.transform.apply(reversed.stored.transform.apply(p)).distanceTo(p) < 1e-9)
+        assertEquals(1.0 / f1ToF2.scaleRatio, reversed.stored.scaleRatio, 1e-12)
+        // Both slots point elsewhere: refused with a message naming them.
+        val error = assertFailsWith<IllegalArgumentException> {
+            FloorAlignmentSolver.placement("F1", f1ToF2, aligned("F0"), aligned("F3"), mapOf("F1" to "Upstairs", "F2" to "Loft"))
+        }
+        assertTrue(error.message!!.startsWith("Upstairs is already aligned to F0 and Loft to F3"), error.message)
+        // Re-aligning the same pair replaces it; the opposite alignment of the pair is cleared, not duplicated.
+        assertEquals("F1", FloorAlignmentSolver.placement("F1", f1ToF2, aligned("F2"), null).storeOnFloorId)
+        val opposite = FloorAlignmentSolver.placement("F1", f1ToF2, null, aligned("F1"))
+        assertEquals("F1" to "F2", opposite.storeOnFloorId to opposite.clearFloorId)
+    }
 }

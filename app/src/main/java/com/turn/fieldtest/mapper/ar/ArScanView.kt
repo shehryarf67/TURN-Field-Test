@@ -201,9 +201,15 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         if(floor==null) return
         val height=hit.hitPose.ty()-floor.origin.y
         // Wall and ceiling hits are accepted and projected vertically to the floor; the height is kept as provenance.
-        if(!HiddenCorners.acceptsHitHeight(height.toDouble())) { report(ArStatus("Tap a floor/wall boundary, a wall, or the ceiling above the corner",true)); return }
-        if(anchors.size>=96) { report(ArStatus("Section anchor limit reached. Pause and continue with an aligned new section.",true)); return }
-        val id=scanId(); anchors[id]=hit.createAnchor()
+        // Corner tools accept hits up to 3.5 m (projected, flagged); wall and door endpoints keep the 2.5 m limit.
+        val tapTool=tool
+        if(!HiddenCorners.acceptsHitHeight(height.toDouble(),tapTool)) {
+            report(ArStatus(if(tapTool in HiddenCorners.CORNER_TOOLS) "Tap a floor/wall boundary, a wall, or the ceiling above the corner" else "Tap a floor/wall boundary or enter a measured point",true)); return
+        }
+        // Two-wall tool points are positions only; they never use up the section's anchors.
+        val anchored=HiddenCorners.anchorsTap(tapTool)
+        if(anchored && anchors.size>=96) { report(ArStatus("Section anchor limit reached. Pause and continue with an aligned new section.",true)); return }
+        val id=scanId(); if(anchored) anchors[id]=hit.createAnchor()
         val (onFloor,above)=HiddenCorners.projectToFloor(floor,hit.hitPose.v())
         sink.point(onFloor,id,if(hit.trackable is Plane) "AR_PLANE" else "DEPTH_HIT",f.timestamp,segmentId,above)
     }

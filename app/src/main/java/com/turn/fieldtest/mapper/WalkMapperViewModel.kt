@@ -74,14 +74,15 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     fun name(value: String)=update(false) {it.copy(name=value.take(80))}
     fun chooseTool(value: String) {tool=value; pendingEndpoint=null; clearHiddenCorner()}
     /** "Hidden corner" tool: points tapped along the first wall, then (after [nextHiddenWall]) along the second. */
-    var hiddenWallA by mutableStateOf<List<P2>>(emptyList()); private set
-    var hiddenWallB by mutableStateOf<List<P2>?>(null); private set
+    var hiddenDraft by mutableStateOf(HiddenCornerDraft()); private set
+    val hiddenWallA: List<P2> get()=hiddenDraft.wallA
+    val hiddenWallB: List<P2>? get()=hiddenDraft.wallB
     private var hiddenSegment: String?=null
     fun nextHiddenWall() {
         if(hiddenWallA.size<2) { status="Tap at least two points along the first wall"; return }
-        hiddenWallB=emptyList(); status="Now tap at least two points along the second wall"
+        hiddenDraft=hiddenDraft.next(); status="Now tap at least two points along the second wall"
     }
-    fun clearHiddenCorner() { hiddenWallA=emptyList(); hiddenWallB=null; hiddenSegment=null }
+    fun clearHiddenCorner() { hiddenDraft=HiddenCornerDraft(); hiddenSegment=null }
     /** Places the corner where the two tapped walls meet (flagged as inferred in the draft and quality report). */
     fun placeHiddenCorner() {
         val r=room ?: run { status="Start and name a room first"; return }
@@ -101,6 +102,12 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     fun removeMeasurement(id: String)=update {it.withoutMeasurement(id)}
     fun cleanupWalls()=update { d->d.copy(walls=ScanGeometry.cleanupWalls(d.walls,d.doors.map {it.wallId}.toSet(),d.thresholds.snapMetres)) }
     fun undo() {
+        // While hidden-corner wall points are pending, Undo removes the last wall point, never a saved corner.
+        if(tool=="WALL_CORNER" && !hiddenDraft.isEmpty && !busy) {
+            hiddenDraft=hiddenDraft.undo()
+            status=if(hiddenWallB==null) "Wall 1: ${hiddenWallA.size} points" else "Wall 2: ${hiddenWallB!!.size} points"
+            return
+        }
         if(history.isEmpty() || busy) return
         val previous=history.peekLast() ?: return
         if(activeSegment!=null && previous.segments.associate {it.id to it.alignment}!=doc!!.segments.associate {it.id to it.alignment}) {
@@ -137,7 +144,7 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
             }
             "WALL_CORNER" -> {
                 if(r.confirmed) { status="Outline confirmed; unconfirm it in review before adding corners"; return }
-                if(hiddenWallB==null) hiddenWallA=hiddenWallA+point else hiddenWallB=hiddenWallB!!+point
+                hiddenDraft=hiddenDraft.add(point)
                 hiddenSegment=segment
                 status=if(hiddenWallB==null) "Wall 1: ${hiddenWallA.size} points · tap more along it, then Next wall"
                     else "Wall 2: ${hiddenWallB!!.size} points · tap more along it, then Place corner"

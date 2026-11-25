@@ -124,7 +124,7 @@ object FloorDetectionOverrides {
     fun defaults(): Map<String, Double> = specs.associate { it.key to it.read(FloorDetectionConfig()) }
 
     /**
-     * [overrides] applied in editor order on top of the defaults. Unknown keys and out-of-range values are rejected; a
+     * [overrides] applied together on top of the defaults (in whatever order the cross-field rules allow). Unknown keys and out-of-range values are rejected; a
      * value the config itself refuses in combination with the others (e.g. a settle speed above the start speed) is
      * rejected too, keeping the rest. An empty map gives `FloorDetectionConfig()` unchanged.
      */
@@ -133,16 +133,28 @@ object FloorDetectionOverrides {
         val used = linkedMapOf<String, Double>()
         val rejected = linkedMapOf<String, String>()
         overrides.keys.filter { it !in byKey }.sorted().forEach { rejected[it] = "Unknown threshold" }
-        specs.filter { it.key in overrides }.forEach { spec ->
-            val value = overrides.getValue(spec.key)
-            spec.problem(value)?.let { rejected[spec.key] = it; return@forEach }
-            try {
-                config = spec.write(config, value)
-                used[spec.key] = value
-            } catch (e: IllegalArgumentException) {
-                rejected[spec.key] = "Conflicts with another threshold"
-            }
+        var pending = specs.filter { it.key in overrides }.filter { spec ->
+            val problem = spec.problem(overrides.getValue(spec.key))
+            if (problem != null) rejected[spec.key] = problem
+            problem == null
         }
+        // Cross-field rules (e.g. start speed above settle speed) are checked on every intermediate config, so one fixed
+        // order can refuse a valid final pair. Apply in passes until nothing more fits: whatever order reaches the
+        // final values is found, and only values that conflict in every order are rejected.
+        while (pending.isNotEmpty()) {
+            val left = pending.filter { spec ->
+                try {
+                    config = spec.write(config, overrides.getValue(spec.key))
+                    false
+                } catch (e: IllegalArgumentException) {
+                    true
+                }
+            }
+            if (left.size == pending.size) break
+            pending = left
+        }
+        pending.forEach { rejected[it.key] = "Conflicts with another threshold" }
+        specs.filter { it.key in overrides && it.key !in rejected }.forEach { used[it.key] = overrides.getValue(it.key) }
         return AppliedFloorDetection(config, used, rejected)
     }
 

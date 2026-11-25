@@ -119,4 +119,21 @@ class FloorDetectionOverridesTest {
         val plainDetail = plain.drainEvents().single { it.type == FloorTrackingEventType.CONFIG }.detail
         assertTrue(!plainDetail.contains("overrides") && !plainDetail.contains("elevations"), plainDetail)
     }
+
+    @Test
+    fun aValidFinalPairIsAcceptedWhateverItsEditorOrder() {
+        // Lowering both speeds: exit 0.03 then start 0.05. Start 0.05 alone would equal the default exit (0.05) and fail.
+        val lowered = FloorDetectionOverrides.apply(mapOf("vertical.exitRateMps" to 0.03, "vertical.enterRateMps" to 0.05))
+        assertTrue(lowered.rejected.isEmpty(), lowered.rejected.toString())
+        assertEquals(VerticalMotionConfig(enterRateMps = 0.05, exitRateMps = 0.03), lowered.config.vertical)
+        // Raising both above the old start speed works too.
+        val raised = FloorDetectionOverrides.apply(mapOf("vertical.exitRateMps" to 0.2, "vertical.enterRateMps" to 0.3))
+        assertEquals(VerticalMotionConfig(enterRateMps = 0.3, exitRateMps = 0.2), raised.config.vertical)
+        // A pair that is invalid in any order is still refused, keeping the other value.
+        val bad = FloorDetectionOverrides.apply(mapOf("vertical.exitRateMps" to 0.2, "vertical.enterRateMps" to 0.1))
+        assertEquals(VerticalMotionConfig(enterRateMps = 0.1), bad.config.vertical)
+        assertEquals(setOf("vertical.exitRateMps"), bad.rejected.keys)
+        assertEquals(mapOf("vertical.enterRateMps" to 0.05, "vertical.exitRateMps" to 0.03),
+            FloorDetectionOverrides.sanitize(mapOf("vertical.exitRateMps" to 0.03, "vertical.enterRateMps" to 0.05)))
+    }
 }
