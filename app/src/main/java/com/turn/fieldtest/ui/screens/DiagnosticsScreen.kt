@@ -136,6 +136,8 @@ fun DiagnosticsScreen(
             )
         }
 
+        if (!simulated) FloorThresholdsCard(state)
+
         SectionCard(
             title = "Visible Wi-Fi access points",
             subtitle = "Fingerprint identity is BSSID, never SSID",

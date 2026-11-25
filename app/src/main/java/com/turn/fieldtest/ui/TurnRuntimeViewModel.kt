@@ -323,6 +323,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.floorTrackingEnabled = saved.floorTrackingEnabled
             appState.useUncheckedFloorLinks = saved.useUncheckedFloorLinks
             appState.stepFreeRouting = saved.stepFreeRouting
+            appState.floorDetectionOverrides = saved.floorDetectionOverrides
             appState.mode = DataMode.valueOf(saved.dataMode.name)
             try {
                 if (appState.mode == DataMode.REAL_DEVICE) {
@@ -349,6 +350,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                     floorTrackingEnabled = appState.floorTrackingEnabled,
                     useUncheckedFloorLinks = appState.useUncheckedFloorLinks,
                     stepFreeRouting = appState.stepFreeRouting,
+                    floorDetectionOverrides = appState.floorDetectionOverrides,
                 )
             }.distinctUntilChanged().collect { settings ->
                 try {
@@ -358,7 +360,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         normalizeDeviceOffset = settings.normalizeDeviceOffset, defaultStrideMetres = settings.defaultStrideMetres,
                         particleCount = settings.particleCount, darkTheme = settings.darkTheme,
                         floorTrackingEnabled = settings.floorTrackingEnabled, useUncheckedFloorLinks = settings.useUncheckedFloorLinks,
-                        stepFreeRouting = settings.stepFreeRouting,
+                        stepFreeRouting = settings.stepFreeRouting, floorDetectionOverrides = settings.floorDetectionOverrides,
                     ) }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (error: Exception) { appState.projectStatus = "Could not save preferences: ${error.message}" }
@@ -566,6 +568,25 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     fun setConnectorVerified(id: String, verified: Boolean) = connectorAction("Updating link…") {
         connectorRepository.setVerified(id, verified); if (verified) "Marked as checked on site" else "Marked as not yet checked"
     }
+
+    /** Saves the open building's floor elevations (all null clears them); the next session start uses them. */
+    fun saveFloorElevations(elevations: Map<String, Double?>) {
+        val venueId = appState.activeProject?.venueId ?: return
+        connectorAction("Saving floor heights…") {
+            projects.setFloorElevations(venueId, elevations, System.currentTimeMillis())
+            refreshFloorLinks(withFloorMaps = true)
+            if (elevations.values.all { it == null }) "Floor heights cleared · standard 3.5 m storeys"
+            else "Floor heights saved · used from the next tracking session"
+        }
+    }
+
+    /** Saves (or with null removes) [floorId]'s alignment onto another floor of the open building. */
+    fun saveFloorAlignment(floorId: String, alignment: com.turn.fieldtest.core.FloorAlignment?) =
+        connectorAction(if (alignment == null) "Removing alignment…" else "Saving alignment…") {
+            projects.setFloorAlignment(floorId, alignment, System.currentTimeMillis())
+            refreshFloorLinks(withFloorMaps = true)
+            if (alignment == null) "Alignment removed" else "Floors aligned · use it to place and check link ends"
+        }
 
     fun suggestConnectors() {
         val venueId = appState.activeProject?.venueId ?: return
@@ -1250,8 +1271,11 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 // Tracking off, or no usable link from this floor: only the start floor is loaded, exactly as before (I1).
                 val loaded = sessionLoader.load(context, appState.floorTrackingEnabled, appState.useUncheckedFloorLinks)
                 val barometerPresent = sensorSource.state.value.availability.any { it.type == TurnSensorType.BAROMETER && it.available }
+                // Threshold overrides are snapshotted here: edits in Diagnostics apply from the next session start.
+                val detection = com.turn.fieldtest.core.FloorDetectionOverrides.apply(appState.floorDetectionOverrides)
                 val coordinator = if (loaded.multiFloor) com.turn.fieldtest.core.FloorTrackingCoordinator.createOrNull(
-                    loaded.topology, com.turn.fieldtest.core.FloorDetectionConfig(), barometerPresent, context.floorId) else null
+                    loaded.topology, detection.config, barometerPresent, context.floorId,
+                    elevations = loaded.elevations, configOverrides = detection.used) else null
                 // No coordinator means the legacy session: never let other floors reach the filter or fingerprints.
                 val building = if (coordinator == null) loaded.singleFloor() else loaded
                 val saved = building.floorMaps.getValue(context.floorId)
@@ -1281,6 +1305,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 floorEventLog.reset()
                 coordinator?.let { drainFloorEvents() }
                 appState.floorTrackingStatus = floorTrackingStartStatus(building, appState.floorTrackingEnabled, barometerPresent)
+                    ?.let { if (coordinator != null && detection.used.isNotEmpty()) "$it · custom thresholds" else it }
                 liveWifiEvidence.reset(android.os.SystemClock.elapsedRealtimeNanos() / 1_000L)
                 appState.realWifiPosition = null
                 appState.realWifiFixEpochMillis = null

@@ -123,6 +123,8 @@ class MainActivity : ComponentActivity() {
                     onConnectorDeleted = runtimeViewModel::deleteConnector,
                     onConnectorVerified = runtimeViewModel::setConnectorVerified,
                     onConnectorSuggestionsRequested = runtimeViewModel::suggestConnectors,
+                    onFloorElevationsSaved = runtimeViewModel::saveFloorElevations,
+                    onFloorAlignmentSaved = runtimeViewModel::saveFloorAlignment,
                     onModeChanged = { mode ->
                         runtimeViewModel.setMode(mode)
                         if (mode == DataMode.REAL_DEVICE && runtimeViewModel.appState.mode == mode) {

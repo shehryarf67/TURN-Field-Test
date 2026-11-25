@@ -64,8 +64,11 @@ fun FloorLinksScreen(state: TurnAppState, actions: TurnAppActions) {
     var editing by remember { mutableStateOf<LinkEditor?>(null) }
     var deleting by remember { mutableStateOf<FloorConnector?>(null) }
     val floors = state.projects.filter { it.venueId == state.activeProject?.venueId }.sortedByDescending { it.floorLevel }
+    var aligning by remember { mutableStateOf(false) }
     val locked = state.floorLinksBusy || state.sessionLocked
-    editing?.let { e -> LinkEditorPanel(state, floors, e, { editing = it }, onCancel = { editing = null }) { save -> actions.onConnectorSaved(save); editing = null }; return }
+    val alignments = buildingAlignments(state)
+    editing?.let { e -> LinkEditorPanel(state, floors, e, alignments, { editing = it }, onCancel = { editing = null }) { save -> actions.onConnectorSaved(save); editing = null }; return }
+    if (aligning) { AlignFloorsPanel(state, floors, alignments, locked, onClose = { aligning = false }) { id, a -> actions.onFloorAlignmentSaved(id, a); aligning = false }; return }
     deleting?.let { c ->
         AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Remove ${c.entity.label}?") },
             text = { Text("Routes and floor changes will no longer use this link. You can add it again later.") },
@@ -112,8 +115,170 @@ fun FloorLinksScreen(state: TurnAppState, actions: TurnAppActions) {
         }
         Text("Links (${state.floorConnectors.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         if (state.floorConnectors.isEmpty()) Text("No links yet.", style = MaterialTheme.typography.bodySmall)
-        state.floorConnectors.forEach { c -> LinkCard(c, linkProblems(state, c), !locked,
+        state.floorConnectors.forEach { c -> LinkCard(c, linkProblems(state, c), linkAlignmentNote(c, alignments), !locked,
             onVerify = { actions.onConnectorVerified(c.entity.id, !c.entity.verifiedOnSite) }, onEdit = { editing = c.toEditor() }, onDelete = { deleting = c }) }
+        FloorHeightsCard(state, floors, !locked, actions.onFloorElevationsSaved)
+        AlignFloorsCard(floors, alignments, !locked) { aligning = true }
+    }
+}
+
+/** Every floor's saved alignment in the open building (floor id -> alignment onto another floor). */
+private fun buildingAlignments(state: TurnAppState): Map<String, FloorAlignment> =
+    state.buildingFloorMaps.mapNotNull { (id, saved) -> FloorAlignment.fromJsonOrNull(saved.floor.frameAlignmentJson)?.let { id to it } }.toMap()
+
+/** What the saved alignments say about a link's two ends, or null when its floors are not aligned. */
+private fun linkAlignmentNote(c: FloorConnector, alignments: Map<String, FloorAlignment>): LinkAlignmentCheck? {
+    val t = FloorAlignmentSolver.transformBetween(c.entity.fromFloorId, c.entity.toFloorId, alignments) ?: return null
+    return FloorLinkAlignment.check(c.kind, MetricPoint(c.entity.fromXMetres, c.entity.fromYMetres), MetricPoint(c.entity.toXMetres, c.entity.toYMetres), t)
+}
+
+/** Fixed-format metres for text fields: locale-independent, no trailing zeros beyond two decimals. */
+private fun metres(value: Double) = String.format(java.util.Locale.ROOT, "%.2f", value)
+
+/**
+ * Floor heights (schema 8): each floor's height above the ground floor, so stairs and lift rides are judged against
+ * the building's real storeys (a 2.7 m house storey is one floor, not 0.77 of a standard 3.5 m one).
+ */
+@Composable
+private fun FloorHeightsCard(state: TurnAppState, floors: List<ProjectSummary>, enabled: Boolean, onSave: (Map<String, Double?>) -> Unit) {
+    val saved = floors.associate { it.floorId to state.buildingFloorMaps[it.floorId]?.floor?.elevationMetres }
+    var storey by remember { mutableStateOf("2.7") }
+    var inputs by remember(saved) { mutableStateOf(saved.mapValues { (_, v) -> v?.let(::metres).orEmpty() }) }
+    val levels = floors.associate { it.floorId to it.floorLevel }
+    val names = floors.associate { it.floorId to it.floorName }
+    val parsed = inputs.mapValues { (_, v) -> v.trim().toDoubleOrNull() }
+    val anyTyped = inputs.values.any { it.isNotBlank() }
+    val error = when {
+        !anyTyped -> null
+        inputs.any { (_, v) -> v.isNotBlank() && v.trim().toDoubleOrNull() == null } -> "Enter heights as numbers in metres, e.g. 2.7"
+        else -> FloorElevations.validationError(levels, parsed, names)
+    }
+    OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Floor heights", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("How high each floor is above the ground floor. Stairs and lift rides are then judged against your building's real storeys; unset uses a standard 3.5 m storey.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (saved.values.all { it == null }) "Not set · standard 3.5 m storeys"
+                else "Set · " + floors.sortedBy { it.floorLevel }.joinToString(" · ") { "${levelBadge(it.floorLevel)} ${saved[it.floorId]?.let(::metres) ?: "?"} m" },
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(storey, { storey = it.filter { c -> c.isDigit() || c == '.' }.take(5) }, label = { Text("Storey height (m)") },
+                    singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = {
+                    storey.toDoubleOrNull()?.let { h -> runCatching { FloorElevations.fromStoreyHeight(levels, h) }.getOrNull() }
+                        ?.let { e -> inputs = e.mapValues { (_, v) -> metres(v) } }
+                }, enabled = enabled && storey.toDoubleOrNull()?.let { it in FloorElevations.MIN_STOREY_METRES..FloorElevations.MAX_STOREY_METRES } == true) {
+                    Text("Fill all floors")
+                }
+            }
+            floors.sortedByDescending { it.floorLevel }.forEach { f ->
+                OutlinedTextField(inputs[f.floorId].orEmpty(), { v -> inputs = inputs + (f.floorId to v.filter { c -> c.isDigit() || c == '.' || c == '-' }.take(7)) },
+                    label = { Text("${levelBadge(f.floorLevel)} · ${f.floorName} height (m)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+            error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onSave(parsed) }, enabled = enabled && anyTyped && error == null && parsed != saved,
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Save heights") }
+                OutlinedButton(onClick = { onSave(saved.mapValues { null }) }, enabled = enabled && saved.values.any { it != null },
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Clear heights") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlignFloorsCard(floors: List<ProjectSummary>, alignments: Map<String, FloorAlignment>, enabled: Boolean, onAlign: () -> Unit) {
+    OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Align floors at the stairs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Each mapped floor has its own origin and direction. Pick the same two spots on two floors (e.g. two stairwell corners) to line the floors up; link ends can then be placed and checked against each other. Tracking does not need it.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val name = floors.associate { it.floorId to "${levelBadge(it.floorLevel)} ${it.floorName}" }
+            if (alignments.isEmpty()) Text("No floors aligned yet", style = MaterialTheme.typography.labelMedium)
+            alignments.forEach { (id, a) ->
+                Text(String.format(java.util.Locale.ROOT, "%s → %s · turned %.1f° · fit within %.2f m%s", name[id] ?: id, name[a.toFloorId] ?: a.toFloorId,
+                    a.transform.rotationDegrees, a.maxResidualMetres, if (a.scaleWarning) " · scales differ" else ""),
+                    style = MaterialTheme.typography.labelMedium, color = if (a.scaleWarning) TurnAmber else TurnMint, fontWeight = FontWeight.Bold)
+            }
+            OutlinedButton(onClick = onAlign, enabled = enabled, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Align two floors") }
+        }
+    }
+}
+
+/**
+ * Pick two matching points on each of two floors; shows the fitted rotation and translation, the residual error, any
+ * scale disagreement, and what the alignment says about the links between the two floors.
+ */
+@Composable
+private fun AlignFloorsPanel(state: TurnAppState, floors: List<ProjectSummary>, alignments: Map<String, FloorAlignment>, locked: Boolean,
+    onClose: () -> Unit, onSave: (String, FloorAlignment?) -> Unit) {
+    var reference by remember { mutableStateOf(floors.minByOrNull { it.floorLevel }?.floorId) }
+    var moving by remember { mutableStateOf(floors.sortedBy { it.floorLevel }.getOrNull(1)?.floorId) }
+    var here by remember(moving) { mutableStateOf(listOf<MetricPoint>()) }
+    var there by remember(reference) { mutableStateOf(listOf<MetricPoint>()) }
+    fun pick(list: List<MetricPoint>, p: MetricPoint) = if (list.size < 2) list + p else listOf(list[1], p)
+    val solved = if (reference != null && moving != null && reference != moving && here.size == 2 && there.size == 2)
+        runCatching { FloorAlignmentSolver.solve(reference!!, here, there, System.currentTimeMillis()) } else null
+    BackHandlerCompat(onClose)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Align two floors", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = onClose) { Text("Close") }
+        }
+        Text("Tap the same two physical spots on both floors, in the same order: point 1, then point 2 (e.g. the two corners at the foot of the stairwell). They should be at least 0.5 m apart; further apart is more accurate.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        AlignPointPicker("Reference floor", floors, reference, there, state, { reference = it; there = emptyList() }) { there = pick(there, it) }
+        AlignPointPicker("Floor to align", floors.filter { it.floorId != reference }, moving, here, state, { moving = it; here = emptyList() }) { here = pick(here, it) }
+        TextButton(onClick = { here = emptyList(); there = emptyList() }) { Text("Clear points") }
+        when {
+            solved == null -> Text("Pick ${2 - there.size.coerceAtMost(2)} more on the reference floor and ${2 - here.size.coerceAtMost(2)} more on the floor to align.",
+                style = MaterialTheme.typography.bodySmall)
+            solved.isFailure -> Text(solved.exceptionOrNull()?.message ?: "Cannot align these points", color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall)
+            else -> {
+                val r = solved.getOrThrow()
+                val a = r.alignment
+                Text(String.format(java.util.Locale.ROOT, "Turn %.1f° · shift %.2f, %.2f m · residual %.2f m (rms %.2f m) · distance ratio %.3f",
+                    a.transform.rotationDegrees, a.transform.tx, a.transform.ty, a.maxResidualMetres, a.rmsResidualMetres, a.scaleRatio),
+                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                r.warnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = TurnAmber) }
+                val links = state.floorConnectors.filter { setOf(it.entity.fromFloorId, it.entity.toFloorId) == setOf(moving, reference) }
+                val trial = alignments.filterKeys { it != moving && it != reference } + (moving!! to a)
+                links.forEach { c -> linkAlignmentNote(c, trial)?.let { check ->
+                    Text("${c.entity.label}: ${check.message}", style = MaterialTheme.typography.bodySmall,
+                        color = if (check.consistent) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
+                } }
+                Button(onClick = { onSave(moving!!, a) }, enabled = !locked, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    shape = RoundedCornerShape(16.dp)) { Text("Save alignment") }
+            }
+        }
+        val existing = moving?.let { alignments[it] }
+        if (existing != null) OutlinedButton(onClick = { onSave(moving!!, null) }, enabled = !locked, modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)) { Text("Remove this floor's alignment") }
+    }
+}
+
+@Composable
+private fun AlignPointPicker(title: String, floors: List<ProjectSummary>, floorId: String?, points: List<MetricPoint>, state: TurnAppState,
+    onFloor: (String) -> Unit, onPoint: (MetricPoint) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val floor = floors.firstOrNull { it.floorId == floorId }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Box {
+            OutlinedButton(onClick = { open = true }) { Text(floor?.let { "${levelBadge(it.floorLevel)} · ${it.floorName}" } ?: "Choose floor") }
+            DropdownMenu(open, { open = false }) {
+                floors.forEach { f -> DropdownMenuItem(text = { Text("${levelBadge(f.floorLevel)} · ${f.floorName}") }, onClick = { open = false; onFloor(f.floorId) }) }
+            }
+        }
+        Text("${points.size} of 2 points", style = MaterialTheme.typography.bodySmall)
+    }
+    val saved = floorId?.let { state.buildingFloorMaps[it] }
+    when {
+        floorId == null -> Unit
+        saved == null -> Text("Loading this floor's map…", style = MaterialTheme.typography.bodySmall)
+        else -> FloorPickMap(saved, null, state.floorConnectors, onPoint,
+            Modifier.fillMaxWidth().height(230.dp).semantics { contentDescription = "$title map" }, numbered = points)
     }
 }
 
@@ -129,7 +294,8 @@ private fun linkProblems(state: TurnAppState, c: FloorConnector): List<String> {
 private fun SavedFloorMap.walkableFloor(): MapFloor? = runCatching { metricMap().floors[floor.id] }.getOrNull()
 
 @Composable
-private fun LinkCard(c: FloorConnector, problems: List<String>, enabled: Boolean, onVerify: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun LinkCard(c: FloorConnector, problems: List<String>, alignment: LinkAlignmentCheck?, enabled: Boolean,
+    onVerify: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -147,6 +313,8 @@ private fun LinkCard(c: FloorConnector, problems: List<String>, enabled: Boolean
             Text(if (c.entity.verifiedOnSite) "Checked on site" else "Not yet checked on site", style = MaterialTheme.typography.labelMedium,
                 color = if (c.entity.verifiedOnSite) TurnMint else TurnAmber, fontWeight = FontWeight.Bold)
             problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            alignment?.let { Text(it.message, style = MaterialTheme.typography.bodySmall,
+                color = if (it.consistent) MaterialTheme.colorScheme.onSurfaceVariant else TurnAmber) }
             Row {
                 TextButton(onClick = onVerify, enabled = enabled) { Text(if (c.entity.verifiedOnSite) "Mark not checked" else "Mark checked on site") }
                 TextButton(onClick = onEdit, enabled = enabled) { Text("Edit") }
@@ -157,8 +325,11 @@ private fun LinkCard(c: FloorConnector, problems: List<String>, enabled: Boolean
 }
 
 @Composable
-private fun LinkEditorPanel(state: TurnAppState, floors: List<ProjectSummary>, e: LinkEditor, update: (LinkEditor) -> Unit,
-    onCancel: () -> Unit, onSave: (ConnectorSave) -> Unit) {
+private fun LinkEditorPanel(state: TurnAppState, floors: List<ProjectSummary>, e: LinkEditor, alignments: Map<String, FloorAlignment>,
+    update: (LinkEditor) -> Unit, onCancel: () -> Unit, onSave: (ConnectorSave) -> Unit) {
+    // With aligned floors, the far end can be placed straight above or below the first one, and the pair checked.
+    val frame = if (e.fromFloorId != null && e.toFloorId != null && e.fromFloorId != e.toFloorId)
+        FloorAlignmentSolver.transformBetween(e.fromFloorId, e.toFloorId, alignments) else null
     val fromLevel = floors.firstOrNull { it.floorId == e.fromFloorId }?.floorLevel
     val toLevel = floors.firstOrNull { it.floorId == e.toFloorId }?.floorLevel
     // Travel time follows kind and floor gap until the user types their own measured value.
@@ -191,6 +362,21 @@ private fun LinkEditorPanel(state: TurnAppState, floors: List<ProjectSummary>, e
             { update(e.copy(fromFloorId = it, from = null)) }) { update(e.copy(from = it)) }
         FloorPointPicker("To", floors, e.toFloorId, e.to, state.buildingFloorMaps, state.floorConnectors, e.replacingId,
             { update(e.copy(toFloorId = it, to = null)) }) { update(e.copy(to = it)) }
+        if (frame != null) {
+            if (e.from != null) {
+                val placed = FloorLinkAlignment.placeOtherEnd(e.from, frame)
+                val inside = placed.x in 0.0..(state.buildingFloorMaps[e.toFloorId]?.floor?.widthMetres ?: 0.0) &&
+                    placed.y in 0.0..(state.buildingFloorMaps[e.toFloorId]?.floor?.heightMetres ?: 0.0)
+                OutlinedButton(onClick = { update(e.copy(to = placed)) }, enabled = inside, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (inside) "Place To directly above/below From (aligned floors)" else "From lies outside the other floor's map")
+                }
+            }
+            if (e.from != null && e.to != null) {
+                val check = FloorLinkAlignment.check(e.kind, e.from, e.to, frame)
+                Text(check.message, style = MaterialTheme.typography.bodySmall,
+                    color = if (check.consistent) MaterialTheme.colorScheme.onSurfaceVariant else TurnAmber)
+            }
+        }
         OutlinedTextField(e.travel, { update(e.copy(travel = it.filter { c -> c.isDigit() || c == '.' }.take(5), travelEdited = true)) },
             label = { Text("Travel time (seconds)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         SwitchRow("Step-free (usable without steps)", e.accessible) { update(e.copy(accessible = it)) }
@@ -243,7 +429,9 @@ private fun FloorPointPicker(title: String, floors: List<ProjectSummary>, floorI
  * (amber) and other links (mint), so points can be placed on floors other than the one that is open.
  */
 @Composable
-internal fun FloorPickMap(saved: SavedFloorMap, marker: MetricPoint?, connectors: List<FloorConnector>, onPick: (MetricPoint) -> Unit, modifier: Modifier = Modifier) {
+internal fun FloorPickMap(saved: SavedFloorMap, marker: MetricPoint?, connectors: List<FloorConnector>, onPick: (MetricPoint) -> Unit, modifier: Modifier = Modifier,
+    /** Numbered picks (1, 2, …), e.g. the matching points of a floor alignment. */
+    numbered: List<MetricPoint> = emptyList()) {
     val regions = remember(saved) { saved.regions.filter { it.enabled }.mapNotNull { runCatching { decodePolygon(it.polygonJson) }.getOrNull() } }
     val rooms = remember(saved) { runCatching { saved.destinationAreas() }.getOrDefault(emptyList()) }
     val landings = remember(saved) { saved.points.mapNotNull { p -> StairLandingMatcher.landingNumber(p.name)?.let { it to MetricPoint(p.xMetres, p.yMetres) } } }
@@ -286,6 +474,7 @@ internal fun FloorPickMap(saved: SavedFloorMap, marker: MetricPoint?, connectors
         }
         landings.forEach { (n, p) -> badge(p, n.toString(), TurnAmber) }
         links.forEach { (b, p) -> badge(p, b, TurnMint) }
+        numbered.forEachIndexed { i, p -> badge(p, (i + 1).toString(), palette.primary) }
         marker?.let { val q = project(it); drawCircle(Color.White, 11f * density, q); drawCircle(palette.primary, 8f * density, q)
             drawCircle(palette.primary, 16f * density, q, style = Stroke(2f * density)) }
     }

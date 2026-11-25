@@ -579,6 +579,11 @@ class TurnAppState {
     var floorTrackingEnabled by mutableStateOf(true)
     /** Option "Use unchecked floor links"; saved with the other preferences. */
     var useUncheckedFloorLinks by mutableStateOf(false)
+    /**
+     * Diagnostics "Floor detection thresholds": overrides of FloorDetectionConfig (key -> value), saved with the other
+     * preferences. Read once when a tracking session starts, so edits apply to the next session.
+     */
+    var floorDetectionOverrides by mutableStateOf<Map<String, Double>>(emptyMap())
     // Directions between floors (phase 3). Null or empty unless a destination lies on another floor.
     /** Option "Step-free routes": routes between floors use only lifts and ramps; saved with the other preferences. */
     var stepFreeRouting by mutableStateOf(false)

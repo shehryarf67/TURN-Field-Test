@@ -36,6 +36,10 @@ data class TurnAppActions(
     val onConnectorDeleted: (id: String) -> Unit = {},
     val onConnectorVerified: (id: String, verified: Boolean) -> Unit = { _, _ -> },
     val onConnectorSuggestionsRequested: () -> Unit = {},
+    /** Saves the open building's floor elevations (floor id -> metres; all null clears them). */
+    val onFloorElevationsSaved: (Map<String, Double?>) -> Unit = {},
+    /** Saves (or with null removes) a floor's alignment onto another floor (floor id, alignment). */
+    val onFloorAlignmentSaved: (String, com.turn.fieldtest.core.FloorAlignment?) -> Unit = { _, _ -> },
     val onMagneticWalkStarted: (fromPointId: String, toPointId: String) -> Unit = { _, _ -> },
     val onMagneticWalkFinished: () -> Unit = {},
     val onMagneticWalkCancelled: () -> Unit = {},
