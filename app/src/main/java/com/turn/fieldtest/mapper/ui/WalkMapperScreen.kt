@@ -116,11 +116,12 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
                                 Text("${r.corners.size} corners · ${if(r.confirmed) "outline confirmed" else "outline draft"}",style=MaterialTheme.typography.labelMedium)
                                 if(points.size>=2) Text("Extent %.2f × %.2f m · observation coverage unknown".format(points.maxOf { it.x }-points.minOf { it.x },points.maxOf { it.y }-points.minOf { it.y }),style=MaterialTheme.typography.bodySmall)
                             }
-                            ActionRow { listOf("CORNER" to "Corner","WALL" to "Wall endpoints","DOOR" to "Door endpoints","ENTRANCE" to "Entrance corner","BOUNDARY" to "Boundary corner").forEach { (id,label)->
+                            ActionRow { listOf("CORNER" to "Corner","WALL_CORNER" to "Hidden corner","WALL" to "Wall endpoints","DOOR" to "Door endpoints","ENTRANCE" to "Entrance corner","BOUNDARY" to "Boundary corner").forEach { (id,label)->
                                 FilterChip(vm.tool==id,{vm.chooseTool(id)},label={Text(label)})
                             } }
                             Text(if(vm.tool=="DOOR") "Select a confirmed wall in 2D preview, then mark its two opening endpoints. Link the rooms in Review."
-                                else "Mark corners in perimeter order. A wall needs two endpoints. Entrance and boundary corners belong to the room outline.",style=MaterialTheme.typography.bodySmall)
+                                else "Mark corners in perimeter order. A wall needs two endpoints. Entrance and boundary corners belong to the room outline. A corner hidden by furniture can be marked on the wall or ceiling above it, or with Hidden corner.",style=MaterialTheme.typography.bodySmall)
+                            if(vm.tool=="WALL_CORNER") HiddenCornerControls(vm)
                             if(camera==null) {
                                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                     NumberField("X (m)",x,{x=it},Modifier.weight(1f)); NumberField("Y (m)",y,{y=it},Modifier.weight(1f))

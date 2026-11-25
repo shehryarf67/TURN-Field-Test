@@ -72,7 +72,31 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     }
     fun save() { viewModelScope.launch { saveNow() } }
     fun name(value: String)=update(false) {it.copy(name=value.take(80))}
-    fun chooseTool(value: String) {tool=value; pendingEndpoint=null}
+    fun chooseTool(value: String) {tool=value; pendingEndpoint=null; clearHiddenCorner()}
+    /** "Hidden corner" tool: points tapped along the first wall, then (after [nextHiddenWall]) along the second. */
+    var hiddenWallA by mutableStateOf<List<P2>>(emptyList()); private set
+    var hiddenWallB by mutableStateOf<List<P2>?>(null); private set
+    private var hiddenSegment: String?=null
+    fun nextHiddenWall() {
+        if(hiddenWallA.size<2) { status="Tap at least two points along the first wall"; return }
+        hiddenWallB=emptyList(); status="Now tap at least two points along the second wall"
+    }
+    fun clearHiddenCorner() { hiddenWallA=emptyList(); hiddenWallB=null; hiddenSegment=null }
+    /** Places the corner where the two tapped walls meet (flagged as inferred in the draft and quality report). */
+    fun placeHiddenCorner() {
+        val r=room ?: run { status="Start and name a room first"; return }
+        val b=hiddenWallB ?: run { status="Tap the first wall, then Next wall"; return }
+        val segment=hiddenSegment ?: return
+        if(r.confirmed) { status="Outline confirmed; unconfirm it in review before adding corners"; return }
+        runCatching { HiddenCorners.cornerFromWalls(hiddenWallA,b) }.onFailure { status=it.message ?: "Walls cannot be intersected" }.onSuccess { (corner,inference) ->
+            if(r.corners.any { it.p.distance(corner)<0.04 }) { status="Corner duplicates an existing point"; return }
+            val point=ScanPoint(p=corner,source="INFERRED_FROM_WALLS",segmentId=segment,timestamp=System.currentTimeMillis(),
+                provenance=CornerProvenance.INFERRED,inference=inference)
+            update { d->d.copy(rooms=d.rooms.map { if(it.id==r.id) it.copy(corners=it.corners+point) else it }) }
+            selectedPointId=point.id; clearHiddenCorner()
+            status="Corner ${r.corners.size+1} inferred from two walls · ${"%.2f, %.2f m".format(corner.x,corner.y)} · walls %.0f° apart".format(inference.angleDegrees)
+        }
+    }
     fun chooseRoom(id: String) {if(doc?.rooms?.any {it.id==id}==true) {currentRoomId=id; pendingEndpoint=null}}
     fun removeMeasurement(id: String)=update {it.withoutMeasurement(id)}
     fun cleanupWalls()=update { d->d.copy(walls=ScanGeometry.cleanupWalls(d.walls,d.doors.map {it.wallId}.toSet(),d.thresholds.snapMetres)) }
@@ -96,7 +120,7 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
         if(doc!!.segments.none { it.id==segment }) update(false) { it.copy(segments=it.segments+ScanSegment(segment,"MANUAL_MEASURED")) }
         receivePoint(P2(x,y),scanId(),"MANUAL_MEASURED",System.currentTimeMillis(),segment)
     }
-    private fun receivePoint(p: P2,id: String,source: String,time: Long,segment: String) {
+    private fun receivePoint(p: P2,id: String,source: String,time: Long,segment: String,height: Double?=null) {
         if(!p.finite) { status="Invalid surface coordinate rejected"; return }
         val r=room ?: run { status="Start and name a room first"; return }
         val s=doc!!.segments.firstOrNull { it.id==segment } ?: return
@@ -106,8 +130,17 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
             "CORNER","BOUNDARY","ENTRANCE" -> {
                 if(r.confirmed) { status="Outline confirmed; unconfirm it in review before adding corners"; return }
                 if(r.corners.any { it.p.distance(point)<0.04 }) { status="Corner duplicates an existing point"; return }
-                update { d->d.copy(rooms=d.rooms.map { if(it.id==r.id) it.copy(corners=it.corners+ScanPoint(id,point,source,segment,time)) else it }) }
-                selectedPointId=id; status="Corner ${r.corners.size+1} placed · ${"%.2f, %.2f m".format(point.x,point.y)}"
+                val provenance=HiddenCorners.provenanceForHeight(height)
+                update { d->d.copy(rooms=d.rooms.map { if(it.id==r.id) it.copy(corners=it.corners+ScanPoint(id,point,source,segment,time,provenance=provenance,heightAboveFloor=height)) else it }) }
+                selectedPointId=id; status="Corner ${r.corners.size+1} placed · ${"%.2f, %.2f m".format(point.x,point.y)}"+
+                    if(provenance==CornerProvenance.PROJECTED) " · projected down from %.1f m".format(height) else ""
+            }
+            "WALL_CORNER" -> {
+                if(r.confirmed) { status="Outline confirmed; unconfirm it in review before adding corners"; return }
+                if(hiddenWallB==null) hiddenWallA=hiddenWallA+point else hiddenWallB=hiddenWallB!!+point
+                hiddenSegment=segment
+                status=if(hiddenWallB==null) "Wall 1: ${hiddenWallA.size} points · tap more along it, then Next wall"
+                    else "Wall 2: ${hiddenWallB!!.size} points · tap more along it, then Place corner"
             }
             "WALL","DOOR" -> {
                 val a=pendingEndpoint
@@ -162,7 +195,7 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     fun transformSection(segment: String,t: Alignment)=update { d ->
         val sourceRoomIds=d.rooms.filter { it.corners.any { p->p.segmentId==segment } }.map { it.id }
         val old=d.segments.first { it.id==segment }
-        d.copy(rooms=d.rooms.map { r->r.copy(corners=r.corners.map { if(it.segmentId==segment) it.copy(p=t.apply(it.p),adjusted=true) else it }) },
+        d.copy(rooms=d.rooms.map { r->r.copy(corners=r.corners.map { if(it.segmentId==segment) it.moved(t).copy(adjusted=true) else it }) },
             walls=d.walls.map { if(it.segmentId==segment) it.copy(a=t.apply(it.a),b=t.apply(it.b)) else it },
             doors=d.doors.map { door->if(sourceRoomIds.any { door.wallId.startsWith("$it:") } || d.walls.any { it.id==door.wallId && it.segmentId==segment }) door.copy(a=t.apply(door.a),b=t.apply(door.b)) else door },
             poses=d.poses.map {if(it.segmentId==segment) it.copy(mapPoint=it.mapPoint?.let(t::apply)) else it},
@@ -192,7 +225,7 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
         update(false) { it.copy(segments=it.segments+ScanSegment(segmentId,"ARCORE",frame,alignment,referencePointIds=listOfNotNull(a?.id,b?.id))) }
         floorDescription=""; status="Floor and orientation confirmed · mark room corners in order"
     }
-    override fun point(point: P2,id: String,source: String,timestamp: Long,segment: String)=main { receivePoint(point,id,source,timestamp,segment) }
+    override fun point(point: P2,id: String,source: String,timestamp: Long,segment: String,heightAboveFloor: Double)=main { receivePoint(point,id,source,timestamp,segment,heightAboveFloor) }
     override fun pose(value: PoseSample,frame: FloorFrame)=main {
         if(value.segmentId!=activeSegment) return@main
         val s=doc?.segments?.firstOrNull { it.id==value.segmentId } ?: return@main

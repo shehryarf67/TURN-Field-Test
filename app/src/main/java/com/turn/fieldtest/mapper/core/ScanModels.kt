@@ -42,8 +42,13 @@ fun scanId() = UUID.randomUUID().toString()
         }
     }
 }
+/** A marked point. [provenance], [heightAboveFloor] and [inference] are additive (older drafts read as observed). */
 @Serializable data class ScanPoint(val id: String = scanId(), val p: P2, val source: String,
-    val segmentId: String, val timestamp: Long = 0, val adjusted: Boolean = false)
+    val segmentId: String, val timestamp: Long = 0, val adjusted: Boolean = false,
+    val provenance: String = CornerProvenance.OBSERVED, val heightAboveFloor: Double? = null, val inference: CornerInference? = null) {
+    /** This point (and the wall points it was inferred from) moved by [t]. */
+    fun moved(t: Alignment) = copy(p=t.apply(p), inference=inference?.let { i -> i.copy(wallA=i.wallA.map(t::apply), wallB=i.wallB.map(t::apply)) })
+}
 @Serializable data class ScanRoom(val id: String = scanId(), val name: String, val corners: List<ScanPoint> = emptyList(), val confirmed: Boolean = false)
 @Serializable data class ScanWall(val id: String = scanId(), val a: P2, val b: P2, val source: String,
     val segmentId: String, val observations: Int = 1, val confidence: Double = 0.5, val height: Double = 0.0,
@@ -95,7 +100,7 @@ fun scanId() = UUID.randomUUID().toString()
         r.corners.indices.map { i -> ScanWall("${r.id}:$i",r.corners[i].p,r.corners[(i+1)%r.corners.size].p,
             "CONFIRMED_OUTLINE",r.corners[i].segmentId,status="CONFIRMED") }
     } + walls.filter { it.status == "CONFIRMED" }
-    fun transformed(t: Alignment) = copy(rooms=rooms.map { r -> r.copy(corners=r.corners.map { it.copy(p=t.apply(it.p)) }) },
+    fun transformed(t: Alignment) = copy(rooms=rooms.map { r -> r.copy(corners=r.corners.map { it.moved(t) }) },
         walls=walls.map { it.copy(a=t.apply(it.a),b=t.apply(it.b)) }, doors=doors.map { it.copy(a=t.apply(it.a),b=t.apply(it.b)) },
         poses=poses.map { it.copy(mapPoint=it.mapPoint?.let(t::apply)) },
         segments=segments.map { s -> s.copy(alignment=t.after(s.alignment)) })

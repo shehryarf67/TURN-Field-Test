@@ -92,6 +92,7 @@ object ScanGeometry {
             outlineError(r.corners.map { it.p })?.let { add(ScanIssue("${r.name}: $it")) }
             if(!r.confirmed) add(ScanIssue("${r.name}: outline is not confirmed"))
             if(r.name.isBlank()) add(ScanIssue("Name every room"))
+            HiddenCorners.qualityNote(r)?.let { add(ScanIssue(it,false)) }
         }
         val used=doc.points().map { it.segmentId }.toSet()+doc.walls.filter { it.status=="CONFIRMED" }.map { it.segmentId }
         used.forEach { id ->

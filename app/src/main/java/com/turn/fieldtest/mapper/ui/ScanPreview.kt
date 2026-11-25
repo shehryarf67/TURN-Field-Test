@@ -67,6 +67,11 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
             }
             d.poses.lastOrNull()?.mapPoint?.let { drawCircle(Color(0xFF4D94FF),7f,screen(it)) }
             d.points().forEach { drawCircle(if(it.id==selected) palette.onSurface else palette.primary,if(it.id==selected) 9f else 5f,screen(it.p)) }
+            // Inferred (two walls) and projected (high hit) corners get an amber ring; inferred ones show their wall points.
+            d.points().filter { it.provenance!=CornerProvenance.OBSERVED }.forEach { p ->
+                drawCircle(Color(0xFFF5A524),11f,screen(p.p),style=androidx.compose.ui.graphics.drawscope.Stroke(3f))
+                p.inference?.let { i -> (i.wallA+i.wallB).forEach { w -> drawCircle(Color(0xFFF5A524),3f,screen(w)) } }
+            }
             val cornerPaint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color=palette.onSurface.toArgb(); textSize=12.dp.toPx()
             }

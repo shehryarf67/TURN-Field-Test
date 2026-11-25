@@ -125,10 +125,11 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                                     TextButton(onClick={camera.rejectFloor()}) {Text("Choose again")}
                                 } else {
                                     val aligned=doc.segments.any {it.id==vm.activeSegment && it.aligned && !it.interrupted}
-                                    Text(if(aligned) "Aim at each corner where the wall meets the floor. Mark corners in order around the room."
-                                        else "Tap the physical floor and confirm it. Then tap a point ahead to set map direction.",style=MaterialTheme.typography.bodyMedium)
-                                    Button(onClick={outline=false; camera.markAtCentre()},enabled=aligned && vm.arStatus.tracking && vm.room!=null && (vm.tool!="CORNER" || vm.room?.confirmed==false) && !outline,
-                                        shape=MaterialTheme.shapes.small,modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) {Text(if(vm.tool=="CORNER") "Mark corner" else if(vm.pendingEndpoint==null) "Mark first endpoint" else "Mark second endpoint")}
+                                    Text(if(!aligned) "Tap the physical floor and confirm it. Then tap a point ahead to set map direction."
+                                        else if(vm.tool=="WALL_CORNER") "Corner hidden by furniture? Aim at visible points along the first wall, tap Next wall, then along the second wall, and Place corner."
+                                        else "Aim at each corner where the wall meets the floor. Mark corners in order around the room. If furniture hides a corner, aim at the wall or ceiling straight above it.",style=MaterialTheme.typography.bodyMedium)
+                                    Button(onClick={outline=false; camera.markAtCentre()},enabled=aligned && vm.arStatus.tracking && vm.room!=null && (vm.tool !in setOf("CORNER","WALL_CORNER") || vm.room?.confirmed==false) && !outline,
+                                        shape=MaterialTheme.shapes.small,modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) {Text(if(vm.tool=="CORNER") "Mark corner" else if(vm.tool=="WALL_CORNER") "Mark wall point" else if(vm.pendingEndpoint==null) "Mark first endpoint" else "Mark second endpoint")}
                                 }
                                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                     OutlinedButton(onClick=vm::undo,enabled=!vm.busy,modifier=Modifier.weight(1f)) {Text("Undo")}
@@ -147,7 +148,7 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                             Row(verticalAlignment=UiAlignment.CenterVertically) {
                                 Box { OutlinedButton(onClick={tools=true}) {Text(if(vm.tool=="CORNER") "Corners ▾" else "More tools ▾")}
                                     DropdownMenu(tools,{tools=false}) {
-                                        listOf("CORNER" to "Room corners","WALL" to "Wall endpoints","DOOR" to "Door endpoints","ENTRANCE" to "Entrance corner","BOUNDARY" to "Boundary corner").forEach { (id,label) ->
+                                        listOf("CORNER" to "Room corners","WALL_CORNER" to "Hidden corner (two walls)","WALL" to "Wall endpoints","DOOR" to "Door endpoints","ENTRANCE" to "Entrance corner","BOUNDARY" to "Boundary corner").forEach { (id,label) ->
                                             DropdownMenuItem(text={Text(label)},onClick={vm.chooseTool(id); tools=false})
                                         }
                                     }
@@ -155,6 +156,7 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                                 TextButton(onClick={roomDialog=true}) {Text(if(vm.room==null) "Name room" else "Add room")}
                             }
                             if(vm.tool=="DOOR") Text("Select a wall in View outline first. Mark both opening endpoints, then link its rooms under Advanced → Review.",style=MaterialTheme.typography.bodySmall)
+                            if(vm.tool=="WALL_CORNER") HiddenCornerControls(vm)
                             if(doc.rooms.size>1) Choice("Room",vm.currentRoomId,doc.rooms.map {it.id to it.name},vm::chooseRoom)
                             if(camera==null && (vm.room?.corners?.size ?: 0)>=3) Button(onClick={stage="Review"},modifier=Modifier.fillMaxWidth()) {Text("Review outline")}
                         }
@@ -213,4 +215,19 @@ private fun GuidedVerification(vm: WalkMapperViewModel,onPublish: ()->Unit,onExi
     if(doc.publishedFloorId!=null) Button(onClick=onExit,modifier=Modifier.fillMaxWidth()) {Text("Open saved floor")}
     TextButton(onClick=onAdvanced) {Text("Edit checks & advanced settings")}
     Row {TextButton(onClick=onJson) {Text("Export JSON")}; if(doc.publishedFloorId!=null) TextButton(onClick=onPng) {Text("Export image")}}
+}
+
+/** "Hidden corner (two walls)": progress of the two wall-point sets and the steps to place the inferred corner. */
+@Composable
+internal fun HiddenCornerControls(vm: WalkMapperViewModel) {
+    val second=vm.hiddenWallB
+    Text(if(second==null) "Wall 1 · ${vm.hiddenWallA.size} points (need 2+, spread ≥ 0.3 m)" else "Wall 1 · ${vm.hiddenWallA.size} points · Wall 2 · ${second.size} points (need 2+)",
+        style=MaterialTheme.typography.labelLarge)
+    Text("The corner is where the two walls meet. They must meet at ${HiddenCorners.MIN_ANGLE_DEGREES.toInt()}° or more; the corner is marked as inferred, so check it with a tape.",
+        style=MaterialTheme.typography.bodySmall)
+    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick=vm::nextHiddenWall,enabled=second==null && vm.hiddenWallA.size>=2 && !vm.busy) {Text("Next wall")}
+        Button(onClick=vm::placeHiddenCorner,enabled=(second?.size ?: 0)>=2 && !vm.busy) {Text("Place corner")}
+        TextButton(onClick=vm::clearHiddenCorner,enabled=vm.hiddenWallA.isNotEmpty()) {Text("Clear")}
+    }
 }

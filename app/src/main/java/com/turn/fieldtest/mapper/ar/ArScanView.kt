@@ -21,7 +21,8 @@ interface ArScanSink {
     fun status(value: ArStatus)
     fun floorCandidate(description: String)
     fun reference(frame: FloorFrame,segmentId: String,length: Double)
-    fun point(point: P2,id: String,source: String,timestamp: Long,segment: String)
+    /** A tapped point projected to the floor; [heightAboveFloor] is the hit's height above the confirmed floor. */
+    fun point(point: P2,id: String,source: String,timestamp: Long,segment: String,heightAboveFloor: Double)
     fun observations(walls: List<ScanWall>)
     fun pose(value: PoseSample,frame: FloorFrame)
     fun refined(points: Map<String,P2>,segment: String)
@@ -199,10 +200,12 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         }
         if(floor==null) return
         val height=hit.hitPose.ty()-floor.origin.y
-        if(height !in -0.15..2.5) { report(ArStatus("Tap a floor/wall boundary or enter a measured point",true)); return }
+        // Wall and ceiling hits are accepted and projected vertically to the floor; the height is kept as provenance.
+        if(!HiddenCorners.acceptsHitHeight(height.toDouble())) { report(ArStatus("Tap a floor/wall boundary, a wall, or the ceiling above the corner",true)); return }
         if(anchors.size>=96) { report(ArStatus("Section anchor limit reached. Pause and continue with an aligned new section.",true)); return }
         val id=scanId(); anchors[id]=hit.createAnchor()
-        sink.point(floor.project(hit.hitPose.v()),id,if(hit.trackable is Plane) "AR_PLANE" else "DEPTH_HIT",f.timestamp,segmentId)
+        val (onFloor,above)=HiddenCorners.projectToFloor(floor,hit.hitPose.v())
+        sink.point(onFloor,id,if(hit.trackable is Plane) "AR_PLANE" else "DEPTH_HIT",f.timestamp,segmentId,above)
     }
     private fun planeWalls(floor: FloorFrame,time: Long): List<ScanWall> = session.getAllTrackables(Plane::class.java).filter {
         it.type==Plane.Type.VERTICAL && it.trackingState==TrackingState.TRACKING && it.subsumedBy==null
