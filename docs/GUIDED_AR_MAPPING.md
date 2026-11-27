@@ -4,7 +4,7 @@ The main mapper now follows Capture → Review → Verify & save. It uses the ex
 
 ## Quick start
 
-1. Open a saved project, then Tools → Create a map with your phone.
+1. Open a saved project, then Tools → Map a floor with your phone.
 2. Tap Start camera and allow Camera access. Move slowly in good light.
 3. Tap the actual floor, confirm it, then tap a floor point at least 0.5 m ahead. This sets map direction, not compass north.
 4. Aim the centre cross at each wall/floor corner and tap Mark corner, in perimeter order. You can also tap the actual corner in the camera view. View outline lets you inspect the result; Show camera returns to capture.

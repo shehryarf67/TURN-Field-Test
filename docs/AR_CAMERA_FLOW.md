@@ -2,7 +2,7 @@
 
 AR mapping uses standard Google ARCore capability checks, camera permission and the Google Play Services for AR installation/update flow. There are no phone-brand or phone-model allowlists. Depth is optional; supported phones without depth use guided floor/corner marking. Phones without ARCore support show a simple explanation and retain measured drawing and image/package import.
 
-Open a saved project, then Tools → Create a map with your phone. The primary Start camera button is below the preview. The first scan automatically creates an empty room. Allow Camera when prompted. Move slowly, tap the physical floor, confirm it, and tap a point ahead to establish map direction. Mark actual room corners; review and verify the measurements before publishing.
+Open a saved project, then Tools → Map a floor with your phone. The primary Start camera button is below the preview. The first scan automatically creates an empty room. Allow Camera when prompted. Move slowly, tap the physical floor, confirm it, and tap a point ahead to establish map direction. Mark actual room corners; review and verify the measurements before publishing.
 
 For a saved draft with existing points, choose Reference A and Reference B at least 0.5 m apart before starting another camera section. These must be the same physical corners used to align the resumed scan. Permission approval is retried after the activity resumes. Starting a new camera section always returns from 2D preview to the live camera. Preview initialization errors and missing camera frames produce explicit messages.
 

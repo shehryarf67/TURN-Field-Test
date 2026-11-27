@@ -11,9 +11,9 @@ Implemented 2026-11-03 from the selected Canvas design. This is a native Kotlin/
 ## First-floor workflow
 
 1. Buildings → Add a building. Enter venue/floor names.
-2. Map setup → Scale. Import PNG/JPEG, or save changes and open **Scan building with phone** for guided AR/measured mapping.
+2. Map setup → Scale. Import PNG/JPEG, or save changes and open **Map a floor with your phone** for the step-by-step AR/measured mapper.
 3. Calibrate scale, then use the next-step actions for Layout → Paths → Points. Leave actual door openings, connect destination nodes and add reference points. Save the map.
-4. Continue to Wi-Fi survey. Select a known point, collect fresh scans, save and repeat. Partial and completed survey states retain their existing Room lineage.
+4. Continue to Record Wi-Fi. Select a known point, collect fresh scans, save and repeat. Partial and completed survey states retain their existing Room lineage.
 5. Continue to Explore. Search/select a destination and choose **Navigate here**, or start positioning without a destination.
 6. Choose a known start on the map/at a reference point, or wait for a confident fresh Wi-Fi initialization. Stand still and choose the facing direction on the drawing, or tap a point ahead. The screen top should face the walking direction. Starting requires an explicit direction choice.
 7. Start tracking. The blue dot comes only from the existing estimator. An absent/stale heading, unavailable position, scan throttling, low confidence and save failures remain visible. No movement is simulated in Real Device mode.

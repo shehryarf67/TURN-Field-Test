@@ -27,7 +27,7 @@ Do this for every course, one recording per course:
    phone points on the map.
 2. *Diagnostics → Raw sensor recording → Start recording*.
 3. Tap **Arrived on… <start floor>** right away. The replay needs this first marker.
-4. Start *Live locate* from your known position, pick the destination and follow the route.
+4. Start navigation (*Explore → Start navigation*) from your known position, pick the destination and follow the route.
 5. Tap the markers **as it happens**:
 
    | When | Tap |
@@ -39,7 +39,7 @@ Do this for every course, one recording per course:
 
    Tap *Arrived on…* once for each floor you actually get off at. A lift ride with no stop in between needs one
    *Enter lift* and one *Arrived on…*.
-6. At the destination, write down whether the route got you there (see §5) and stop *Live locate*.
+6. At the destination, write down whether the route got you there (see §5) and tap *End navigation*.
 7. *Stop recording*, then **Save recording… right away.** The next *Start recording* overwrites the last one.
    Name the file after the course and phone, e.g. `stairs-gf-f4-pixel.csv`.
 
@@ -59,7 +59,7 @@ expect it to be slower to change floor.
 ## 4. After the walk: export
 
 - **Recordings:** the CSV files from *Save recording…* (one per course).
-- **Sessions:** *Data & export → Save complete database JSON*. It holds the positioning sessions and the floor change
+- **Sessions:** *Export & backup → Save complete database JSON*. It holds the positioning sessions and the floor change
   log (`floorTransitionEvents`, export schema 4 and later). *Analysis CSV files → Floor change log* gives the same events as CSV.
 
 Copy them to the computer.

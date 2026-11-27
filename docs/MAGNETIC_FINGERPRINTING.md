@@ -2,10 +2,10 @@
 
 TURN fuses four sources: a known start or Wi-Fi fix, PDR steps, map constraints, and now **magnetic evidence**. Steel in the building bends Earth's field into a stable, location-specific pattern. Wi-Fi says roughly where you are (3–5 m); the magnetic pattern refines *where along the corridor*. Magnetic evidence never initialises tracking on its own.
 
-## Survey (Wi-Fi survey → Magnetic paths)
+## Survey (Record Wi-Fi → Magnetic paths)
 
 1. Save the map with survey points along each corridor (Map setup → Points).
-2. Open **Wi-Fi survey → Magnetic paths**. Tap the start point, then the end point (one straight corridor stretch, at least 2 m).
+2. Open **Record Wi-Fi → Magnetic paths**. Tap the start point, then the end point (one straight corridor stretch, at least 2 m).
 3. Stand at the start, tap **Start walk**, walk straight at a normal pace holding the phone as you would when navigating, and tap **Finish** at the end.
 4. Walk each stretch in both directions, ideally with more than one phone. Mapped cells appear as green squares.
 
