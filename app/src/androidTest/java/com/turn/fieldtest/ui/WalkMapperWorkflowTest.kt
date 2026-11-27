@@ -89,6 +89,8 @@ class WalkMapperWorkflowTest {
         compose.onNodeWithText("Start room").performClick()
         // Supply known geometry through the same ViewModel API exercised by the measured fields.
         compose.runOnIdle {vm.measuredPoint(0.0,0.0); vm.measuredPoint(4.0,0.0); vm.measuredPoint(4.0,3.0); vm.measuredPoint(0.0,3.0)}
+        // Without AR support the corner step still offers to re-check it once corners exist.
+        compose.onNodeWithText("Check camera support again").performScrollTo().assertExists()
         compose.onNodeWithText("Finish floor").performScrollTo().performClick()
         compose.onNodeWithText("Step 4 of 6").assertExists()
         compose.onNodeWithText("Looks right — finish Lab").performScrollTo().performClick()

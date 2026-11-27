@@ -49,6 +49,8 @@ internal fun cornerName(doc: ScanDocument, id: String?): String =
 private const val FLOOR_HELP = "Why the floor? The camera sees the room in 3D. To draw a flat floor plan, TURN needs to know where the floor is: " +
     "every corner you tap later is dropped straight down onto it, so distances are measured flat along the ground, like a tape measure. " +
     "Pick plain, well-lit floor — not a table, bed or sofa. No photos or video are kept; only the points you tap are saved, on this phone."
+internal const val TRACKING_LOST_HINT = "Tracking was lost, so this camera session can't add more points. Tap Pause camera, " +
+    "then Continue with camera to line up with your map again — everything you've marked is saved."
 private const val ALIGN_WHY = "Tapping two corners you have already marked lets the camera line up with your saved map, so new corners land in the right place."
 
 /** Step-by-step mapper over the persisted scan document and the ARCore capture view. */
@@ -97,18 +99,12 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
             }
             if (doc == null) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(vm.status, Modifier.padding(20.dp)); return@Column }
             val resuming = doc.points().isNotEmpty()
-            val aligned = camera != null && doc.segments.any { it.id == vm.activeSegment && it.aligned && !it.interrupted }
-            val step = when (stage) {
-                MapperStage.CAPTURE -> when {
-                    camera == null -> if (resuming || measured) 3 else 1
-                    aligned -> 3
-                    vm.arStatus.originSet && vm.floorDescription.isEmpty() -> 2
-                    else -> 1
-                }
-                MapperStage.REVIEW -> 4
-                MapperStage.MEASURE -> 5
-                MapperStage.SAVE -> 6
-            }
+            // Once the camera session is lined up with the map it stays on step 3, even if tracking is later lost;
+            // losing tracking only disables marking (see CornersStep), it never sends the user back to step 2.
+            val started = camera != null && doc.segments.any { it.id == vm.activeSegment }
+            val aligned = started && doc.segments.any { it.id == vm.activeSegment && it.aligned && !it.interrupted }
+            val step = wizardStep(stage, cameraOn = camera != null, sessionStarted = started, originSet = vm.arStatus.originSet,
+                floorPending = vm.floorDescription.isNotEmpty(), hasPoints = resuming, measured = measured)
             LinearProgressIndicator(progress = { step / MAPPER_STEPS.toFloat() }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
             val visual: @Composable (Modifier) -> Unit = { modifier ->
                 Box(modifier.clip(MaterialTheme.shapes.extraLarge)) {
@@ -143,6 +139,7 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         when (stage) {
                             MapperStage.CAPTURE -> CaptureStep(vm, doc, camera, step, aligned, arSupported, availability, measured,
+                                CameraView(outline) { outline = false },
                                 onMeasured = { measured = it }, onStartCamera = { outline = false; onStartCamera() }, onStopCamera = onStopCamera,
                                 onCheckSupport = onCheckSupport, onRoomDialog = { roomDialog = it }, onFinishFloor = { goTo(MapperStage.REVIEW) })
                             MapperStage.REVIEW -> ReviewStep(vm, doc, onBack = { goTo(MapperStage.CAPTURE) }, onNext = { goTo(MapperStage.MEASURE) },
@@ -190,10 +187,36 @@ private fun RoomNameDialog(vm: WalkMapperViewModel, mode: String, onDone: () -> 
         dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } })
 }
 
+/**
+ * Which wizard step to show. Capture is steps 1–3: with the camera on, a session that has been lined up with the map
+ * (its segment exists) is step 3 even after tracking is lost; before that, step 2 once the starting point is confirmed.
+ */
+internal fun wizardStep(stage: MapperStage, cameraOn: Boolean, sessionStarted: Boolean, originSet: Boolean,
+    floorPending: Boolean, hasPoints: Boolean, measured: Boolean): Int = when (stage) {
+    MapperStage.CAPTURE -> when {
+        !cameraOn -> if (hasPoints || measured) 3 else 1
+        sessionStarted -> 3
+        originSet && !floorPending -> 2
+        else -> 1
+    }
+    MapperStage.REVIEW -> 4
+    MapperStage.MEASURE -> 5
+    MapperStage.SAVE -> 6
+}
+
+/**
+ * Whether the full-size map currently covers the camera ([outline]). Marking is refused while it does, because
+ * the user cannot see what the + is pointing at; [show] switches back to the camera picture before a mark.
+ */
+internal class CameraView(val outline: Boolean, val show: () -> Unit)
+
+/** Every "mark at the +" button switches back to the camera picture first (the buttons are also disabled while the map covers it). */
+private fun ArScanView.markVisible(view: CameraView) { view.show(); markAtCentre() }
+
 /** Steps 1–3: starting point, map direction, then the corners of each room. */
 @Composable
 private fun CaptureStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArScanView?, step: Int, aligned: Boolean,
-    arSupported: Boolean, availability: String, measured: Boolean, onMeasured: (Boolean) -> Unit,
+    arSupported: Boolean, availability: String, measured: Boolean, view: CameraView, onMeasured: (Boolean) -> Unit,
     onStartCamera: () -> Unit, onStopCamera: () -> Unit, onCheckSupport: () -> Unit,
     onRoomDialog: (String) -> Unit, onFinishFloor: () -> Unit) {
     val resuming = doc.points().isNotEmpty()
@@ -230,10 +253,11 @@ private fun CaptureStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArSc
                 else StepHeader(1, MAPPER_STEPS, "Set the starting point",
                     "Point your phone at a clear patch of floor near where you're standing and tap it on the screen.",
                     "This spot becomes the corner of your map (0,0).", FLOOR_HELP)
-                Button(onClick = { camera.markAtCentre() }, enabled = vm.arStatus.tracking, shape = MaterialTheme.shapes.small, modifier = bigButton) {
+                Button(onClick = { camera.markVisible(view) }, enabled = vm.arStatus.tracking && !view.outline, shape = MaterialTheme.shapes.small, modifier = bigButton) {
                     Text("Use the spot under the +")
                 }
-                OutlinedButton(onClick = onStopCamera, modifier = Modifier.fillMaxWidth()) { Text("Back") }
+                // Step 1 has nothing earlier to go back to with the camera on, so Back is the camera pause.
+                OutlinedButton(onClick = onStopCamera, modifier = Modifier.fillMaxWidth()) { Text("Pause camera") }
             }
         }
         // Step 2: direction ("up" on the map).
@@ -245,20 +269,23 @@ private fun CaptureStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArSc
                 "Tap another floor point a few steps in front of you, e.g. along a hallway.",
                 "The map will be drawn with this direction pointing up. It doesn't need to be north.",
                 "Any direction works — pick one that's easy, like straight down a hallway or along a long wall. The point must be on the same floor and at least half a metre (one step) away. This only turns the map on screen; it doesn't change any distances.")
-            Button(onClick = { camera.markAtCentre() }, enabled = vm.arStatus.tracking, shape = MaterialTheme.shapes.small, modifier = bigButton) {
+            Button(onClick = { camera.markVisible(view) }, enabled = vm.arStatus.tracking && !view.outline, shape = MaterialTheme.shapes.small, modifier = bigButton) {
                 Text("Use the spot under the +")
             }
-            OutlinedButton(onClick = { camera.rejectFloor() }, modifier = Modifier.fillMaxWidth()) { Text("Back") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { camera.rejectFloor() }, modifier = Modifier.weight(1f)) { Text("Back") }
+                OutlinedButton(onClick = onStopCamera, modifier = Modifier.weight(1f)) { Text("Pause camera") }
+            }
         }
         // Step 3: corners of each room.
-        else -> CornersStep(vm, doc, camera, aligned, arSupported, measured, onMeasured, onStartCamera, onStopCamera, onRoomDialog, onFinishFloor)
+        else -> CornersStep(vm, doc, camera, aligned, arSupported, measured, view, onMeasured, onStartCamera, onStopCamera, onCheckSupport, onRoomDialog, onFinishFloor)
     }
 }
 
 @Composable
 private fun CornersStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArScanView?, aligned: Boolean, arSupported: Boolean,
-    measured: Boolean, onMeasured: (Boolean) -> Unit, onStartCamera: () -> Unit, onStopCamera: () -> Unit,
-    onRoomDialog: (String) -> Unit, onFinishFloor: () -> Unit) {
+    measured: Boolean, view: CameraView, onMeasured: (Boolean) -> Unit, onStartCamera: () -> Unit, onStopCamera: () -> Unit,
+    onCheckSupport: () -> Unit, onRoomDialog: (String) -> Unit, onFinishFloor: () -> Unit) {
     val room = vm.room
     val bigButton = Modifier.fillMaxWidth().heightIn(min = 52.dp)
     StepHeader(3, MAPPER_STEPS, "Mark the corners of this room",
@@ -289,10 +316,13 @@ private fun CornersStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArSc
             "DOOR" -> if (vm.pendingEndpoint == null) "Mark first side of doorway" else "Mark other side of doorway"
             else -> if (vm.pendingEndpoint == null) "Mark first end of wall" else "Mark other end of wall"
         }
-        Button(onClick = { camera.markAtCentre() },
-            enabled = aligned && vm.arStatus.tracking && room != null && (vm.tool !in setOf("CORNER", "WALL_CORNER") || room.confirmed == false),
+        Button(onClick = { camera.markVisible(view) },
+            enabled = aligned && vm.arStatus.tracking && !view.outline && room != null && (vm.tool !in setOf("CORNER", "WALL_CORNER") || room.confirmed == false),
             shape = MaterialTheme.shapes.small, modifier = bigButton) { Text(label) }
-        Text("Put the + on the spot and press the button, or tap the spot on the camera picture.", style = MaterialTheme.typography.bodySmall,
+        if (!aligned) Text(TRACKING_LOST_HINT, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        else if (view.outline) Text("Tap Show camera to mark points.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else Text("Put the + on the spot and press the button, or tap the spot on the camera picture.", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = vm::undo, enabled = !vm.busy, modifier = Modifier.weight(1f)) { Text("Undo") }
@@ -307,6 +337,7 @@ private fun CornersStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArSc
     if (measured || !arSupported) {
         MeasuredEntry(vm, onRoomDialog)
         if (arSupported) TextButton(onClick = { onMeasured(false) }) { Text("Use the camera instead") }
+        else TextButton(onClick = onCheckSupport) { Text("Check camera support again") }
     } else {
         Text("Continue with the camera", style = MaterialTheme.typography.titleMedium)
         Text("The camera is paused. To keep marking, it needs to line up with your map again: pick two corners you've already marked that you can easily find, at least half a metre apart (further is better).",

@@ -76,7 +76,13 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         if(disposed || blocked || trackingFrames<20 || hit==null || System.nanoTime()-pendingFloorAt>10_000_000_000L || hit.trackable.trackingState!=TrackingState.TRACKING) notice("That floor tap timed out — tap the floor again, then confirm within 10 seconds")
         else { origin?.detach(); origin=hit.createAnchor(); pendingFloor=null; sink.floorCandidate(""); notice("Starting point set") }
     }
-    fun rejectFloor()=queueEvent { pendingFloor=null; origin?.detach(); origin=null; ahead?.detach(); ahead=null; sink.floorCandidate("") }
+    /**
+     * Clears the starting point and direction so steps 1–2 can be redone. The reference is re-sent once a new pair is
+     * tapped: after a refused reference (wrong corners, scale gate) the session would otherwise stay on step 2 forever.
+     * The wizard only offers this before the session is lined up; the view model ignores a second reference for a
+     * segment it already accepted.
+     */
+    fun rejectFloor()=queueEvent { pendingFloor=null; origin?.detach(); origin=null; ahead?.detach(); ahead=null; referencePending=true; sink.floorCandidate("") }
     fun disposeNative() {
         disposed=true; work.shutdownNow(); anchors.values.forEach { it.detach() }; anchors.clear(); origin?.detach(); ahead?.detach()
         if(backgroundProgram!=0) GLES20.glDeleteProgram(backgroundProgram)

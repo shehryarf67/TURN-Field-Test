@@ -234,6 +234,8 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     override fun reference(frame: FloorFrame,segmentId: String,length: Double) = main {
         if(segmentId!=activeSegment) return@main
         val d=doc ?: return@main
+        // A redone starting point re-sends the reference; a session that is already lined up keeps its first alignment.
+        if(d.segments.any { it.id==segmentId }) return@main
         val a=d.points().firstOrNull { it.id==alignmentA }; val b=d.points().firstOrNull { it.id==alignmentB }
         val alignment=if(d.points().isEmpty()) Alignment() else if(a!=null && b!=null)
             runCatching { Alignment.between(P2(0.0,0.0),P2(0.0,length),a.p,b.p) }.getOrElse { status=it.message.orEmpty(); return@main }
