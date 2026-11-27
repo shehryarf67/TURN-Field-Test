@@ -14,7 +14,8 @@ class MapperImportUiTest {
   val state=TurnAppState().apply {mode=DataMode.REAL_DEVICE;destination=TurnDestination.VENUES}
   var selected="";var replace=false
   compose.setContent {TurnApp(state,TurnAppActions(onBundledMapperImport={f,r->selected=f;replace=r}))}
-  // The bundled floors are listed directly; the first row is C-F4.
+  // The bundled floors sit in a collapsed section; the first row is C-F4.
+  compose.onNodeWithText(com.turn.fieldtest.ui.screens.UNIVERSITY_FLOORS).performScrollTo().performClick()
   compose.onAllNodesWithText("Add").onFirst().performScrollTo().performClick()
   compose.onNodeWithText("This also deletes linked survey/positioning recordings and AR drafts on this device. Export anything you want to keep first.").assertIsDisplayed()
   compose.onNodeWithText("Import C-F4").performClick()

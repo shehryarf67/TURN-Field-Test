@@ -136,9 +136,9 @@ fun FloorEditorScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         PageHeader(
-            eyebrow = "02 · Metric map",
-            title = "Floor-plan editor",
-            description = "Draw navigable geometry in metres over a replaceable sketch. Tap the canvas with a tool selected to add geometry.",
+            eyebrow = "Advanced map editor",
+            title = "Advanced map editor",
+            description = "Every map tool in one place: draw walkable areas, walls, doors and points in metres over your floor plan picture. Pick a tool, then tap the map.",
             compact = compact,
             action = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

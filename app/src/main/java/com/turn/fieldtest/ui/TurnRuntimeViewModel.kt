@@ -291,7 +291,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     init {
         viewModelScope.launch {
             projects.observeProjects().catch { error ->
-                appState.projectStatus = "Could not read saved projects: ${error.message}"
+                appState.projectStatus = "Couldn't read your saved buildings: ${error.message}"
             }.collect { appState.projects = it }
         }
         viewModelScope.launch {
@@ -332,7 +332,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                         if (appState.allWalkablePolygons().any { it.size >= 3 }) com.turn.fieldtest.ui.model.TurnDestination.LIVE_LOCATE
                         else com.turn.fieldtest.ui.model.TurnDestination.FLOOR_EDITOR)
                 } else appState.loadDemoMap()
-            } catch (error: Exception) { appState.projectStatus = "Could not restore project: ${error.message}" }
+            } catch (error: Exception) { appState.projectStatus = "Couldn't reopen the last floor: ${error.message}" }
             finally { appState.startupLoading = false }
             refreshWifiPermissionStatus()
             if (foreground && appState.mode == DataMode.REAL_DEVICE) startRealSources()
@@ -456,7 +456,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
     private fun projectChangeAllowed(): Boolean {
         if (appState.startupLoading || appState.projectBusy || appState.sessionLocked ||
             activeSurvey != null || activePositioningSession != null || appState.realEvaluationBusy) {
-            appState.projectStatus = "Finish the active operation before changing project or mode"
+            appState.projectStatus = "Stop recording or navigation before switching floors or data source"
             appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.VENUES)
             return false
         }
@@ -488,7 +488,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             appState.projectBusy = true
             viewModelScope.launch {
                 try { restoreSelectedProject() }
-                catch (error: Exception) { appState.projectStatus = "Could not load project: ${error.message}" }
+                catch (error: Exception) { appState.projectStatus = "Couldn't load this floor: ${error.message}" }
                 finally { appState.projectBusy = false }
             }
             if (foreground) startRealSources()
@@ -504,7 +504,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 val context = projects.create(input, System.currentTimeMillis())
                 loadProject(context)
                 appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.FLOOR_EDITOR)
-            } catch (error: Exception) { appState.projectStatus = "Could not create project: ${error.message}" }
+            } catch (error: Exception) { appState.projectStatus = "Couldn't add the building: ${error.message}" }
             finally { appState.projectBusy = false }
         }
     }
@@ -641,7 +641,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.projectBusy = true
         viewModelScope.launch {
             try { loadProject(context) }
-            catch (error: Exception) { appState.projectStatus = "Could not open project: ${error.message}" }
+            catch (error: Exception) { appState.projectStatus = "Couldn't open this floor: ${error.message}" }
             finally { appState.projectBusy = false }
         }
     }
@@ -677,8 +677,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         appState.surveyDistinctBssidCount = 0
         appState.realSurveyAggregates = emptyList()
         appState.surveySessionLabel = "No active survey"
-        appState.surveySaveStatus = "Saved fingerprints remain available for matching and export"
-        appState.surveyRuntimeStatus = "Select a reference point to collect fresh Wi-Fi snapshots"
+        appState.surveySaveStatus = "Your saved Wi-Fi recordings are kept for navigation and export"
+        appState.surveyRuntimeStatus = "Pick a Wi-Fi spot, stand on it and tap Begin collection"
         appState.realLivePosition = null
         appState.realRawPdrPosition = null
         appState.realWifiPosition = null
@@ -821,7 +821,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
 
     fun onMotionPermissionDenied() {
         appState.realDiagnosticStatus = "Physical activity permission denied; step tracking unavailable"
-        appState.realLiveStatus = "Grant Physical activity permission to start PDR tracking"
+        appState.realLiveStatus = "Allow Physical activity for TURN so it can count your steps"
     }
 
     fun exportRealData(uri: Uri, dataset: ResearchDataset) {
@@ -985,7 +985,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         if (appState.liveRunning || activePositioningSession != null) {
-            appState.surveyRuntimeStatus = "Stop Live locate before collecting a training fingerprint"
+            appState.surveyRuntimeStatus = "End navigation before recording Wi-Fi"
             return
         }
         if (!realWifiReady("Survey")) {
@@ -1230,7 +1230,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
                 appState.realLiveFloorConfidence = 0.0
                 appState.clearRoute()
                 appState.routeStatus = "Waiting for a fresh position before routing"
-                appState.realLiveStatus = "Global relocalization armed; waiting for a fresh Wi-Fi fix"
+                appState.realLiveStatus = "Finding your position again — waiting for the next Wi-Fi scan"
                 requestLiveScan()
             }
         }
@@ -1248,7 +1248,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         if (activeSurvey != null || appState.surveyRunning) {
-            appState.realLiveStatus = "Finish the active fingerprint survey before positioning"
+            appState.realLiveStatus = "Finish recording Wi-Fi before starting navigation"
             return
         }
         if (!realWifiReady("Live locate")) return
@@ -1900,8 +1900,8 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         if (fingerprints.isEmpty()) {
             appState.realWifiPosition = null
             appState.realWifiFixEpochMillis = null
-            appState.realWifiEvidenceStatus = "No completed fingerprints on this floor · correction not applied"
-            appState.realLiveStatus = "No saved fingerprints found; survey at least one reference point first"
+            appState.realWifiEvidenceStatus = "No Wi-Fi recorded on this floor yet · Wi-Fi can't correct your position"
+            appState.realLiveStatus = "No Wi-Fi recorded on this floor yet — record Wi-Fi at one or more spots first (Tools → Record Wi-Fi)"
             return
         }
         val matcher = WeightedKnnWifiMatcher(
@@ -2033,7 +2033,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
             appState.realLiveInitialized = true
             appState.lastCorrectionType = if (appState.relocalizationCount > 0) "globally relocalized" else "first confident Wi-Fi fix"
-            appState.realLiveStatus = "Fresh Wi-Fi initialized the particle filter; original raw PDR is retained"
+            appState.realLiveStatus = "Wi-Fi found your position — start walking"
             // Only a session that was waiting for Wi-Fi was initialised by it; a later relocalisation of a
             // manual start is recorded as a correction event and must not rewrite how the session began.
             if (positioningSession.initializationType == "WAITING_FOR_FRESH_WIFI") {
@@ -2207,7 +2207,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
             }
         } catch (error: Exception) {
             appState.liveCloseFailed = true
-            appState.realLiveStatus = "Could not save session end: ${error.message}. Retry saving before switching projects."
+            appState.realLiveStatus = "Couldn't save the end of this navigation: ${error.message}. Tap Retry saving before switching floors."
             return
         }
         liveEndedAtEpochMillis = null
@@ -2431,7 +2431,7 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
         val route = graph.route(MetricPoint(position.x.toDouble(), position.y.toDouble()), node.id)
         if (route == null) {
-            appState.clearRoute(); appState.routeStatus = "No walkable route from this position. Check paths or relocalize."; return
+            appState.clearRoute(); appState.routeStatus = "No walkable route from here. Check the paths in Map setup, or find your position again."; return
         }
         appState.routePoints = route.points.map { it.toUiOffset() }
         appState.remainingDistanceMetres = route.distanceMetres

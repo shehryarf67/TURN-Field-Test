@@ -62,11 +62,11 @@ class PrototypeWorkflowTest {
             MapSetupScreen(state, TurnAppActions(onMapSaved = { saved = true; state.markMapSaved() }))
         } } }
         compose.onNodeWithText("Paths", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("Node", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Add path point", useUnmergedTree = true).performClick()
         compose.onNodeWithContentDescription("Floor map").performTouchInput { click(center) }
         compose.runOnIdle { assertEquals(1, state.navigationNodes.size); assertTrue(state.hasUnsavedMapChanges) }
-        compose.onNodeWithText("Destination name, e.g. Lab 1").performScrollTo().performTextInput("Lab 1")
-        compose.onNodeWithText("Save destination in draft").performScrollTo().performClick()
+        compose.onNodeWithText("Place name, e.g. Kitchen").performScrollTo().performTextInput("Lab 1")
+        compose.onNodeWithText("Name this place").performScrollTo().performClick()
         compose.onNodeWithText("Save map").performClick()
         compose.runOnIdle { assertTrue(saved); assertEquals("Lab 1", state.destinations.single().name); assertFalse(state.hasUnsavedMapChanges) }
     }
@@ -77,9 +77,9 @@ class PrototypeWorkflowTest {
             surveyPointProgress = mapOf("a" to SurveyPointProgress("COMPLETED", 8, 8, 6))
         }
         compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) { FieldSurveyScreen(state, TurnAppActions()) } } }
-        compose.onNodeWithText("8 / 8 fresh snapshots · 6 APs").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("RP-02 · Not surveyed", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("0 / 8 fresh snapshots · 0 APs").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("8 / 8 scans · 6 Wi-Fi networks seen").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("RP-02 · Not recorded", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("0 / 8 scans · 0 Wi-Fi networks seen").performScrollTo().assertIsDisplayed()
     }
     @Test fun destinationAndDeclaredStartCanBeChosenWithoutInventingAPosition() {
         val state = fixture().apply {
@@ -203,14 +203,16 @@ class PrototypeWorkflowTest {
     @Test fun settingsCannotChangeAlgorithmDuringTrackingButThemeRemainsAvailable() {
         val state = fixture().apply { liveRunning = true; sessionLocked = true }
         compose.setContent { TurnTheme { Surface(Modifier.fillMaxSize()) { SettingsScreen(state, true) } } }
+        // Positioning settings sit in a collapsed section below Appearance.
+        compose.onNodeWithText(POSITIONING_SETTINGS).performScrollTo().performClick()
         compose.onNodeWithText("Reset defaults").performScrollTo().assertIsNotEnabled()
         val sliders = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
         sliders.assertCountEquals(4)
         repeat(4) { sliders[it].assertIsNotEnabled() }
         compose.onNodeWithText("Device-offset normalization").performScrollTo()
-        compose.onAllNodes(isToggleable())[0].assertIsNotEnabled()
+        compose.onAllNodes(isToggleable())[1].assertIsNotEnabled()
         compose.onNodeWithText("Dark mode").performScrollTo()
-        compose.onAllNodes(isToggleable())[1].assertIsEnabled()
+        compose.onAllNodes(isToggleable())[0].assertIsEnabled()
     }
 
     @Test fun liveHeadingControlsDeclareLeftWithoutMovingOrClearingTrails() {

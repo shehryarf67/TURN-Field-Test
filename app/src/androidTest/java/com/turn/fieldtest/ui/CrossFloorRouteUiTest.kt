@@ -129,10 +129,11 @@ class CrossFloorRouteUiTest {
         compose.setContent { TurnApp(state) }
         compose.onNodeWithContentDescription("Map options").performClick()
         compose.onNodeWithText("Step-free routes").performScrollTo().assertExists()
-        // Dark mode, debug overlays, step-free, magnetic corrections, multi-floor tracking, unchecked links.
+        // Dark mode, step-free, then (Advanced) debug overlays, magnetic corrections, multi-floor tracking, unchecked links.
         val toggles = compose.onAllNodes(isToggleable())
         val count = toggles.fetchSemanticsNodes().size
-        toggles[count - 4].performClick()
+        assertEquals(6, count)
+        toggles[1].performClick()
         compose.runOnIdle { assertTrue(state.stepFreeRouting); assertTrue(state.floorTrackingEnabled); assertFalse(state.useUncheckedFloorLinks) }
     }
 

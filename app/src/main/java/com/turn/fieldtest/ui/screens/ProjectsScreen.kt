@@ -18,6 +18,8 @@ import com.turn.fieldtest.data.repository.ProjectInput
 import com.turn.fieldtest.data.repository.ProjectSummary
 import com.turn.fieldtest.ui.TurnAppActions
 import com.turn.fieldtest.ui.TurnAppState
+import com.turn.fieldtest.ui.components.AdvancedSection
+import com.turn.fieldtest.ui.components.EmptyState
 import com.turn.fieldtest.ui.model.TurnDestination
 
 @Composable
@@ -43,9 +45,9 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
             ?.first()?.venueId
         mapperImport = true
     }
-    if(mapperImport) AlertDialog(onDismissRequest={mapperImport=false}, title={Text("Import mapper floor")}, text={
+    if(mapperImport) AlertDialog(onDismissRequest={mapperImport=false}, title={Text("Add a university floor")}, text={
         Column(Modifier.heightIn(max=460.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("Use the package's dimensions, walkable geometry, destinations and paths. No fingerprints are included.")
+            Text("Adds the floor's size, walkable areas, rooms and paths. Wi-Fi recordings are not included — you'll record those yourself.")
             Box {
                 OutlinedButton(onClick={floorChoices=true}) {Text("Floor: $floorPackage · Change")}
                 DropdownMenu(floorChoices,{floorChoices=false}) {
@@ -73,7 +75,8 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
                 if(replaceOld) Text("This also deletes linked survey/positioning recordings and AR drafts on this device. Export anything you want to keep first.",color=MaterialTheme.colorScheme.error)
             } else Text("Other floors, fingerprints and recordings are kept. Floors stay separate until stairs and lifts are linked.",
                 style = MaterialTheme.typography.bodySmall)
-            Text("Automatic room/door labels need review on site. Some floors have estimated scale; C-F4 uses measured-room calibration.")
+            Text("Room and door names were added automatically — check them on site. Some floors' sizes are estimates; C-F4 was checked against measured rooms.",
+                style = MaterialTheme.typography.bodySmall)
         }
     },confirmButton={TextButton(enabled = importInto == null || buildings.any { b -> b.first().venueId == importInto && canJoin(b, floorPackage) }, onClick={
         mapperImport=false
@@ -89,7 +92,7 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
         val levelTaken = level.toIntOrNull()?.let { l -> siblings.any { it.floorLevel == l } } == true
         AlertDialog(onDismissRequest = { addFloorTo = null }, title = { Text("Add floor") }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("An empty floor in ${siblings.firstOrNull()?.venueName ?: "this building"}. Draw or import its plan in Map setup.")
+                Text("Adds an empty floor to ${siblings.firstOrNull()?.venueName ?: "this building"}. Then map it with your phone (Tools → Map a floor with your phone) or import a plan in Map setup.")
                 OutlinedTextField(name, { name = it.take(120) }, label = { Text("Floor name") }, singleLine = true, isError = clash,
                     supportingText = { if (clash) Text("This building already has a floor with that name") })
                 OutlinedTextField(level, { level = it.filter { c -> c.isDigit() || c == '-' }.take(3) }, label = { Text("Level (0 = ground, -1 = basement)") },
@@ -110,44 +113,43 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
     }
     if (creating) AlertDialog(
         onDismissRequest = { creating = false },
-        title = { Text("Create project") },
+        title = { Text("Add a building") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Start with one floor; add more floors to the building later. Your map and measurements stay on this device.")
-                OutlinedTextField(venue, { venue = it.take(120) }, label = { Text("Venue name") }, singleLine = true)
-                OutlinedTextField(floor, { floor = it.take(120) }, label = { Text("Floor name") }, singleLine = true)
+                Text("Start with one floor (for example your ground floor). You can add more floors later. Everything stays on this phone.")
+                OutlinedTextField(venue, { venue = it.take(120) }, label = { Text("Building name") }, placeholder = { Text("e.g. Home") }, singleLine = true)
+                OutlinedTextField(floor, { floor = it.take(120) }, label = { Text("Floor name") }, placeholder = { Text("e.g. Ground floor") }, singleLine = true)
             }
         },
         confirmButton = { Button(enabled = available && venue.isNotBlank() && floor.isNotBlank(), onClick = {
             actions.onProjectCreated(ProjectInput(venue, floor)); creating = false
-        }) { Text("Create project") } },
+        }) { Text("Add building") } },
         dismissButton = { TextButton(onClick = { creating = false }) { Text("Cancel") } },
     )
     pendingOpen?.let { context ->
         AlertDialog(
             onDismissRequest = { pendingOpen = null },
-            title = { Text("Reload saved map?") },
-            text = { Text("Unsaved drawing changes will be discarded. Saved maps, fingerprints and sessions remain on this device.") },
+            title = { Text("Discard unsaved changes?") },
+            text = { Text("You have map changes that aren't saved yet. Opening this floor throws them away. Everything you already saved (maps and Wi-Fi recordings) stays on this phone.") },
             confirmButton = { Button(enabled = available, onClick = {
                 opening = context; actions.onProjectOpened(context, true); pendingOpen = null
-            }) { Text("Discard draft and open") } },
+            }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Discard changes and open") } },
             dismissButton = { TextButton(onClick = { pendingOpen = null }) { Text("Keep editing") } },
         )
     }
     val importAllowed = available && !state.hasUnsavedMapChanges && state.mode == com.turn.fieldtest.ui.model.DataMode.REAL_DEVICE
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Open a saved floor, add a university floor or prepare a new building.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Your buildings and their floors. Open a floor to set it up or to navigate on it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (state.projectBusy || state.startupLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
         Text(state.projectStatus, style = MaterialTheme.typography.bodyMedium)
-        if (state.hasUnsavedMapChanges) Text("Your map has unsaved changes. Save in Map setup, or open a saved project to discard the draft.")
-        if (state.sessionLocked) Text("Project selection is locked until the physical session finishes saving.")
+        if (state.hasUnsavedMapChanges) Text("Your map has unsaved changes. Save them in Map setup — opening another floor would throw them away.")
+        if (state.sessionLocked) Text("You can switch floors once the current recording has finished saving.")
         if (state.projects.isEmpty() && !state.startupLoading) {
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Outlined.Apartment, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-                    Text("Bring your first floor into TURN", style = MaterialTheme.typography.titleMedium)
-                    Text("Add a university floor below, use an existing floor plan, or create one with guided AR mapping. Then add places and survey points.")
+                EmptyState("No buildings yet", "Tap Add a building to start. Then map each floor with your phone (Tools → Map a floor with your phone), " +
+                    "or import a floor plan picture in Map setup.") {
+                    Button(onClick = { creating = true }, enabled = available && !state.hasUnsavedMapChanges) { Text("Add a building") }
                 }
             }
         }
@@ -184,10 +186,10 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
                         LinearProgressIndicator({ steps.count { it } / steps.size.toFloat() }, Modifier.fillMaxWidth().height(6.dp),
                             strokeCap = androidx.compose.ui.graphics.StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
                         Text(when {
-                            !steps[0] -> "Next: draw the walkable map in Map setup"
-                            !steps[1] -> "Next: add places and connect paths"
-                            !steps[2] -> "Next: Wi-Fi survey · $completed of ${state.referencePoints.size} points done"
-                            else -> "Ready to navigate · $completed survey points"
+                            !steps[0] -> "Next: map this floor (Map setup, or Tools → Map a floor with your phone)"
+                            !steps[1] -> "Next: add places and connect paths in Map setup"
+                            !steps[2] -> "Next: record Wi-Fi · $completed of ${state.referencePoints.size} points done"
+                            else -> "Ready to navigate · $completed points recorded"
                         }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         Button(onClick = { state.selectDestination(if (state.draftWalkablePolygon.size >= 3) TurnDestination.LIVE_LOCATE else TurnDestination.FLOOR_EDITOR) },
                             enabled = available, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
@@ -197,7 +199,7 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
                             OutlinedButton(onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) }, enabled = available,
                                 modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Map setup") }
                             OutlinedButton(onClick = { open(current.context) }, enabled = available,
-                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Reload saved map") }
+                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Reload saved") }
                         }
                         if (floors.size > 1) OutlinedButton(onClick = { state.selectDestination(TurnDestination.FLOOR_LINKS) }, enabled = available,
                             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Link floors · stairs and lifts") }
@@ -209,9 +211,12 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
                 }
             }
         }
-        SectionTitle("University floors")
-        Text("FAST-NUCES floors from TURN-Mapper, with rooms, walls and paths. Wi-Fi fingerprints are not included.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SectionTitle("Other ways to add a floor")
+        OutlinedButton(enabled = available && !state.hasUnsavedMapChanges, onClick = { creating = true }, modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text("Add a building") }
+        OutlinedButton(onClick = actions.onMapperImportRequested, enabled = importAllowed, modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("Import a TURN-Mapper file") }
+        AdvancedSection(title = UNIVERSITY_FLOORS, subtitle = "Ready-made FAST-NUCES floors with rooms, walls and paths (no Wi-Fi recordings)") {
         OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
             bundledMapperFloors.forEachIndexed { index, f ->
                 if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -225,13 +230,12 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
                 }
             }
         }
-        SectionTitle("Other ways to add a floor")
-        OutlinedButton(onClick = actions.onMapperImportRequested, enabled = importAllowed, modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("Import another mapper file") }
-        OutlinedButton(enabled = available && !state.hasUnsavedMapChanges, onClick = { creating = true }, modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text("Add a building") }
+        }
     }
 }
+
+/** Title of the collapsed section holding the bundled university floors (tests expand it by this name). */
+internal const val UNIVERSITY_FLOORS = "University floors"
 
 @Composable
 private fun FloorRow(floor: ProjectSummary, selected: Boolean, enabled: Boolean, onOpen: () -> Unit) {
@@ -241,12 +245,12 @@ private fun FloorRow(floor: ProjectSummary, selected: Boolean, enabled: Boolean,
                 color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(40.dp))
             Column(Modifier.weight(1f)) {
                 Text(floor.floorName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text("Saved offline · ${floor.fingerprintPointCount} surveyed points", style = MaterialTheme.typography.bodySmall,
+                Text("${floor.fingerprintPointCount} Wi-Fi points recorded", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (selected) Text("Open now", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 12.dp))
-            else TextButton(onClick = onOpen, enabled = enabled) { Text("Open project") }
+            else TextButton(onClick = onOpen, enabled = enabled) { Text("Open") }
         }
     }
 }

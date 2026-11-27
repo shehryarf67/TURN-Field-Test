@@ -3,15 +3,15 @@ package com.turn.fieldtest.ui.model
 import androidx.compose.ui.geometry.Offset
 
 enum class TurnDestination(val title: String, val shortLabel: String, val description: String) {
-    VENUES("Projects", "PR", "Venue and floor setup"),
+    VENUES("Buildings", "BL", "Your buildings and floors"),
     FLOOR_EDITOR("Map setup", "MP", "Metric floor geometry editor"),
-    RADIO_DIAGNOSTICS("Radio diagnostics", "RD", "Wi-Fi and motion sensor health"),
-    SURVEY("Survey", "SV", "Wi-Fi fingerprint collection"),
+    RADIO_DIAGNOSTICS("Diagnostics", "DG", "Wi-Fi and motion sensor health"),
+    SURVEY("Record Wi-Fi", "SV", "Record the Wi-Fi at known points"),
     LIVE_LOCATE("Navigate", "NV", "Fused Wi-Fi and PDR positioning"),
-    EVALUATE("Evaluate", "EV", "Independent checkpoint testing"),
-    DATA_EXPORT("Data / export", "DX", "Import, export and backups"),
+    EVALUATE("Accuracy test", "EV", "Check positioning at known points"),
+    DATA_EXPORT("Export & backup", "DX", "Import, export and backups"),
     SETTINGS("Settings", "ST", "Modes, algorithms and hardware"),
-    FLOOR_LINKS("Floor links", "FL", "Stairs, lifts and ramps between floors")
+    FLOOR_LINKS("Link floors", "FL", "Stairs, lifts and ramps between floors")
 }
 
 enum class DataMode(val label: String, val detail: String) {
@@ -22,14 +22,14 @@ enum class DataMode(val label: String, val detail: String) {
 enum class EditorTool(val label: String, val code: String) {
     SELECT("Select", "SE"),
     CALIBRATION("Scale points", "AB"),
-    WALKABLE("Walkable polygon", "WA"),
+    WALKABLE("Walkable area", "WA"),
     WALL("Wall", "WL"),
     DOOR("Door", "DR"),
     JUNCTION("Junction", "JN"),
     STAIRS("Stairs", "ST"),
     LIFT("Lift", "LF"),
     ESCALATOR("Escalator", "ES"),
-    POI("Room / POI", "PO"),
+    POI("Room / place", "PO"),
     QR_ANCHOR("QR anchor", "QR"),
     REFERENCE_POINT("Survey point", "RP")
 }

@@ -117,17 +117,17 @@ class TurnAppState {
                 val metric = MetricPoint(point.x.toDouble(), point.y.toDouble())
                 if (runCatching { draftNavigationGraph().floor.isWalkable(metric) }.getOrDefault(false)) {
                     val node = NavigationNodeEntity("NODE-${java.util.UUID.randomUUID()}", context.floorId, metric.x, metric.y)
-                    navigationNodes.add(node); selectedNodeId = node.id; editorStatus = "Node placed. Connect it to the corridor path."
-                } else editorStatus = "Place nodes inside a valid walkable area"
+                    navigationNodes.add(node); selectedNodeId = node.id; editorStatus = "Path point added. Choose Connect to join it to the others."
+                } else editorStatus = "Path points must be inside the walkable area"
             }
             "Connect" -> {
-                if (nearest == null) { editorStatus = "Tap an existing node"; return }
+                if (nearest == null) { editorStatus = "Tap an existing path point"; return }
                 val from = navigationNodes.firstOrNull { it.id == selectedNodeId }
-                if (from == null || from.id == nearest.id) { selectedNodeId = nearest.id; editorStatus = "Now tap the other node"; return }
+                if (from == null || from.id == nearest.id) { selectedNodeId = nearest.id; editorStatus = "Now tap the other path point"; return }
                 val edge = NavigationEdgeEntity("EDGE-${java.util.UUID.randomUUID()}", context.floorId, from.id, nearest.id,
                     from.core().point.distanceTo(nearest.core().point))
                 if (navigationEdges.any { (it.fromNodeId == from.id && it.toNodeId == nearest.id) || (it.bidirectional && it.toNodeId == from.id && it.fromNodeId == nearest.id) }) {
-                    editorStatus = "These nodes are already connected"; return
+                    editorStatus = "These path points are already connected"; return
                 }
                 // Judge only the new connection; an older path broken by a later wall edit must not block every new one.
                 val floor = runCatching { draftNavigationGraph().floor }.getOrElse {
@@ -149,24 +149,24 @@ class TurnAppState {
         val node=navigationNodes.firstOrNull {it.id==selectedNodeId} ?: return
         val place=destinations.firstOrNull {it.id==destinationId && it.floorId==node.floorId} ?: return
         if(node.poiId!=null && node.poiId!=place.id || navigationNodes.any {it.id!=node.id && it.poiId==place.id}) {
-            editorStatus="This room or node already has an entrance. Select an unassigned path node."; return
+            editorStatus="That place or path point is already linked to a doorway. Select a path point that isn't linked yet."; return
         }
         if(!runCatching {draftNavigationGraph().floor.isWalkable(node.core().point)}.getOrDefault(false)) {
-            editorStatus="The entrance must be inside verified walkable space"; return
+            editorStatus="The doorway point must be inside the walkable area"; return
         }
         destinations[destinations.indexOf(place)]=place.copy(xMetres=node.xMetres,yMetres=node.yMetres)
         navigationNodes[navigationNodes.indexOf(node)]=node.copy(poiId=place.id)
-        editorStatus="${place.name} entrance linked · Save map to keep it"
+        editorStatus="${place.name} linked to this doorway · tap Save map to keep it"
     }
     fun nameSelectedDestination(name: String) {
         if (!canEditMap || name.isBlank()) return
-        val node = navigationNodes.firstOrNull { it.id == selectedNodeId } ?: run { editorStatus = "Select a path node first"; return }
+        val node = navigationNodes.firstOrNull { it.id == selectedNodeId } ?: run { editorStatus = "Select a path point first"; return }
         val existing = destinations.firstOrNull { it.id == node.poiId }
         val poi = PointOfInterestEntity(existing?.id ?: "POI-${java.util.UUID.randomUUID()}", node.floorId,
             name.trim().take(80), existing?.kind ?: "DESTINATION", node.xMetres, node.yMetres, existing?.notes)
         destinations.removeAll { it.id == poi.id }; destinations.add(poi)
         navigationNodes[navigationNodes.indexOf(node)] = node.copy(poiId = poi.id)
-        editorStatus = "Destination ${poi.name} added · Save map to keep it"
+        editorStatus = "Place ${poi.name} added · tap Save map to keep it"
     }
     fun removeSelectedNode() {
         if (!canEditMap) return
@@ -224,7 +224,7 @@ class TurnAppState {
     fun markMapSaved() { savedDraft = draftSnapshot() }
     private fun requireMapEditing(): Boolean {
         if (canEditMap) return true
-        editorStatus = "Open a project and finish active operations before editing"
+        editorStatus = "Open a floor and stop any recording before editing"
         return false
     }
     var destination by mutableStateOf(TurnDestination.VENUES)
@@ -362,7 +362,7 @@ class TurnAppState {
     var lastDataAction by mutableStateOf("No import or export operation in progress")
     var realExportBusy by mutableStateOf(false)
     var realEvaluationBusy by mutableStateOf(false)
-    var realEvaluationStatus by mutableStateOf("Start Live locate to capture independent checkpoints")
+    var realEvaluationStatus by mutableStateOf("Start navigation (Explore) to record accuracy checks")
     val realTestSamples = mutableStateListOf<com.turn.fieldtest.data.local.TestSampleEntity>()
 
     var knnK by mutableIntStateOf(4)
@@ -391,7 +391,7 @@ class TurnAppState {
         if (!requireMapEditing()) return
         when (editorTool) {
             EditorTool.CALIBRATION -> {
-                if (!canChangeScale) { editorStatus = "Scale is locked because this floor has recorded measurements"; return }
+                if (!canChangeScale) { editorStatus = "The size is locked because this floor already has Wi-Fi recordings"; return }
                 if (calibrationPoints.size == 2) calibrationPoints.clear()
                 calibrationPoints.add(metricPoint)
                 editorStatus = if (calibrationPoints.size == 1) {
@@ -402,17 +402,17 @@ class TurnAppState {
             }
             EditorTool.WALKABLE -> {
                 draftWalkablePolygon.add(metricPoint); suggestedSurveyPoints.clear()
-                editorStatus = "Walkable vertex ${draftWalkablePolygon.size} · ${formatPoint(metricPoint)}"
+                editorStatus = "Outline corner ${draftWalkablePolygon.size} added · ${formatPoint(metricPoint)}"
             }
             EditorTool.WALL -> {
                 val start = pendingWallStart
                 if (start == null) {
                     pendingWallStart = metricPoint
-                    editorStatus = "Wall start ${formatPoint(metricPoint)} · select endpoint"
+                    editorStatus = "Wall start set · tap where the wall ends"
                 } else {
                     draftWalls.add(start to metricPoint); suggestedSurveyPoints.clear()
                     pendingWallStart = null
-                    editorStatus = "Wall stored in metric coordinates"
+                    editorStatus = "Wall added"
                 }
             }
             EditorTool.REFERENCE_POINT -> {
@@ -425,7 +425,7 @@ class TurnAppState {
                     MetricPolygon(polygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) })
                         .contains(MetricPoint(metricPoint.x.toDouble(), metricPoint.y.toDouble()))
                 }
-                if (!walkable) { editorStatus = "Survey points must be inside walkable space · tap the corridor or a walkable room"; return }
+                if (!walkable) { editorStatus = "Wi-Fi spots must be inside walkable space · tap a hallway or room"; return }
                 val label = addReferencePointAt(metricPoint)
                 editorStatus = "$label placed at ${formatPoint(metricPoint)}"
             }
@@ -434,7 +434,7 @@ class TurnAppState {
                 qrAnchors.add(MapPointUi(id, "Ground", metricPoint, "QR ${qrAnchors.size + 1}"))
                 editorStatus = "$id placed at ${formatPoint(metricPoint)}"
             }
-            EditorTool.SELECT -> editorStatus = "Choose Walkable polygon or Wall to edit the layout"
+            EditorTool.SELECT -> editorStatus = "Choose Walkable area or Wall to edit the layout"
             else -> editorStatus = "${editorTool.label} placed at ${formatPoint(metricPoint)}"
         }
     }
@@ -452,7 +452,7 @@ class TurnAppState {
         pendingWallStart = null
         editorTool = EditorTool.SELECT
         selectedSurveyReferencePointId = ""
-        editorStatus = "Blank map ready · import an image or draw the walkable outline"
+        editorStatus = "Blank map ready · import a floor plan picture or draw the walkable area"
     }
 
     fun loadDemoMap() {
@@ -511,7 +511,7 @@ class TurnAppState {
 
     fun finishWalkablePolygon() {
         if (!requireMapEditing()) return
-        if (draftWalkablePolygon.size < 3) { editorStatus = "Add at least three walkable vertices"; return }
+        if (draftWalkablePolygon.size < 3) { editorStatus = "Tap at least three corners first"; return }
         // Close only shapes that paths, survey suggestions and saving will accept, and say why otherwise.
         val problem = runCatching {
             validateSimpleWalkablePolygon(MetricPolygon(draftWalkablePolygon.map { MetricPoint(it.x.toDouble(), it.y.toDouble()) }))
@@ -519,7 +519,7 @@ class TurnAppState {
         if (problem != null) { editorStatus = "Outline not closed: ${problem.message} · use Undo or Redraw outline"; return }
         editorTool = EditorTool.SELECT
         suggestedSurveyPoints.clear()
-        editorStatus = "Walkable polygon closed with ${draftWalkablePolygon.size} vertices"
+        editorStatus = "Outline closed (${draftWalkablePolygon.size} corners) · tap Save map to keep it"
     }
 
     fun addReferencePointAt(idInput: String, x: Float, y: Float) {
@@ -626,7 +626,7 @@ class TurnAppState {
     fun suggestSurveyPoints(spacingMetres: Double) {
         if (!requireMapEditing()) return
         val graph = runCatching { draftNavigationGraph() }.getOrElse {
-            editorStatus = "Draw a valid walkable layout before suggesting survey points"; return
+            editorStatus = "Draw the walkable area before suggesting Wi-Fi spots"; return
         }
         val proposals = SurveyPointPlanner.suggest(graph.floor, graph.nodes, graph.edges,
             referencePoints.map { MetricPoint(it.metres.x.toDouble(), it.metres.y.toDouble()) }, spacingMetres)
@@ -650,7 +650,7 @@ class TurnAppState {
         suggestedSurveyPoints.clear()
         // Surveying starts from the first new point, not the last one added.
         referencePoints.getOrNull(firstNew)?.let { selectedSurveyReferencePointId = it.id }
-        editorStatus = "$count survey points added · Save map to keep them"
+        editorStatus = "$count Wi-Fi spots added · tap Save map to keep them"
     }
 
     /** Saving refuses to drop a point with survey sessions, so the draft must refuse it too. */
@@ -671,9 +671,9 @@ class TurnAppState {
     }
 
     fun applyCalibration(measuredDistanceMetres: Double): Boolean {
-        if (!canChangeScale) { editorStatus = "Scale is locked while recording or after measurements exist"; return false }
+        if (!canChangeScale) { editorStatus = "The size is locked while recording or once Wi-Fi has been recorded"; return false }
         if (calibrationPoints.size != 2 || measuredDistanceMetres <= 0.0 || !measuredDistanceMetres.isFinite()) {
-            editorStatus = "Select points A and B, then enter a positive measured distance"
+            editorStatus = "Tap points A and B, then type the real distance between them"
             return false
         }
         val a = calibrationPoints[0]
@@ -687,12 +687,12 @@ class TurnAppState {
         if (!resizeFloor(floorWidthMetres * scale, floorHeightMetres * scale)) return false
         floorPlanMetresPerPixel = floorPlanPixelWidth?.takeIf { it > 0 }?.let { floorWidthMetres.toDouble() / it }
         editorTool = EditorTool.SELECT
-        editorStatus = "Calibrated · floor is %.2f m × %.2f m".format(floorWidthMetres, floorHeightMetres)
+        editorStatus = "Scale set · the plan is %.2f m × %.2f m".format(floorWidthMetres, floorHeightMetres)
         return true
     }
 
     fun resizeFloor(width: Float, height: Float): Boolean {
-        if (!canChangeScale) { editorStatus = "Scale is locked while recording or after measurements exist"; return false }
+        if (!canChangeScale) { editorStatus = "The size is locked while recording or once Wi-Fi has been recorded"; return false }
         if (!width.isFinite() || !height.isFinite() || width <= 0f || height <= 0f || width > 1000f || height > 1000f) {
             editorStatus = "Floor dimensions must be between 0 and 1000 metres"
             return false

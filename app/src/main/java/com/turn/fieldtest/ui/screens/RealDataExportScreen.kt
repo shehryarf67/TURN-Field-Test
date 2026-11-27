@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.turn.fieldtest.data.export.ResearchDataset
 import com.turn.fieldtest.ui.TurnAppState
+import com.turn.fieldtest.ui.components.AdvancedSection
 
 @Composable
 fun RealDataExportScreen(
@@ -34,18 +35,21 @@ fun RealDataExportScreen(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        PageHeader("07 · Research data", "Data & export",
-            "Back up maps, surveys and recordings to your files.", compact)
+        PageHeader("Export & backup", "Export & backup",
+            "Save a copy of your maps, Wi-Fi recordings and sessions to your files.", compact)
         Text(state.lastDataAction, style = MaterialTheme.typography.bodyMedium)
-        SectionCard("Complete database", "Keep a JSON backup after every field session") {
-            Text("Includes all database tables, raw readings, fingerprints, geometry, sessions and estimates. Image URIs reference phone-local assets; copy floor-plan images separately.")
+        if (state.surveyRunning || state.liveRunning) Text("Stop recording Wi-Fi and navigation before exporting.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        SectionCard("Back up everything", "One file with all your data — save one after each mapping or testing session") {
+            Text("Includes every map, Wi-Fi recording, session and position estimate. Floor plan pictures stay on the phone; copy them separately if you need them.",
+                style = MaterialTheme.typography.bodySmall)
             Button(shape=MaterialTheme.shapes.small,
                 onClick = { backup.launch("turn-database-${System.currentTimeMillis()}.json") },
                 enabled = !state.realExportBusy && !state.surveyRunning && !state.liveRunning,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Save complete database JSON") }
         }
-        SectionCard("Analysis CSV files", "Every entity field and lineage ID is included") {
+        AdvancedSection(title = "Spreadsheet files (CSV)", subtitle = "Individual tables for analysis; every field and ID is included") {
             ResearchDataset.entries.filter { it != ResearchDataset.BACKUP }.forEach { dataset ->
                 val picker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) {
                     if (it != null) onExport(it, dataset)
@@ -58,6 +62,7 @@ fun RealDataExportScreen(
                 ) { Text(dataset.label) }
             }
         }
-        Text("Stop Survey and Live locate before exporting. Empty datasets produce a header-only CSV. CSV files join through session and reference-point IDs; save the complete JSON as the full record. Import/restore is not yet exposed in this screen.")
+        Text("An empty table gives a file with just the column headings. Files link to each other through session and survey-point IDs. " +
+                "The complete backup above is the full record. Restoring a backup isn't available on this screen yet.", style = MaterialTheme.typography.bodySmall)
     }
 }

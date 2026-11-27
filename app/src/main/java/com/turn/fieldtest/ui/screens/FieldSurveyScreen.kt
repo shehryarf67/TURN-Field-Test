@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.turn.fieldtest.ui.*
 import com.turn.fieldtest.ui.model.TurnDestination
+import com.turn.fieldtest.ui.components.EmptyState
 import androidx.compose.ui.text.font.FontWeight
 
 @Composable
@@ -32,7 +33,7 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
         .minByOrNull { p -> selected?.let { (it.metres - p.metres).getDistance() } ?: 0f }
     if (details) {
         Column {
-            TextButton(onClick = { details = false }) { Text("Back to survey") }
+            TextButton(onClick = { details = false }) { Text("Back to Record Wi-Fi") }
             SurveyScreen(state, true, actions.onRealSurveyStarted, actions.onRealSurveyFinished)
         }; return
     }
@@ -45,9 +46,12 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
             FilterChip(!magneticMode, { magneticMode = false }, enabled = !state.sessionLocked, label = { Text("Wi-Fi points") })
             FilterChip(magneticMode, { magneticMode = true }, enabled = !state.sessionLocked, label = { Text("Magnetic paths") })
         }
-        Text(if (magneticMode) "Magnetic survey" else "Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text(if (magneticMode) "Pick two points on one corridor · Stand at the first · Walk straight · Finish at the second"
-            else "Select a point · Stand still · Collect · Save", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Text(if (magneticMode) "Record magnetic paths (optional)" else "Record Wi-Fi", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(if (magneticMode) "Walking a straight path records the magnetic field along it, which helps tracking in hallways. Wi-Fi spots come first."
+            else "TURN learns what the Wi-Fi looks like at each spot, so it can recognise where you are later.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(if (magneticMode) "Pick two spots on one hallway · stand at the first · walk straight · finish at the second"
+            else "Pick a spot · stand on it and hold still · Begin collection · wait until it's saved", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Bounded so a long building name can never squeeze the floor switcher out of the row.
             Text(state.venueName, style = MaterialTheme.typography.bodySmall, maxLines = 1,
@@ -55,7 +59,7 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
             FloorSwitcher(state, actions)
         }
         if (!magneticMode && state.referencePoints.isNotEmpty()) {
-            Text("${surveyed.size} of ${state.referencePoints.size} points surveyed", style = MaterialTheme.typography.labelLarge)
+            Text("${surveyed.size} of ${state.referencePoints.size} spots recorded", style = MaterialTheme.typography.labelLarge)
             LinearProgressIndicator(progress = { surveyed.size / state.referencePoints.size.toFloat() }, modifier = Modifier.fillMaxWidth())
         }
         NavigationMap(state, Modifier.fillMaxWidth().then(if (shortWindow) Modifier.height(220.dp) else Modifier.weight(1f).heightIn(min = 100.dp)), showReferences = true, roomLabels = true, showMagneticCoverage = magneticMode, onTap = { p, tolerance ->
@@ -75,11 +79,11 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
             state.referencePoints.forEach { point ->
                 val progress = state.surveyPointProgress[point.id]
                 val label = when {
-                    state.surveyRunning && point.id == selected?.id -> "Collecting"
-                    progress?.status == "COMPLETED" -> "Completed"
-                    progress?.status == "LEGACY" -> "Saved legacy"
-                    progress != null -> "Partial ${progress.freshCount}"
-                    else -> "Not surveyed"
+                    state.surveyRunning && point.id == selected?.id -> "Recording"
+                    progress?.status == "COMPLETED" -> "Recorded"
+                    progress?.status == "LEGACY" -> "Recorded (older)"
+                    progress != null -> "Partly done (${progress.freshCount})"
+                    else -> "Not recorded"
                 }
                 FilterChip(point.id == selected?.id, { state.selectedSurveyReferencePointId = point.id }, enabled = !state.sessionLocked,
                     label = { Text("${point.label} · $label") })
@@ -87,24 +91,25 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
         }
         Column(Modifier.fillMaxWidth().then(if(shortWindow) Modifier else Modifier.height(panelHeight).verticalScroll(rememberScrollState())).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (selected == null) {
-                Text("Add reference points in Map setup before surveying.")
-                TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add survey points") }
+                if (state.referencePoints.isEmpty()) EmptyState("No Wi-Fi spots yet", "Add the spots where you'll record Wi-Fi in Map setup (step 4: Wi-Fi spots).")
+                else Text("Tap a spot on the map or in the list above.")
+                TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add Wi-Fi spots") }
             }
             else Text("${selected.label} · x %.1f m, y %.1f m".format(selected.metres.x, selected.metres.y), style = MaterialTheme.typography.titleMedium)
             if (!state.sessionLocked) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(target, { value -> target = value.filter(Char::isDigit).take(2); target.toIntOrNull()?.let { state.surveyTargetSnapshots = it.coerceIn(1, 50) } },
-                    label = { Text("Fresh scans") }, modifier = Modifier.weight(0.4f), singleLine = true)
+                    label = { Text("Scans to take") }, modifier = Modifier.weight(0.4f), singleLine = true)
                 OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, modifier = Modifier.weight(0.6f), singleLine = true)
             }
             LinearProgressIndicator(progress = { (freshCount.toFloat() / targetCount.coerceAtLeast(1)).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-            Text("${freshCount} / ${targetCount} fresh snapshots · ${apCount} APs", style = MaterialTheme.typography.labelLarge)
+            Text("${freshCount} / ${targetCount} scans · ${apCount} Wi-Fi networks seen", style = MaterialTheme.typography.labelLarge)
             Text(state.surveyRuntimeStatus, style = MaterialTheme.typography.bodySmall)
             state.realWifiIssue?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             Text(if (collecting) state.surveySaveStatus else when (savedProgress?.status) {
-                "COMPLETED" -> "Fingerprint saved on this phone"
-                "LEGACY" -> "Saved fingerprint from an earlier version; target count was not recorded"
-                null -> "This point has no saved fingerprint"
-                else -> "Partial collection saved. Begin a new collection to complete this point."
+                "COMPLETED" -> "Recorded and saved on this phone"
+                "LEGACY" -> "Recorded with an older version of TURN (number of scans unknown)"
+                null -> "Not recorded yet"
+                else -> "Partly recorded. Tap Begin collection to finish this spot."
             }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             Button(modifier = Modifier.fillMaxWidth().heightIn(min=52.dp), shape=RoundedCornerShape(16.dp), enabled = !state.surveyStarting && !state.projectBusy && !state.liveRunning && selected != null,
                 onClick = {
@@ -118,13 +123,13 @@ fun FieldSurveyScreen(state: TurnAppState, actions: TurnAppActions) {
                 FilledTonalButton(onClick = { state.selectedSurveyReferencePointId = next.id }, enabled = !state.sessionLocked,
                     modifier = Modifier.fillMaxWidth()) { Text("Go to ${next.label}") }
             } else if (!collecting && next != null) TextButton(onClick = { state.selectedSurveyReferencePointId = next.id },
-                enabled = !state.sessionLocked) { Text("Skip to nearest unsurveyed point (${next.label})") }
+                enabled = !state.sessionLocked) { Text("Skip to the nearest spot not recorded yet (${next.label})") }
             if (!collecting && state.referencePoints.isNotEmpty() && next == null && selected?.id in surveyed)
-                Text("All ${state.referencePoints.size} points surveyed. Add more points for denser coverage, or continue to Explore.",
+                Text("All ${state.referencePoints.size} spots recorded. Add more spots for better accuracy, or continue to Explore.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) },
-                enabled = !collecting) { Text("Add or suggest more points") }
-            TextButton(onClick = { details = true }) { Text("Research details & RSSI aggregation") }
+                enabled = !collecting) { Text("Add or suggest more spots") }
+            TextButton(onClick = { details = true }) { Text("Advanced: recording details and signal strengths") }
             if (!collecting && state.surveyPointProgress.values.any { it.status == "COMPLETED" || it.status == "LEGACY" }) {
                 OutlinedButton(onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) }, enabled = !state.sessionLocked,
                     modifier = Modifier.fillMaxWidth()) { Text("Continue to Explore") }
@@ -147,11 +152,11 @@ private fun MagneticPathPanel(state: TurnAppState, actions: TurnAppActions) {
         Text("%d cells mapped · %d walks saved".format(state.magneticCoverage.size, state.magneticWalkCount),
             style = MaterialTheme.typography.labelLarge)
         if (state.referencePoints.size < 2) {
-            Text("Add at least two survey points along a corridor in Map setup first.")
-            TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add survey points") }
+            Text("Add at least two Wi-Fi spots along a hallway in Map setup first.")
+            TextButton(onClick = { state.mapSetupSection = "Points"; state.selectDestination(TurnDestination.FLOOR_EDITOR) }) { Text("Add Wi-Fi spots") }
             return@Column
         }
-        Text("Tap two survey points on the map: where you start, then where you stop.", style = MaterialTheme.typography.bodySmall)
+        Text("Tap two spots on the map: where you start, then where you stop.", style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedCard(Modifier.weight(1f)) { Column(Modifier.padding(10.dp)) {
                 Text("FROM", style = MaterialTheme.typography.labelSmall); Text(from?.label ?: "Tap a point", fontWeight = FontWeight.Bold) } }

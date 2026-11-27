@@ -77,14 +77,15 @@ fun FloorLinksScreen(state: TurnAppState, actions: TurnAppActions) {
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(state.venueName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text("Floors stay separate until you link the places where people move between them: stairs, lifts, escalators and ramps.",
+        Text("Connect the floors of this building. Add a link for each staircase or lift by tapping where it is on both floors — " +
+            "navigation and tracking can then move between floors.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(state.floorLinksStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         if (floors.size < 2) {
             OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("This building has one floor", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text("Add another floor in Buildings, then link them here.", style = MaterialTheme.typography.bodySmall)
+                    Text("Add your other floor in Buildings (Add floor), map it, then come back here to link the floors.", style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = { state.selectDestination(TurnDestination.VENUES) }) { Text("Go to Buildings") }
                 }
             }
@@ -114,9 +115,12 @@ fun FloorLinksScreen(state: TurnAppState, actions: TurnAppActions) {
             }
         }
         Text("Links (${state.floorConnectors.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        if (state.floorConnectors.isEmpty()) Text("No links yet.", style = MaterialTheme.typography.bodySmall)
+        if (state.floorConnectors.isEmpty()) Text("No links yet — tap New link and mark your stairs on both floors.", style = MaterialTheme.typography.bodySmall)
         state.floorConnectors.forEach { c -> LinkCard(c, linkProblems(state, c), linkAlignmentNote(c, alignments), !locked,
             onVerify = { actions.onConnectorVerified(c.entity.id, !c.entity.verifiedOnSite) }, onEdit = { editing = c.toEditor() }, onDelete = { deleting = c }) }
+        Text("Optional extras", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text("Both help a home where floors are lower than an office building, or were mapped separately with the phone. Navigation works without them.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FloorHeightsCard(state, floors, !locked, actions.onFloorElevationsSaved)
         AlignFloorsCard(floors, alignments, !locked) { aligning = true }
     }
@@ -156,7 +160,7 @@ private fun FloorHeightsCard(state: TurnAppState, floors: List<ProjectSummary>, 
     OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Floor heights", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("How high each floor is above the ground floor. Stairs and lift rides are then judged against your building's real storeys; unset uses a standard 3.5 m storey.",
+            Text("How high each floor is above the ground floor (a typical house storey is about 2.7 m). TURN uses it to recognise when you've gone up or down a floor; if unset it assumes 3.5 m per floor.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(if (saved.values.all { it == null }) "Not set · standard 3.5 m storeys"
                 else "Set · " + floors.sortedBy { it.floorLevel }.joinToString(" · ") { "${levelBadge(it.floorLevel)} ${saved[it.floorId]?.let(::metres) ?: "?"} m" },
@@ -190,14 +194,14 @@ private fun FloorHeightsCard(state: TurnAppState, floors: List<ProjectSummary>, 
 private fun AlignFloorsCard(floors: List<ProjectSummary>, alignments: Map<String, FloorAlignment>, enabled: Boolean, onAlign: () -> Unit) {
     OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Align floors at the stairs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("Each mapped floor has its own origin and direction. Pick the same two spots on two floors (e.g. two stairwell corners) to line the floors up; link ends can then be placed and checked against each other. Tracking does not need it.",
+            Text("Line up floors at the stairs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Each floor mapped with the phone has its own starting point and 'up' direction. Tap the same two spots on two floors (e.g. two corners at the foot of the stairs) so TURN knows how they sit on top of each other. Link ends can then be placed straight above each other and checked. Tracking doesn't need it.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             val name = floors.associate { it.floorId to "${levelBadge(it.floorLevel)} ${it.floorName}" }
-            if (alignments.isEmpty()) Text("No floors aligned yet", style = MaterialTheme.typography.labelMedium)
+            if (alignments.isEmpty()) Text("No floors lined up yet", style = MaterialTheme.typography.labelMedium)
             alignments.forEach { (id, a) ->
-                Text(String.format(java.util.Locale.ROOT, "%s → %s · turned %.1f° · fit within %.2f m%s", name[id] ?: id, name[a.toFloorId] ?: a.toFloorId,
-                    a.transform.rotationDegrees, a.maxResidualMetres, if (a.scaleWarning) " · scales differ" else ""),
+                Text(String.format(java.util.Locale.ROOT, "%s lined up with %s · turned %.1f° · points match within %.2f m%s", name[id] ?: id, name[a.toFloorId] ?: a.toFloorId,
+                    a.transform.rotationDegrees, a.maxResidualMetres, if (a.scaleWarning) " · the floors' sizes disagree — check both maps" else ""),
                     style = MaterialTheme.typography.labelMedium, color = if (a.scaleWarning) TurnAmber else TurnMint, fontWeight = FontWeight.Bold)
             }
             OutlinedButton(onClick = onAlign, enabled = enabled, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Align two floors") }
@@ -226,22 +230,25 @@ private fun AlignFloorsPanel(state: TurnAppState, floors: List<ProjectSummary>, 
             Text("Align two floors", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             TextButton(onClick = onClose) { Text("Close") }
         }
-        Text("Tap the same two physical spots on both floors, in the same order: point 1, then point 2 (e.g. the two corners at the foot of the stairwell). They should be at least 0.5 m apart; further apart is more accurate.",
+        Text("Tap the same two real spots on both floors, in the same order: point 1, then point 2 (e.g. the two corners at the foot of the stairs). " +
+            "The reference floor stays where it is; the other floor is turned and moved to match. Keep the points at least 0.5 m apart — further apart is more accurate.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         AlignPointPicker("Reference floor", floors, reference, there, state, { reference = it; there = emptyList() }) { there = pick(there, it) }
         AlignPointPicker("Floor to align", floors.filter { it.floorId != reference }, moving, here, state, { moving = it; here = emptyList() }) { here = pick(here, it) }
         TextButton(onClick = { here = emptyList(); there = emptyList() }) { Text("Clear points") }
         when {
-            solved == null -> Text("Pick ${2 - there.size.coerceAtMost(2)} more on the reference floor and ${2 - here.size.coerceAtMost(2)} more on the floor to align.",
+            solved == null -> Text("Tap ${2 - there.size.coerceAtMost(2)} more on the reference floor and ${2 - here.size.coerceAtMost(2)} more on the floor to align.",
                 style = MaterialTheme.typography.bodySmall)
             solved.isFailure -> Text(solved.exceptionOrNull()?.message ?: "Cannot align these points", color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall)
             else -> {
                 val r = solved.getOrThrow()
                 val a = r.alignment
-                Text(String.format(java.util.Locale.ROOT, "Turn %.1f° · shift %.2f, %.2f m · residual %.2f m (rms %.2f m) · distance ratio %.3f",
-                    a.transform.rotationDegrees, a.transform.tx, a.transform.ty, a.maxResidualMetres, a.rmsResidualMetres, a.scaleRatio),
+                Text(String.format(java.util.Locale.ROOT, "Turned %.1f° and moved %.2f, %.2f m · points match within %.2f m",
+                    a.transform.rotationDegrees, a.transform.tx, a.transform.ty, a.maxResidualMetres),
                     style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(String.format(java.util.Locale.ROOT, "Details: residual %.2f m (rms %.2f m) · distance ratio %.3f (1.000 means both floors measure the same distance)",
+                    a.maxResidualMetres, a.rmsResidualMetres, a.scaleRatio), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 r.warnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = TurnAmber) }
                 val links = state.floorConnectors.filter { setOf(it.entity.fromFloorId, it.entity.toFloorId) == setOf(moving, reference) }
                 val trial = alignments.filterKeys { it != moving && it != reference } + (moving!! to a)
@@ -264,8 +271,12 @@ private fun AlignFloorsPanel(state: TurnAppState, floors: List<ProjectSummary>, 
         }
         // The pair's alignment may be stored on either floor.
         val storedOn = listOfNotNull(moving, reference).firstOrNull { id -> alignments[id]?.toFloorId == (if (id == moving) reference else moving) }
-        if (storedOn != null) OutlinedButton(onClick = { onSave(storedOn, null) }, enabled = !locked, modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)) { Text("Remove these floors' alignment") }
+        var removing by remember { mutableStateOf(false) }
+        if (removing && storedOn != null) com.turn.fieldtest.ui.components.ConfirmDialog("Remove the alignment?",
+            "These two floors will no longer be lined up. Your links stay; you can line the floors up again later.", "Remove",
+            onConfirm = { onSave(storedOn, null) }, onDismiss = { removing = false })
+        if (storedOn != null) OutlinedButton(onClick = { removing = true }, enabled = !locked, modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)) { Text("Remove these floors' alignment…") }
     }
 }
 
@@ -379,7 +390,7 @@ private fun LinkEditorPanel(state: TurnAppState, floors: List<ProjectSummary>, e
                 val inside = placed.x in 0.0..(state.buildingFloorMaps[e.toFloorId]?.floor?.widthMetres ?: 0.0) &&
                     placed.y in 0.0..(state.buildingFloorMaps[e.toFloorId]?.floor?.heightMetres ?: 0.0)
                 OutlinedButton(onClick = { update(e.copy(to = placed)) }, enabled = inside, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (inside) "Place To directly above/below From (aligned floors)" else "From lies outside the other floor's map")
+                    Text(if (inside) "Put the To end straight above/below the From end" else "The From end is outside the other floor's map")
                 }
             }
             if (e.from != null && e.to != null) {

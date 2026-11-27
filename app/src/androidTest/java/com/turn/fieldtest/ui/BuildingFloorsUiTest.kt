@@ -53,6 +53,7 @@ class BuildingFloorsUiTest {
         compose.setContent { TurnApp(s, TurnAppActions(onBundledFloorAddedToBuilding = { f, v -> intoBuilding = f to v },
             onBundledMapperImport = { _, _ -> replaced = true })) }
         // Bundled order is C-F4, C-F3, B-GF, B-F1, C-F2, C-F5…; the first two are already added ("Re-import").
+        compose.onNodeWithText(com.turn.fieldtest.ui.screens.UNIVERSITY_FLOORS).performScrollTo().performClick()
         compose.onAllNodesWithText("Add")[3].performScrollTo().performClick()
         compose.onNodeWithText("Floor: C-F5 · Change").assertExists()
         compose.onNodeWithText("Add to University").assertIsSelected()
@@ -66,6 +67,7 @@ class BuildingFloorsUiTest {
         var intoBuilding: Pair<String, String>? = null; var imported: String? = null
         compose.setContent { TurnApp(s, TurnAppActions(onBundledFloorAddedToBuilding = { f, v -> intoBuilding = f to v },
             onBundledMapperImport = { f, _ -> imported = f })) }
+        compose.onNodeWithText(com.turn.fieldtest.ui.screens.UNIVERSITY_FLOORS).performScrollTo().performClick()
         compose.onAllNodesWithText("Re-import").onFirst().performScrollTo().performClick() // C-F4
         compose.onNodeWithText("New building").assertIsSelected()
         compose.onNodeWithText("Add to University (already has C-F4)").assertIsNotEnabled()

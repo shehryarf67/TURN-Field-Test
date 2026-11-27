@@ -76,9 +76,9 @@ fun DiagnosticsScreen(
         verticalArrangement = Arrangement.spacedBy(15.dp)
     ) {
         PageHeader(
-            eyebrow = "03 · Hardware readiness",
-            title = "Radio & sensor diagnostics",
-            description = "Verify freshness, scan restrictions and motion sources before collecting research data.",
+            eyebrow = "Diagnostics",
+            title = "Diagnostics",
+            description = "Technical checks of your phone's Wi-Fi and motion sensors, and raw recordings for testing stairs and lifts. You don't need this page to map or navigate.",
             compact = compact,
             action = {
                 Button(onClick = {
@@ -86,7 +86,7 @@ fun DiagnosticsScreen(
                 }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = null)
                     Spacer(Modifier.width(7.dp))
-                    Text(if (simulated) "Replay scan" else "Request scan")
+                    Text(if (simulated) "Replay scan" else "Scan Wi-Fi now")
                 }
             }
         )
@@ -99,25 +99,27 @@ fun DiagnosticsScreen(
             StatusPill(
                 if (simulated) "Trace scan #${state.diagnosticScanSequence}"
                 else state.realWifiIssue ?: when {
-                    state.realWifiRequestInFlight -> "Waiting for Android scan results"
-                    state.realWifiLastBatchEpochMillis != null -> "Physical SCAN_RESULTS received"
-                    else -> "No physical scan received yet"
+                    state.realWifiRequestInFlight -> "Waiting for the Wi-Fi scan…"
+                    state.realWifiLastBatchEpochMillis != null -> "Wi-Fi scan received"
+                    else -> "No Wi-Fi scan yet"
                 },
                 if (simulated || state.realWifiFresh == true) EventSeverity.GOOD
                 else if (state.realWifiIssue != null) EventSeverity.WARNING else EventSeverity.INFO,
             )
             StatusPill(
                 if (simulated) "throttling replayed"
-                else if (state.realWifiThrottlingEnabled == true) "Android throttling enabled" else "throttling status ${state.realWifiThrottlingEnabled ?: "unknown"}",
+                else when (state.realWifiThrottlingEnabled) { true -> "Android limits how often apps scan"; false -> "Android scan limit off"; null -> "Android scan limit: unknown" },
                 EventSeverity.INFO,
             )
         }
 
+        DiagnosticsGroup("Wi-Fi")
         BoxWithMetrics(state = state, compact = compact, simulated = simulated)
 
+        if (!simulated) DiagnosticsGroup("Stairs and lifts")
         if (!simulated) SectionCard(
-            title = "Raw sensor recording",
-            subtitle = "For stair and lift walks: barometer, motion, magnetic and Wi-Fi to one CSV file",
+            title = "Record a stair or lift walk",
+            subtitle = "Saves barometer, motion, magnetic and Wi-Fi readings to one CSV file, with markers for when you change floor",
             trailing = { if (state.rawRecording) StatusPill("${state.rawRecordingRows} rows", EventSeverity.GOOD) },
         ) {
             Text(state.rawRecordingStatus, style = MaterialTheme.typography.bodySmall)
@@ -138,9 +140,10 @@ fun DiagnosticsScreen(
 
         if (!simulated) FloorThresholdsCard(state)
 
+        DiagnosticsGroup("Wi-Fi details")
         SectionCard(
-            title = "Visible Wi-Fi access points",
-            subtitle = "Fingerprint identity is BSSID, never SSID",
+            title = "Wi-Fi networks in range",
+            subtitle = "Each access point is identified by its BSSID (hardware address), never its name (SSID)",
             trailing = {
                 StatusPill(
                     "${wifiRows.size} visible",
@@ -166,7 +169,7 @@ fun DiagnosticsScreen(
                             "${ap.frequencyMhz} MHz" to 90.dp,
                             (ap.channel?.toString() ?: "—") to 72.dp,
                             "${ap.ageSeconds} s" to 66.dp,
-                            (if (ap.fresh) "FRESH" else "CACHED") to 94.dp
+                            (if (ap.fresh) "New" else "Cached") to 94.dp
                         ),
                         tint = if (ap.fresh) TurnMint else TurnAmber
                     )
@@ -174,7 +177,7 @@ fun DiagnosticsScreen(
                 if (wifiRows.isEmpty()) {
                     Text(
                         if (simulated) "The demo trace contains no access points."
-                        else "No physical Wi-Fi observations are available. Grant permission, enable Wi-Fi and location services, then request a scan.",
+                        else "No Wi-Fi networks seen yet. Allow TURN to use location, turn on Wi-Fi and Location, then tap Scan Wi-Fi now.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(12.dp),
@@ -186,16 +189,17 @@ fun DiagnosticsScreen(
                 if (simulated) {
                     "Replay metadata preserves original scan boundaries. Cached snapshots are shown but never counted as independent scans."
                 } else {
-                    "A successful startScan() call is only a request. Results count as fresh only when EXTRA_RESULTS_UPDATED confirms an update."
+                    "Asking Android to scan doesn't guarantee new results. Results count as new only when Android confirms they were updated (EXTRA_RESULTS_UPDATED)."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
+        DiagnosticsGroup("Motion")
         SectionCard(
             title = "Motion sensors",
-            subtitle = "Live source availability and stability",
+            subtitle = "Which sensors this phone has and whether they're working",
             trailing = {
                 StatusPill(
                     "${sensorRows.count { it.available }} / ${sensorRows.size} available",
@@ -204,7 +208,7 @@ fun DiagnosticsScreen(
             }
         ) {
             if (sensorRows.isEmpty()) {
-                Text("No physical sensor inventory is available yet.", style = MaterialTheme.typography.bodySmall)
+                Text("No sensor information yet.", style = MaterialTheme.typography.bodySmall)
             } else {
                 SensorGrid(sensorRows)
             }
@@ -212,22 +216,23 @@ fun DiagnosticsScreen(
 
         DiagnosticWalkCard(state, compact, simulated, onToggleDiagnosticWalk)
 
-        SectionCard("Failure-state checks", "TURN reports hardware limits; it never fabricates fresh data") {
+        DiagnosticsGroup("Checklist")
+        SectionCard("What's working", "Green is working; amber needs attention or is optional. TURN never makes up data when hardware is missing.") {
             AdaptiveColumns(
                 breakpoint = 600.dp,
                 primary = {
                     Column {
-                        FailureRow("Wi-Fi source", simulated || state.realWifiMonitoring, if (simulated) "replay ready" else if (state.realWifiMonitoring) "foreground receiver active" else "not active")
-                        FailureRow("Radio permissions", simulated || state.wifiPermissionStatus.startsWith("Granted"), state.wifiPermissionStatus)
-                        FailureRow("Scan request accepted", simulated || state.realWifiRequestAccepted == true, if (simulated) "trace sequence ${state.diagnosticScanSequence}" else state.realWifiRequestAccepted?.toString() ?: "not requested")
-                        FailureRow("Results updated", simulated || state.realWifiResultsUpdated == true, if (simulated) "trace metadata" else state.realWifiResultsUpdated?.toString() ?: "no broadcast")
+                        FailureRow("Wi-Fi listening", simulated || state.realWifiMonitoring, if (simulated) "replay ready" else if (state.realWifiMonitoring) "listening" else "not listening")
+                        FailureRow("Wi-Fi permissions", simulated || state.wifiPermissionStatus.startsWith("Granted"), state.wifiPermissionStatus)
+                        FailureRow("Scan request accepted", simulated || state.realWifiRequestAccepted == true, if (simulated) "trace sequence ${state.diagnosticScanSequence}" else yesNo(state.realWifiRequestAccepted, "not asked yet"))
+                        FailureRow("Results updated", simulated || state.realWifiResultsUpdated == true, if (simulated) "trace metadata" else yesNo(state.realWifiResultsUpdated, "no results yet"))
                     }
                 },
                 secondary = {
                     Column {
-                        FailureRow("Fresh system results", simulated || state.realWifiFresh == true, if (simulated) "trace newest 1 s" else if (state.realWifiFresh == true) "fresh" else "none")
-                        FailureRow("Throttling monitored", true, if (simulated) "replayed" else nextRequestLabel(state.realWifiNextPermittedRequestEpochMillis))
-                        FailureRow("BLE configured", false, "disabled by design")
+                        FailureRow("New Wi-Fi results", simulated || state.realWifiFresh == true, if (simulated) "trace newest 1 s" else if (state.realWifiFresh == true) "yes" else "none")
+                        FailureRow("Next scan allowed", true, if (simulated) "replayed" else nextRequestLabel(state.realWifiNextPermittedRequestEpochMillis))
+                        FailureRow("Bluetooth beacons", false, "off by design")
                         FailureRow("Magnetometer", false, "optional")
                     }
                 }
@@ -241,36 +246,36 @@ fun DiagnosticsScreen(
 
 @Composable
 private fun BoxWithMetrics(state: TurnAppState, compact: Boolean, simulated: Boolean) {
-    val request = if (simulated) "SUCCESS" else when (state.realWifiRequestAccepted) {
-        true -> "ACCEPTED"
-        false -> "REJECTED"
-        null -> "NOT REQUESTED"
+    val request = if (simulated) "OK" else when (state.realWifiRequestAccepted) {
+        true -> "Accepted"
+        false -> "Refused"
+        null -> "Not yet"
     }
     val visible = if (simulated) 5 else state.realWifiAccessPoints.size
     val newestAge = if (simulated) "1 s" else state.realWifiNewestAgeMillis?.let { "${it / 1_000.0} s" } ?: "—"
     val freshness = if (simulated) "fresh" else when (state.realWifiFresh) {
-        true -> "fresh physical results"
-        false -> "cached/stale"
+        true -> "new results"
+        false -> "old (cached) results"
         null -> "no result"
     }
     val nextRequest = if (simulated) "00:23" else nextRequestLabel(state.realWifiNextPermittedRequestEpochMillis)
     if (compact) {
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                MetricCard("Scan request", request, Modifier.weight(1f), freshness, if (request == "REJECTED") TurnAmber else TurnMint)
-                MetricCard("Visible APs", visible.toString(), Modifier.weight(1f), if (simulated) "3 fresh · 2 cached" else "physical observations")
+                MetricCard("Scan request", request, Modifier.weight(1f), freshness, if (request == "Refused") TurnAmber else TurnMint)
+                MetricCard("Networks seen", visible.toString(), Modifier.weight(1f), if (simulated) "3 new · 2 cached" else "in the last scan")
             }
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                MetricCard("Newest age", newestAge, Modifier.weight(1f), freshness)
-                MetricCard("Next request", nextRequest, Modifier.weight(1f), "conservative client limit", TurnAmber)
+                MetricCard("Newest result", newestAge, Modifier.weight(1f), freshness)
+                MetricCard("Next scan", nextRequest, Modifier.weight(1f), "TURN waits to respect Android's limit", TurnAmber)
             }
         }
     } else {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Scan request", request, Modifier.weight(1f), freshness, if (request == "REJECTED") TurnAmber else TurnMint)
-            MetricCard("Visible APs", visible.toString(), Modifier.weight(1f), if (simulated) "3 fresh · 2 cached" else "physical observations")
-            MetricCard("Newest age", newestAge, Modifier.weight(1f), freshness)
-            MetricCard("Next request", nextRequest, Modifier.weight(1f), "conservative client limit", TurnAmber)
+            MetricCard("Scan request", request, Modifier.weight(1f), freshness, if (request == "Refused") TurnAmber else TurnMint)
+            MetricCard("Networks seen", visible.toString(), Modifier.weight(1f), if (simulated) "3 new · 2 cached" else "in the last scan")
+            MetricCard("Newest result", newestAge, Modifier.weight(1f), freshness)
+            MetricCard("Next scan", nextRequest, Modifier.weight(1f), "TURN waits to respect Android's limit", TurnAmber)
         }
     }
 }
@@ -315,8 +320,8 @@ private fun DiagnosticWalkCard(
     onToggleDiagnosticWalk: () -> Unit,
 ) {
     SectionCard(
-        title = "Short diagnostic walk",
-        subtitle = "Relative motion only · no ground-truth learning",
+        title = "Short test walk",
+        subtitle = "Counts steps and distance on a short walk. Nothing is learned or saved.",
         trailing = {
             FilledTonalButton(onClick = {
                 if (simulated) state.diagnosticWalkRunning = !state.diagnosticWalkRunning
@@ -354,15 +359,24 @@ private fun DiagnosticWalkCard(
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusPill(if (state.diagnosticWalkRunning) "recording" else if (simulated) "complete" else "not recording", if (state.diagnosticWalkRunning) EventSeverity.INFO else EventSeverity.GOOD)
-            Text(if (simulated) "Missing: magnetometer (optional)" else "Only physical Android sensor events are counted.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (simulated) "Missing: magnetometer (optional)" else "Only real sensor readings from this phone are counted.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 private fun nextRequestLabel(epochMillis: Long?): String {
-    if (epochMillis == null) return "not scheduled"
+    if (epochMillis == null) return "any time"
     val remaining = (epochMillis - System.currentTimeMillis()).coerceAtLeast(0L)
     return if (remaining == 0L) "ready" else "in ${remaining / 1_000L} s"
+}
+
+private fun yesNo(value: Boolean?, unknown: String) = when (value) { true -> "yes"; false -> "no"; null -> unknown }
+
+/** Plain heading that groups the technical cards on this page. */
+@Composable
+private fun DiagnosticsGroup(title: String) {
+    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp))
 }
 
 @Composable
@@ -400,7 +414,7 @@ internal fun RawRecordingMarkers(floors: List<Pair<String, String>>, enabled: Bo
     // Floor ids the grammar cannot carry (commas, semicolons, outer spaces) are left out rather than written wrongly.
     val arrivals = floors.mapNotNull { (id, name) -> runCatching { markers.arrived(id) }.getOrNull()?.let { name to it } }
     Text("Arrived on…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-    if (arrivals.isEmpty()) Text("Open a project to mark its floors", style = MaterialTheme.typography.bodySmall)
+    if (arrivals.isEmpty()) Text("Open a floor of a building to mark arrivals", style = MaterialTheme.typography.bodySmall)
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         arrivals.forEach { (name, text) ->
             androidx.compose.material3.AssistChip(onClick = { onMarker(text) }, enabled = enabled, label = { Text(name) })

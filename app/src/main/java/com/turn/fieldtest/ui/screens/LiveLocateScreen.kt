@@ -106,9 +106,9 @@ fun LiveLocateScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         PageHeader(
-            eyebrow = "05 · Fused positioning",
-            title = "Live locate",
-            description = "PDR propagates each step; map constraints reject impossible motion; fresh Wi-Fi periodically corrects drift.",
+            eyebrow = "Navigate",
+            title = "Live position",
+            description = "Your steps move the dot, walls stop impossible moves, and fresh Wi-Fi scans correct drift (PDR + map constraints + Wi-Fi).",
             compact = compact,
             action = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

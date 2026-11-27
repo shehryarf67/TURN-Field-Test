@@ -22,37 +22,46 @@ import com.turn.fieldtest.ui.model.TurnDestination
 fun ToolsScreen(state: TurnAppState, actions: TurnAppActions) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Text("Prepare a floor. Then explore it.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Set up a floor, then explore it", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("Work through the numbered steps in order. Each floor of a building is set up on its own.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (!state.realMapReady || state.activeProject == null) {
-            ToolCard("Choose a building", "Open a saved floor or create a new one to begin.", Icons.Outlined.Apartment,
+            ToolCard("Choose a building", "Open a saved floor, or add a building to begin.", Icons.Outlined.Apartment,
                 onClick = { state.selectDestination(TurnDestination.VENUES) })
         } else {
-            Text("${state.venueName} · ${state.floorName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ToolCard("1 · Map setup", if (state.hasUnsavedMapChanges) "Unsaved edits · Save your map before surveying"
-                else "Import or scan, calibrate, draw paths and add places", Icons.Outlined.DesignServices,
-                onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) })
-            ToolCard("2 · Wi-Fi survey", "${state.referencePoints.size} reference points · ${state.surveyPointProgress.values.count { it.status == "COMPLETED" }} completed",
-                Icons.Outlined.Wifi, onClick = { state.selectDestination(TurnDestination.SURVEY) })
-            ToolCard("3 · Explore & navigate", "Choose a start and destination, then confirm your direction", Icons.Outlined.NearMe,
-                onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) })
-            if (state.projects.count { it.venueId == state.activeProject?.venueId } > 1)
-                ToolCard("Link floors", "${state.floorConnectors.size} links · stairs, lifts, escalators and ramps", Icons.Outlined.Stairs,
-                    enabled = !state.sessionLocked, onClick = { state.selectDestination(TurnDestination.FLOOR_LINKS) })
-            ToolCard("Create a map with your phone", "Guided AR capture or measured drawing · review and verify before use",
+            Text("Open floor: ${state.venueName} · ${state.floorName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ToolCard(MAP_WITH_PHONE, "Step by step: walk around with the camera and tap room corners. Saves a new floor plan.",
                 Icons.Outlined.ViewInAr, enabled = state.canEditMap && !state.hasUnsavedMapChanges && state.mode == DataMode.REAL_DEVICE,
                 onClick = actions.onWalkMapperRequested)
-            if (state.hasUnsavedMapChanges) Text("Save your map in Map setup before opening AR mapping.", style = MaterialTheme.typography.bodySmall)
+            if (state.hasUnsavedMapChanges) Text("Save your changes in Map setup first.", style = MaterialTheme.typography.bodySmall)
+            ToolCard("1 · Map setup", if (state.hasUnsavedMapChanges) "You have unsaved changes · save them before recording Wi-Fi"
+                else "Check the floor plan and its size, add rooms and places, and draw walking paths", Icons.Outlined.DesignServices,
+                onClick = { state.selectDestination(TurnDestination.FLOOR_EDITOR) })
+            ToolCard("2 · Record Wi-Fi", "Stand at each survey point and record the Wi-Fi there · " +
+                "${state.surveyPointProgress.values.count { it.status == "COMPLETED" }} of ${state.referencePoints.size} points done",
+                Icons.Outlined.Wifi, onClick = { state.selectDestination(TurnDestination.SURVEY) })
+            ToolCard("3 · Explore & navigate", "Choose where you are and where to go, then follow the directions", Icons.Outlined.NearMe,
+                onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) })
+            if (state.projects.count { it.venueId == state.activeProject?.venueId } > 1)
+                ToolCard("Link floors", "Stairs and lifts between floors, floor heights and lining floors up · ${state.floorConnectors.size} " +
+                    if (state.floorConnectors.size == 1) "link" else "links", Icons.Outlined.Stairs,
+                    enabled = !state.sessionLocked, onClick = { state.selectDestination(TurnDestination.FLOOR_LINKS) })
         }
         HorizontalDivider()
-        Text("Research & settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        listOf(Triple(TurnDestination.RADIO_DIAGNOSTICS, Icons.Outlined.Sensors, "Wi-Fi and sensor diagnostics"),
-            Triple(TurnDestination.EVALUATE, Icons.AutoMirrored.Outlined.FactCheck, "Independent checkpoint testing"),
-            Triple(TurnDestination.DATA_EXPORT, Icons.Outlined.FileDownload, "Recordings, exports and backups"),
-            Triple(TurnDestination.SETTINGS, Icons.Outlined.Settings, "Appearance, data mode and algorithms")).forEach { (destination, icon, detail) ->
+        Text("More", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        listOf(Triple(TurnDestination.SETTINGS, Icons.Outlined.Settings, "Appearance, map options and how positioning works"),
+            Triple(TurnDestination.DATA_EXPORT, Icons.Outlined.FileDownload, "Back up, restore and export your data"),
+            Triple(TurnDestination.EVALUATE, Icons.AutoMirrored.Outlined.FactCheck, "Measure how accurate positioning is at known points"),
+            Triple(TurnDestination.RADIO_DIAGNOSTICS, Icons.Outlined.Sensors, "Technical: Wi-Fi, sensors, raw recordings and markers")).forEach { (destination, icon, detail) ->
             ToolCard(destination.title, detail, icon, onClick = { state.selectDestination(destination) })
         }
     }
 }
+
+/** Name of the step-by-step camera mapper, used on every screen that opens it. */
+internal const val MAP_WITH_PHONE = "Map a floor with your phone"
 
 @Composable
 internal fun ToolCard(title: String, detail: String, icon: ImageVector, enabled: Boolean = true, onClick: () -> Unit) {

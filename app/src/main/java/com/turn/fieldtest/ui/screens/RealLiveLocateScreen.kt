@@ -79,9 +79,9 @@ internal fun RealLiveLocateScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         PageHeader(
-            eyebrow = "05 · Physical positioning",
-            title = "Live locate",
-            description = "Fresh Wi-Fi supplies absolute fixes; step and relative-heading sensors propagate the particle cloud between scans.",
+            eyebrow = "Navigate",
+            title = "Live position",
+            description = "Wi-Fi scans fix your position; step and direction sensors move it between scans (a particle filter does the blending).",
             compact = compact,
             action = {
                 Button(onClick = onToggle, enabled = !state.liveStarting && !state.projectBusy) {

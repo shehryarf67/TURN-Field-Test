@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -49,10 +50,10 @@ fun RealEvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (Checkp
     val parsedY = y.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..heightLimit }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        PageHeader("06 · Independent validation", "Evaluate positioning",
-            "Stand at a physically marked checkpoint while Live locate is running. Enter its measured coordinates.", compact)
+        PageHeader("Accuracy test", "Accuracy test",
+            "Start navigation, stand on a marked spot whose real position you measured, and enter its coordinates. TURN records where it thought you were.", compact)
         Text(state.realEvaluationStatus)
-        SectionCard("Independent checkpoint", "${checkpointFloor?.name ?: state.floorName} · metric coordinates") {
+        SectionCard("Test spot", "${checkpointFloor?.name ?: state.floorName} · metric coordinates") {
             if (showFloorChips) {
                 Text("Checkpoint floor")
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -62,17 +63,22 @@ fun RealEvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (Checkp
                     }
                 }
             }
-            OutlinedTextField(code, { code = it }, label = { Text("Checkpoint code") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(code, { code = it }, label = { Text("Spot name, e.g. T1") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(x, { x = it }, label = { Text("Measured x (metres)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(y, { y = it }, label = { Text("Measured y (metres)") }, modifier = Modifier.fillMaxWidth())
-            Text("Use independently measured checkpoints, separate from training reference points. Reusing a checkpoint code requires the same coordinate.")
+            Text("Use spots you measured yourself — not your Wi-Fi spots, or the test would be unfair. If you reuse a spot name, enter the same coordinates.",
+                style = MaterialTheme.typography.bodySmall)
+            if (!state.liveRunning) Text("Start navigation first (Explore → Start navigation), then come back here.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             Button(onClick = { onCapture(CheckpointInput(code.trim(), requireNotNull(parsedX), requireNotNull(parsedY), checkpointFloor?.id)) },
                 enabled = state.liveRunning && !state.realEvaluationBusy && code.isNotBlank() && parsedX != null && parsedY != null,
-                modifier = Modifier.fillMaxWidth()) { Text("Capture test sample") }
+                modifier = Modifier.fillMaxWidth()) { Text("Record this test") }
         }
-        listOf("Wi-Fi only", "Raw PDR", "Fused").forEach { method ->
+        Text("Results", style = MaterialTheme.typography.titleMedium)
+        if (state.realTestSamples.isEmpty()) Text("No tests recorded in this navigation session yet.", style = MaterialTheme.typography.bodyMedium)
+        listOf("Fused", "Wi-Fi only", "Raw PDR").forEach { method ->
             val statistics = summarizeErrors(state.realTestSamples.map { sample -> sample.errorFor(method) })
-            SectionCard(method, "Current positioning session · ${statistics.sampleCount} checkpoints") {
+            SectionCard(methodTitle(method), "This navigation session · ${statistics.sampleCount} ${if (statistics.sampleCount == 1) "test" else "tests"}") {
                 LabelValue("Estimates available", "${statistics.estimateCount}")
                 LabelValue("Mean / median", "${metric(statistics.mean)} / ${metric(statistics.median)}")
                 LabelValue("90th percentile / maximum", "${metric(statistics.p90)} / ${metric(statistics.maximum)}")
@@ -81,8 +87,17 @@ fun RealEvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (Checkp
                 LabelValue("Correct floor", "%.1f%%".format(statistics.floorAccuracyPercent))
             }
         }
-        Text("Distance statistics use available estimates. Threshold and floor percentages use all captures, including failures. Horizontal error and floor correctness are separate. Full sample records are saved to Room and available in Data/export; the on-screen summary resets for a new live session.")
+        Text("Distances average only the tests where TURN had a position; the percentages count every test, including ones with no position. " +
+            "Floor correctness is counted separately from distance. Every test is saved and can be exported (Export & backup); this summary restarts with each navigation.",
+            style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/** Plain names for the three positioning methods compared (their keys stay as stored). */
+private fun methodTitle(method: String) = when (method) {
+    "Fused" -> "Combined (what navigation uses)"
+    "Raw PDR" -> "Steps only (PDR)"
+    else -> method
 }
 
 private fun metric(value: Double?) = value?.let { "%.2f m".format(it) } ?: "—"

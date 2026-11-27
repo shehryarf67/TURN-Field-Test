@@ -87,9 +87,9 @@ fun SurveyScreen(
         verticalArrangement = Arrangement.spacedBy(15.dp)
     ) {
         PageHeader(
-            eyebrow = "04 · Training data",
-            title = "Wi-Fi fingerprint survey",
-            description = "Collect bounded, distinct scan snapshots at a known point. Raw observations remain traceable to their snapshot.",
+            eyebrow = "Record Wi-Fi",
+            title = "Wi-Fi recording details",
+            description = "Each recording takes several separate Wi-Fi scans while you stand on one known spot. Every reading stays linked to the scan it came from.",
             compact = compact,
             action = {
                 Button(

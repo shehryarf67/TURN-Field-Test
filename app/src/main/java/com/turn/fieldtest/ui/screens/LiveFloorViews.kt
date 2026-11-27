@@ -73,7 +73,7 @@ internal fun FloorTrackingOptions(state: TurnAppState, live: Boolean) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Use unchecked floor links")
-            Text("Links not checked on site move fewer hypotheses", style = MaterialTheme.typography.bodySmall,
+            Text("Also follow stairs and lifts you have not checked on site (they count for less)", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(state.useUncheckedFloorLinks, { state.useUncheckedFloorLinks = it }, enabled = !live && state.floorTrackingEnabled)

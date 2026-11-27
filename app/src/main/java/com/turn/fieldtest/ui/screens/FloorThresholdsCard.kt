@@ -23,6 +23,7 @@ import com.turn.fieldtest.core.FloorDetectionConfig
 import com.turn.fieldtest.core.FloorDetectionOverrides
 import com.turn.fieldtest.core.ThresholdSpec
 import com.turn.fieldtest.ui.TurnAppState
+import com.turn.fieldtest.ui.components.ConfirmDialog
 import com.turn.fieldtest.ui.model.EventSeverity
 
 /**
@@ -33,10 +34,13 @@ import com.turn.fieldtest.ui.model.EventSeverity
 @Composable
 internal fun FloorThresholdsCard(state: TurnAppState) {
     var open by rememberSaveable { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
     val overrides = state.floorDetectionOverrides
+    if (confirmReset) ConfirmDialog("Reset all thresholds?", "Your ${overrides.size} changed ${if (overrides.size == 1) "value goes" else "values go"} back to the defaults. " +
+        "This applies from the next tracking session.", "Reset", onConfirm = { state.floorDetectionOverrides = emptyMap() }, onDismiss = { confirmReset = false })
     SectionCard(
         title = "Floor detection thresholds",
-        subtitle = "Tune stairs, lift and floor-change detection; changes apply when the next tracking session starts",
+        subtitle = "Advanced: how sensitive stairs, lift and floor-change detection is. Changes apply when the next tracking session starts.",
         trailing = { StatusPill(if (overrides.isEmpty()) "Defaults" else "${overrides.size} changed",
             if (overrides.isEmpty()) EventSeverity.INFO else EventSeverity.WARNING) },
     ) {
@@ -44,7 +48,7 @@ internal fun FloorThresholdsCard(state: TurnAppState) {
             style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { open = !open }, modifier = Modifier.weight(1f)) { Text(if (open) "Hide thresholds" else "Show thresholds") }
-            OutlinedButton(onClick = { state.floorDetectionOverrides = emptyMap() }, enabled = overrides.isNotEmpty(), modifier = Modifier.weight(1f)) {
+            OutlinedButton(onClick = { confirmReset = true }, enabled = overrides.isNotEmpty(), modifier = Modifier.weight(1f)) {
                 Text("Reset to defaults")
             }
         }

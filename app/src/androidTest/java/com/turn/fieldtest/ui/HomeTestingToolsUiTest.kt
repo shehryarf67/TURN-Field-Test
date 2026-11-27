@@ -80,6 +80,7 @@ class HomeTestingToolsUiTest {
         compose.onAllNodesWithText("Use")[0].performScrollTo().assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(mapOf("vertical.floorHeightMetres" to 2.8), s.floorDetectionOverrides) }
         compose.onNodeWithText("Reset to defaults").performScrollTo().performClick()
+        compose.onNodeWithText("Reset").performClick() // confirm in the dialog
         compose.runOnIdle { assertTrue(s.floorDetectionOverrides.isEmpty()) }
     }
 }

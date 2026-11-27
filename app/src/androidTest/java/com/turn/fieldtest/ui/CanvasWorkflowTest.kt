@@ -150,12 +150,12 @@ class CanvasWorkflowTest {
         val state = fixture(); var scans = 0
         compose.setContent { TurnApp(state, TurnAppActions(onWalkMapperRequested = { scans++ })) }
         compose.onNodeWithText("Tools", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("Create a map with your phone").performScrollTo().performClick()
+        compose.onNodeWithText("Map a floor with your phone").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, scans) }
-        compose.onNodeWithText("Radio diagnostics").performScrollTo().performClick()
+        compose.onNodeWithText("Diagnostics").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(TurnDestination.RADIO_DIAGNOSTICS, state.destination) }
         compose.onNodeWithContentDescription("Back to tools").performClick()
-        compose.onNodeWithText("Data / export").performScrollTo().performClick()
+        compose.onNodeWithText("Export & backup").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(TurnDestination.DATA_EXPORT, state.destination) }
     }
 
@@ -344,7 +344,7 @@ class CanvasWorkflowTest {
         compose.setContent { TurnApp(state) }
         compose.onNodeWithContentDescription("Map options").performClick()
         compose.onAllNodes(isToggleable())[0].performClick()
-        compose.onAllNodes(isToggleable())[1].performClick()
+        compose.onAllNodes(isToggleable())[2].performClick() // dark mode, step-free, then debug overlays
         compose.onNodeWithText("Particles").performScrollTo().assertIsDisplayed()
         compose.runOnIdle {
             assertTrue(state.darkTheme); assertTrue(state.debugOverlays); assertTrue(state.liveRunning)
@@ -357,7 +357,7 @@ class CanvasWorkflowTest {
         compose.setContent { TurnApp(state) }
         compose.onNodeWithText("Start navigation").assertIsDisplayed().assertIsNotEnabled()
         compose.onNodeWithText("Tools", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("Create a map with your phone").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Map a floor with your phone").performScrollTo().assertIsNotEnabled()
     }
 
     @Test fun recenterAndTapsUseVisibleMapAreaBesideTheFloatingCard() {

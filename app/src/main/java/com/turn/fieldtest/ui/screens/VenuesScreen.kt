@@ -69,9 +69,9 @@ fun VenuesScreen(state: TurnAppState, compact: Boolean) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         PageHeader(
-            eyebrow = "01 · Setup",
-            title = "Venues & floors",
-            description = "Build a metric map workspace before surveying. Imported drawings remain replaceable visual backgrounds.",
+            eyebrow = "Buildings",
+            title = "Buildings & floors",
+            description = "Set up a building and its floors before recording Wi-Fi. Imported floor plan pictures can be replaced later.",
             compact = compact,
             action = {
                 Button(onClick = { addVenueDialog = true }) {

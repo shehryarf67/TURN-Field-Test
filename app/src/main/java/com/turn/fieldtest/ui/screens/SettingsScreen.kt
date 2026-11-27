@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.turn.fieldtest.BuildConfig
 import com.turn.fieldtest.ui.TurnAppState
+import com.turn.fieldtest.ui.components.AdvancedSection
 import com.turn.fieldtest.ui.model.DataMode
 import com.turn.fieldtest.ui.model.EventSeverity
 import com.turn.fieldtest.ui.model.TurnDestination
@@ -56,169 +57,161 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         PageHeader(
-            eyebrow = "08 · Configuration",
-            title = "Preferences & algorithms",
-            description = "Tune research parameters explicitly. TURN never substitutes simulated radio or sensor readings in real-device mode.",
+            eyebrow = "Settings",
+            title = "Settings",
+            description = "Appearance and how TURN works. The defaults suit most homes — positioning and hardware details are under the collapsed sections.",
             compact = compact,
-            action = {
-                OutlinedButton(onClick = { resetAlgorithmDefaults(state) }, enabled = editable) {
-                    Icon(Icons.Outlined.RestartAlt, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Reset defaults")
-                }
-            }
         )
-        if (!editable) Text("Finish the active operation before changing algorithm settings.", style = MaterialTheme.typography.bodySmall)
+        SectionCard("Appearance") {
+            SettingToggle("Dark mode", "Blue and white by day; navy and blue by night", state.darkTheme) { state.darkTheme = it }
+        }
 
-        SectionCard("Data source", "Choose the environment before starting a session") {
+        SectionCard("Data source", "Use your phone's real sensors to map and navigate your home. Demo plays back recorded data, for trying the app.") {
             AdaptiveColumns(
                 breakpoint = 540.dp,
                 primary = {
                     ModeChoice(
-                        title = "DEMO / SIMULATED",
-                        detail = "Deterministic Wi-Fi and motion trace; suitable for emulator workflow checks",
-                        selected = state.mode == DataMode.DEMO,
-                        onClick = { onModeChanged(DataMode.DEMO) }
+                        title = "Real phone sensors",
+                        detail = "Your phone's Wi-Fi and motion sensors. Problems are shown, never hidden or faked.",
+                        selected = state.mode == DataMode.REAL_DEVICE,
+                        onClick = { onModeChanged(DataMode.REAL_DEVICE) }
                     )
                 },
                 secondary = {
                     ModeChoice(
-                        title = "REAL DEVICE",
-                        detail = "Physical phone radio and Android sensors; failures are shown, never replaced",
-                        selected = state.mode == DataMode.REAL_DEVICE,
-                        onClick = { onModeChanged(DataMode.REAL_DEVICE) }
+                        title = "Demo (simulated data)",
+                        detail = "A recorded walk with simulated Wi-Fi, for trying the app or the emulator",
+                        selected = state.mode == DataMode.DEMO,
+                        onClick = { onModeChanged(DataMode.DEMO) }
                     )
                 }
             )
             Spacer(Modifier.height(10.dp))
             StatusPill(
-                if (state.mode == DataMode.DEMO) "SIMULATED DATA active" else "REAL DEVICE sources required",
+                if (state.mode == DataMode.DEMO) "Using simulated data" else "Using real sensors",
                 if (state.mode == DataMode.DEMO) EventSeverity.WARNING else EventSeverity.GOOD
             )
         }
 
-        AdaptiveColumns(
-            primary = {
-                SectionCard("Wi-Fi positioning", "Weighted k-nearest-neighbour fingerprint matching") {
-                    SettingSlider(
-                        label = "Neighbour count (k)",
-                        valueLabel = state.knnK.toString(),
-                        value = state.knnK.toFloat(),
-                        range = 1f..10f,
-                        steps = 8,
-                        enabled = editable,
-                        onChange = { state.knnK = it.roundToInt() }
-                    )
-                    SettingSlider(
-                        label = "Missing BSSID RSSI",
-                        valueLabel = "${state.missingRssi} dBm",
-                        value = state.missingRssi.toFloat(),
-                        range = -120f..-80f,
-                        steps = 39,
-                        enabled = editable,
-                        onChange = { state.missingRssi = it.roundToInt() }
-                    )
-                    SettingToggle(
-                        "Device-offset normalization",
-                        "Optional median offset normalization across shared BSSIDs",
-                        state.deviceOffsetNormalization,
-                        enabled = editable,
-                        onCheckedChange = { state.deviceOffsetNormalization = it }
-                    )
-                    LabelValue("Exact-match safeguard", "Enabled")
-                    LabelValue("Unlike-database detection", "Enabled")
-                }
-            },
-            secondary = {
-                SectionCard("PDR & particle filter", "Session values are logged with each estimate") {
-                    SettingSlider(
-                        label = "Default stride",
-                        valueLabel = "%.2f m".format(state.strideMetres),
-                        value = state.strideMetres,
-                        range = 0.4f..1.2f,
-                        steps = 79,
-                        enabled = editable,
-                        onChange = { state.strideMetres = it }
-                    )
-                    SettingSlider(
-                        label = "Particle count",
-                        valueLabel = state.particleCount.toString(),
-                        value = state.particleCount.toFloat(),
-                        range = 100f..1_500f,
-                        steps = 13,
-                        enabled = editable,
-                        onChange = { state.particleCount = (it / 100f).roundToInt() * 100 }
-                    )
-                    LabelValue("Accelerometer fallback", "Not implemented; step detector required")
-                    LabelValue("Heading preference", "Game rotation vector")
-                    LabelValue("Global relocalization", "Explicit strong-match recovery")
-                }
+        AdvancedSection(title = POSITIONING_SETTINGS, subtitle = "Wi-Fi matching, step length and tracking. Only change these if you know why.") {
+            if (!editable) Text("Stop tracking or recording before changing these settings.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { resetAlgorithmDefaults(state) }, enabled = editable) {
+                Icon(Icons.Outlined.RestartAlt, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Reset defaults")
             }
-        )
-
-        AdaptiveColumns(
-            primaryWeight = 1.05f,
-            secondaryWeight = 0.95f,
-            primary = {
-                SectionCard("Permissions & hardware", "Requested only when the matching workflow starts") {
-                    PermissionRow("Wi-Fi state", "manifest ready", true)
-                    PermissionRow("Coarse + fine location", "Android 12+ pair; fine is required for scan-derived location", true)
-                    PermissionRow("Nearby Wi-Fi", "version-aware", true)
-                    PermissionRow("Physical activity", "requested for step tracking on Android 10+", true)
-                    PermissionRow("Camera", "requested for QR scan", true)
-                    PermissionRow("Bluetooth scan", "not requested while BLE is off", false)
-                    Text(
-                        "Android Wi-Fi throttling is reported honestly; a cached broadcast is never counted as a fresh survey snapshot.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    FilledTonalButton(
-                        onClick = { state.selectDestination(TurnDestination.RADIO_DIAGNOSTICS) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-                    ) { Text("Open hardware diagnostics") }
-                }
-            },
-            secondary = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    SectionCard("Appearance", "Stored as a local preference") {
-                        SettingToggle("Dark mode", "Blue and white by day; navy and blue by night", state.darkTheme) { state.darkTheme = it }
+            AdaptiveColumns(
+                primary = {
+                    SectionCard("Wi-Fi positioning", "How a Wi-Fi reading is matched to the points you recorded (weighted k-nearest neighbours)") {
+                        SettingSlider(
+                            label = "Recorded points compared (k)",
+                            valueLabel = state.knnK.toString(),
+                            value = state.knnK.toFloat(),
+                            range = 1f..10f,
+                            steps = 8,
+                            enabled = editable,
+                            onChange = { state.knnK = it.roundToInt() }
+                        )
+                        SettingSlider(
+                            label = "Signal assumed when an access point is missing",
+                            valueLabel = "${state.missingRssi} dBm",
+                            value = state.missingRssi.toFloat(),
+                            range = -120f..-80f,
+                            steps = 39,
+                            enabled = editable,
+                            onChange = { state.missingRssi = it.roundToInt() }
+                        )
+                        SettingToggle(
+                            "Device-offset normalization",
+                            "Corrects for phones that read all Wi-Fi a little stronger or weaker",
+                            state.deviceOffsetNormalization,
+                            enabled = editable,
+                            onCheckedChange = { state.deviceOffsetNormalization = it }
+                        )
+                        LabelValue("Exact-match safeguard", "On")
+                        LabelValue("Unknown-place detection", "On")
                     }
-                    SectionCard("Build", "Reproducibility metadata") {
-                        LabelValue("Application", "TURN")
-                        LabelValue("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-                        LabelValue("Package", BuildConfig.APPLICATION_ID)
-                        LabelValue("Storage", "Offline Room database")
+                },
+                secondary = {
+                    SectionCard("Step tracking", "Step counting and the particle filter that follows you between Wi-Fi fixes") {
+                        SettingSlider(
+                            label = "Step length",
+                            valueLabel = "%.2f m".format(state.strideMetres),
+                            value = state.strideMetres,
+                            range = 0.4f..1.2f,
+                            steps = 79,
+                            enabled = editable,
+                            onChange = { state.strideMetres = it }
+                        )
+                        SettingSlider(
+                            label = "Tracking samples (particles)",
+                            valueLabel = state.particleCount.toString(),
+                            value = state.particleCount.toFloat(),
+                            range = 100f..1_500f,
+                            steps = 13,
+                            enabled = editable,
+                            onChange = { state.particleCount = (it / 100f).roundToInt() * 100 }
+                        )
+                        LabelValue("Step counting", "Uses the phone's step detector (required)")
+                        LabelValue("Direction source", "Game rotation vector")
+                        LabelValue("Recovering when lost", "Only on a strong Wi-Fi match")
                     }
                 }
-            }
-        )
+            )
+        }
 
-        BleDisabledBanner()
-        SectionCard("Future BLE correction", "Code paths exist, but no beacon hardware is required") {
+        AdvancedSection(title = "Permissions & hardware", subtitle = "What TURN asks for, and when") {
+            PermissionRow("Wi-Fi state", "Ready", true)
+            PermissionRow("Location", "Needed by Android to read Wi-Fi scans", true)
+            PermissionRow("Nearby Wi-Fi", "Asked on newer Android versions", true)
+            PermissionRow("Physical activity", "Asked when step tracking starts", true)
+            PermissionRow("Camera", "Asked when you map with the camera or scan a QR code", true)
+            PermissionRow("Bluetooth scan", "Not asked — Bluetooth beacons are off", false)
+            Text(
+                "Android limits how often apps can scan Wi-Fi. TURN shows when a scan is old instead of counting it as new.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FilledTonalButton(
+                onClick = { state.selectDestination(TurnDestination.RADIO_DIAGNOSTICS) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Open diagnostics") }
+        }
+
+        AdvancedSection(title = "About this build") {
+            LabelValue("Application", "TURN")
+            LabelValue("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            LabelValue("Package", BuildConfig.APPLICATION_ID)
+            LabelValue("Storage", "On this phone only (offline database)")
+        }
+
+        AdvancedSection(title = "Bluetooth beacons", subtitle = "Not used — TURN works with Wi-Fi and step tracking") {
+            BleDisabledBanner()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.BluetoothDisabled, contentDescription = null, tint = TurnAmber)
                 Column(Modifier.weight(1f)) {
-                    Text("Feature flag off", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text("Beacons are off", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "Register and physically place beacons before enabling scans. Fake BLE observations are allowed only in labelled demo mode.",
+                        "Beacons would need to be registered and physically placed before scanning. Simulated beacon readings appear only in demo mode.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Switch(checked = state.bleConfigured, onCheckedChange = null, enabled = false)
             }
-            Spacer(Modifier.height(10.dp))
-            LabelValue("Parsers", "iBeacon · Eddystone UID")
-            LabelValue("Default build flag", if (BuildConfig.BLE_DEFAULT_ENABLED) "enabled" else "disabled")
+            LabelValue("Supported beacon types", "iBeacon · Eddystone UID")
+            LabelValue("Default build flag", if (BuildConfig.BLE_DEFAULT_ENABLED) "on" else "off")
             Button(onClick = { state.lastDataAction = "Beacon registration requires a stable identifier and measured placement" }) {
                 Icon(Icons.Outlined.Info, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Review registration requirements")
+                Text("What beacon setup needs")
             }
         }
     }
 }
+
+/** Title of the collapsed positioning section (tests expand it by this name). */
+internal const val POSITIONING_SETTINGS = "Positioning (advanced)"
 
 @Composable
 private fun ModeChoice(title: String, detail: String, selected: Boolean, onClick: () -> Unit) {

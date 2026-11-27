@@ -358,10 +358,10 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         Icon(Icons.Outlined.NearMe, null); Spacer(Modifier.width(8.dp))
                         Text(if (!hasWalkableMap) "Prepare this floor" else "Start navigation", fontWeight = FontWeight.Bold)
                     }
-                    if (state.realLivePosition != null) Text("Grey dot: last known position · tracking stopped", style = MaterialTheme.typography.labelSmall,
+                    if (state.realLivePosition != null) Text("Grey dot: where you were when navigation ended", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (state.destinations.isEmpty()) Text(if (hasWalkableMap) "Add places and paths in Map setup to get directions."
-                        else "Import a floor plan or create one with your phone, then define walkable space.", style = MaterialTheme.typography.bodySmall)
+                    if (state.destinations.isEmpty()) Text(if (hasWalkableMap) "No places yet — add places and paths in Map setup to get directions."
+                        else "No map yet — map this floor with your phone (Tools) or import a floor plan picture in Map setup.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -416,14 +416,14 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                 }
                 "start" -> {
                     Text("Where are you now?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    OutlinedTextField(startQuery, { startQuery = it }, placeholder = { Text("Search rooms & survey points") }, singleLine = true,
+                    OutlinedTextField(startQuery, { startQuery = it }, placeholder = { Text("Search rooms & Wi-Fi spots") }, singleLine = true,
                         leadingIcon = { Icon(Icons.Outlined.Search, null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp))
                     val enabled = !busy && !state.sessionLocked
                     if (startQuery.isBlank()) {
                         ActionRow(Icons.Outlined.TouchApp, "Pick on map", "Tap the spot you're standing on", enabled) {
                             state.pickingStart = true; state.pickingHeading = false; sheet = null
                         }
-                        ActionRow(Icons.Outlined.Wifi, "Detect with Wi-Fi", "Needs a surveyed floor · waits for a confident fix", enabled) {
+                        ActionRow(Icons.Outlined.Wifi, "Detect with Wi-Fi", "Works once you've recorded Wi-Fi on this floor · waits until it's sure", enabled) {
                             state.chooseKnownStart(null); wifiStartChosen = true; startLabel = null; startPlaceId = null
                             sheet = if (positionOnly || selected != null) null else { query = ""; category = null; "destinations" }
                         }
@@ -446,7 +446,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                             Text(if (showReferences) "Hide survey points" else "Show survey points (${points.size})")
                         }
                         if (showReferences || startQuery.isNotBlank()) points.forEach { point ->
-                            PlaceRow(point.label, "Survey point · stand exactly on its floor label", trailing = null, selected = false,
+                            PlaceRow(point.label, "Wi-Fi spot · stand exactly on its floor sticker", trailing = null, selected = false,
                                 badge = null, enabled = enabled) { selectStart(point.metres, point.label) }
                         }
                     }
@@ -482,7 +482,7 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                         enabled = canStart && state.headingChoiceConfirmed, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                         shape = RoundedCornerShape(16.dp)) { Text("I'm facing this way · Go", fontWeight = FontWeight.Bold) }
                     else Button(onClick = { sheet = null }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("Done") }
-                    TextButton(onClick = { sheet = null; details = true }) { Text("Advanced direction controls") }
+                    TextButton(onClick = { sheet = null; details = true }) { Text("Advanced: all direction controls") }
                 }
                 "options" -> {
                     Text("Map & tracking", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -497,31 +497,40 @@ fun CanvasNavigationScreen(state: TurnAppState, actions: TurnAppActions) {
                             Text(if (wait > 0) "Fresh Wi-Fi available in ${wait}s" else "Request fresh Wi-Fi fix")
                         }
                         Text(state.realWifiEvidenceStatus, style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = actions.onRealLiveRelocalizationRequested, enabled = !busy) { Text("Relocalize with next Wi-Fi scan") }
+                        TextButton(onClick = actions.onRealLiveRelocalizationRequested, enabled = !busy) { Text("Find my position again (next Wi-Fi scan)") }
                         TextButton(onClick = { sheet = "direction" }, enabled = !busy) { Text("Adjust direction") }
                         Text(state.realLiveRecordingStatus, style = MaterialTheme.typography.bodySmall)
                     }
+                    StepFreeRouteOption(state)
+                    HorizontalDivider()
+                    Text("Advanced", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text("For testing how tracking works. Settings that affect a recording can't change while navigating.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Debug overlays", Modifier.weight(1f)); Switch(state.debugOverlays, { state.debugOverlays = it })
+                        Column(Modifier.weight(1f)) {
+                            Text("Show tracking details on the map")
+                            Text("Paths, nodes and the raw tracking layers below", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(state.debugOverlays, { state.debugOverlays = it })
                     }
                     if (state.debugOverlays) {
-                        OverlayChoice("Raw PDR trace", state.showRawPdr) { state.showRawPdr = it }
+                        OverlayChoice("Raw step path (PDR)", state.showRawPdr) { state.showRawPdr = it }
                         OverlayChoice("Wi-Fi fixes", state.showWifiFixes) { state.showWifiFixes = it }
                         OverlayChoice("Particles", state.showParticles) { state.showParticles = it }
                     }
-                    StepFreeRouteOption(state)
                     // Locked while tracking so a recorded session never mixes runs with and without magnetic evidence.
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Magnetic corrections")
-                            Text(if (live) state.realMagneticStatus else "${state.magneticCoverage.size} magnetic cells mapped on this floor",
+                            Text(if (live) state.realMagneticStatus else "Uses recorded magnetic paths · ${state.magneticCoverage.size} map cells recorded on this floor",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(state.magneticCorrectionsEnabled, { state.magneticCorrectionsEnabled = it }, enabled = !live)
                     }
                     FloorTrackingOptions(state, live)
-                    TextButton(onClick = { sheet = null; details = true }) { Text("Research details & all controls") }
-                    TextButton(onClick = { sheet = null; state.openTools() }) { Text("Map setup, survey & tools") }
+                    TextButton(onClick = { sheet = null; details = true }) { Text("All controls and research details") }
+                    TextButton(onClick = { sheet = null; state.openTools() }) { Text("Open Tools (Map setup, Record Wi-Fi…)") }
                 }
             }
         }

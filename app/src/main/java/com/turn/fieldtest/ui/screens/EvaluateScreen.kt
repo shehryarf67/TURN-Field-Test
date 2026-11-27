@@ -57,9 +57,9 @@ fun EvaluateScreen(state: TurnAppState, compact: Boolean, onCapture: (Checkpoint
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         PageHeader(
-            eyebrow = "06 · Independent validation",
-            title = "Evaluate positioning",
-            description = "Capture estimates at physically marked checkpoints. Test samples stay separate from the training fingerprint database.",
+            eyebrow = "Accuracy test",
+            title = "Accuracy test",
+            description = "Stand on a marked spot whose real position you know and record where TURN thinks you are. These test results are kept separate from your Wi-Fi recordings.",
             compact = compact,
             action = {
                 Button(onClick = state::captureEvaluationSample) {

@@ -67,12 +67,12 @@ internal fun CanvasAppShell(state: TurnAppState, actions: TurnAppActions) {
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 if (state.mode == DataMode.DEMO) Surface(color = MaterialTheme.colorScheme.tertiaryContainer) {
-                    Text("DEMO · simulated data", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    Text("Demo mode · simulated data (change in Settings)", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelMedium)
                 }
                 if (state.liveRunning && !exploring) TextButton(
                     onClick = { state.selectDestination(TurnDestination.LIVE_LOCATE) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.MyLocation, null); Spacer(Modifier.width(8.dp)); Text("Tracking is running · Return to map")
+                    Icon(Icons.Outlined.MyLocation, null); Spacer(Modifier.width(8.dp)); Text("Navigation is running · back to the map")
                 }
                 if (state.toolsHome) ToolsScreen(state, actions)
                 else TurnScreen(state, actions, compact = true)

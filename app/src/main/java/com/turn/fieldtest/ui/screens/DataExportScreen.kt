@@ -104,9 +104,9 @@ fun DataExportScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         PageHeader(
-            eyebrow = "07 · Research data",
-            title = "Data & export",
-            description = "Move venue definitions, raw observations, estimates and independent test results through Android's document picker.",
+            eyebrow = "Export & backup",
+            title = "Export & backup",
+            description = "Save maps, recordings and test results to your files, or check a file before importing it.",
             compact = compact,
             action = {
                 OutlinedButton(onClick = { openDocument.launch(arrayOf("application/json", "text/csv", "application/octet-stream")) }) {
