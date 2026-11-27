@@ -47,10 +47,30 @@ class WalkMapperWorkflowTest {
         }
         compose.waitUntil(10_000) {vm.doc!=null}
         var requests=0
-        compose.setContent {TurnTheme {WalkMapperScreen(vm,null,"AR supported · tap Start camera to begin",true,
+        compose.setContent {TurnTheme {WalkMapperScreen(vm,null,"This phone can map with the camera",true,
             {requests++},{},{},{},{},{})}}
+        compose.onNodeWithText("Step 1 of 6").assertExists()
+        compose.onNodeWithText("Set the starting point").assertExists()
         compose.onNodeWithText("Start camera").assertIsEnabled().performClick()
         compose.runOnIdle {assertEquals(1,requests); assertNull(vm.room)}
+    }
+    @Test fun firstStepExplainsWhyTheFloorIsUsed(): Unit=runBlocking {
+        val database=TurnDatabase.build(app,name).also {db=it}
+        lateinit var vm: WalkMapperViewModel
+        instrumentation.runOnMainSync {
+            vm=WalkMapperViewModel(app,SavedStateHandle(mapOf("venueId" to "v","floorId" to "f")),ScanRepository(database,app))
+            store.put("mapper",vm)
+        }
+        compose.waitUntil(10_000) {vm.doc!=null}
+        compose.setContent {TurnTheme {WalkMapperScreen(vm,null,"This phone can map with the camera",true,{},{},{},{},{},{})}}
+        compose.onNodeWithText("This spot becomes the corner of your map (0,0).").assertExists()
+        compose.onNodeWithText("Why the floor?",substring=true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Show help").performClick()
+        compose.onNodeWithText("Why the floor?",substring=true).assertExists()
+        // The measured alternative skips the camera steps and goes straight to marking corners.
+        compose.onNodeWithText("No camera? Enter measurements instead").performScrollTo().performClick()
+        compose.onNodeWithText("Step 3 of 6").assertExists()
+        compose.onNodeWithText("Mark the corners of this room").assertExists()
     }
     @Test fun guidedMeasuredCaptureLeadsToReviewAndMeasuredChecks(): Unit=runBlocking {
         val database=TurnDatabase.build(app,name).also {db=it}
@@ -60,22 +80,29 @@ class WalkMapperWorkflowTest {
             store.put("mapper",vm)
         }
         compose.waitUntil(10_000) {vm.doc!=null}
-        compose.setContent {TurnTheme {WalkMapperScreen(vm,null,"AR unavailable",false,{},{},{},{},{},{})}}
+        compose.setContent {TurnTheme {WalkMapperScreen(vm,null,"This phone can't map with the camera",false,{},{},{},{},{},{})}}
         compose.onNodeWithText("Start camera").assertDoesNotExist()
-        compose.onNodeWithText("Use measured drawing").performScrollTo().performClick()
+        compose.onNodeWithText("Enter measurements").performScrollTo().performClick()
+        compose.onNodeWithText("Step 3 of 6").assertExists()
         compose.onAllNodesWithText("Name room").onFirst().performScrollTo().performClick()
         compose.onNodeWithText("Room name").performTextInput("Lab")
-        compose.onNodeWithText("Create room").performClick()
+        compose.onNodeWithText("Start room").performClick()
         // Supply known geometry through the same ViewModel API exercised by the measured fields.
         compose.runOnIdle {vm.measuredPoint(0.0,0.0); vm.measuredPoint(4.0,0.0); vm.measuredPoint(4.0,3.0); vm.measuredPoint(0.0,3.0)}
-        compose.onNodeWithText("Review outline").performScrollTo().performClick()
-        compose.onNodeWithText("Confirm outline").performScrollTo().performClick()
-        compose.onNodeWithText("Check measurements").performScrollTo().performClick()
-        compose.onNodeWithText("Save floor plan").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Finish floor").performScrollTo().performClick()
+        compose.onNodeWithText("Step 4 of 6").assertExists()
+        compose.onNodeWithText("Looks right — finish Lab").performScrollTo().performClick()
+        compose.onNodeWithText("Next: check the size").performScrollTo().performClick()
+        compose.onNodeWithText("Step 5 of 6").assertExists()
+        compose.onNodeWithText("Next: name and save").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("From corner: Choose").performScrollTo().assertExists()
         compose.runOnIdle {assertTrue(vm.room!!.confirmed); assertEquals(4,vm.room!!.corners.size)}
         compose.runOnIdle {val points=vm.doc!!.points(); vm.measurement(points[0].id,points[1].id,4.0,"VALIDATION")}
+        compose.onNodeWithText("Next: name and save").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithText("Step 6 of 6").assertExists()
         compose.onNodeWithText("Save floor plan").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Back to the tape check").performScrollTo().performClick()
+        compose.onNodeWithText("Step 5 of 6").assertExists()
     }
     @Test fun measuredFallbackCapturesVerifiesAndPublishesAnActualTurnFloor(): Unit=runBlocking {
         val database=TurnDatabase.build(app,name).also {db=it}
@@ -85,7 +112,7 @@ class WalkMapperWorkflowTest {
         instrumentation.runOnMainSync {vm=WalkMapperViewModel(app,SavedStateHandle(mapOf("venueId" to "v","floorId" to "f")),ScanRepository(database,app)); store.put("mapper",vm)}
         compose.waitUntil(10_000) {vm.doc!=null}
         var published: String?=null
-        compose.setContent {TurnTheme {MapperDetailsScreen(vm,null,"ARCore unavailable · measured drawing",false,{}, {}, {},{vm.publish {published=it}},{},{})}}
+        compose.setContent {TurnTheme {MapperDetailsScreen(vm,null,"This phone can't map with the camera",false,{}, {}, {},{vm.publish {published=it}},{},{})}}
         compose.onNodeWithText("Start camera").assertIsNotEnabled()
         compose.onNodeWithText("Room name").performScrollTo().performTextInput("Bedroom")
         compose.onNodeWithText("Room name").assertTextContains("Bedroom")
@@ -96,7 +123,7 @@ class WalkMapperWorkflowTest {
         compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
             .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f,320f) }
         try {
-            compose.onNodeWithText("Start next room").assertIsDisplayed().assertIsEnabled().performClick()
+            compose.onNodeWithText("Start new room").assertIsDisplayed().assertIsEnabled().performClick()
         } catch(error: AssertionError) {
             File(app.getExternalFilesDir(null),"mapper-ui-failure.txt").writeText(compose.onRoot(useUnmergedTree=true).printToString())
             instrumentation.uiAutomation.takeScreenshot().let { bitmap ->
@@ -111,13 +138,13 @@ class WalkMapperWorkflowTest {
         compose.onNodeWithText("Y (m)").performScrollTo().performTextInput("0")
         compose.onNodeWithText("Y (m)").performImeAction()
         waitForKeyboardLayout()
-        compose.onNodeWithText("Add measured point").performScrollTo().performClick()
+        compose.onNodeWithText("Add measured corner").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("First measured corner: ${vm.status}; tool=${vm.tool}",1,vm.doc!!.points().size)
             vm.measuredPoint(4.0,0.0); vm.measuredPoint(4.0,3.0); vm.measuredPoint(0.0,3.0)
             assertEquals("Complete measured outline: ${vm.status}",4,vm.doc!!.points().size)
         }
-        compose.onNodeWithText("Confirm outline").performScrollTo().performClick()
+        compose.onNodeWithText("Finish room").performScrollTo().performClick()
         compose.runOnIdle {
             val points=vm.doc!!.points()
             vm.measurement(points[0].id,points[1].id,2.0,"CALIBRATION"); vm.applyCalibration(vm.doc!!.measurements.single().id)
@@ -126,14 +153,14 @@ class WalkMapperWorkflowTest {
             assertEquals(4,vm.doc!!.points().size); vm.finishRoom()
             vm.measurement(points[1].id,points[2].id,1.5,"VALIDATION")
         }
-        compose.onNodeWithText("Verify & save",useUnmergedTree=true).performScrollTo().performClick()
-        compose.onNodeWithText("Save as new TURN project").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithText("Measure & save",useUnmergedTree=true).performScrollTo().performClick()
+        compose.onNodeWithText("Save floor plan").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(15_000) {published!=null}
         assertNotEquals("f",published)
         val map=com.turn.fieldtest.data.repository.ProjectRepository(database).load(com.turn.fieldtest.data.repository.ProjectContext(vm.doc!!.publishedVenueId!!,published!!))
         assertEquals("Bedroom",map.regions.single().name); assertTrue(map.nodes.isNotEmpty())
         image=File(android.net.Uri.parse(map.asset!!.contentUri).path!!)
         assertTrue(image!!.isFile)
-        compose.onNodeWithText("Open saved floor in TURN").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Open saved floor").performScrollTo().assertIsDisplayed()
     }
 }

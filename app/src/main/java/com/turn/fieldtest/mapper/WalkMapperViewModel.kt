@@ -20,12 +20,15 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     var currentRoomId by mutableStateOf("")
     var selectedWallId by mutableStateOf<String?>(null)
     var selectedPointId by mutableStateOf<String?>(null)
-    var status by mutableStateOf("Opening local scan drafts…"); private set
+    var status by mutableStateOf("Opening your saved map…"); private set
     var arStatus by mutableStateOf(ArStatus("Camera paused")); private set
+    /** Short-lived feedback about the last camera tap (for example why it was refused); cleared after a few seconds. */
+    var arNotice by mutableStateOf<String?>(null); private set
+    private var noticeJob: Job?=null
     var floorDescription by mutableStateOf(""); private set
     var tool by mutableStateOf("CORNER")
     var busy by mutableStateOf(false); private set
-    var saveStatus by mutableStateOf("Draft not saved yet"); private set
+    var saveStatus by mutableStateOf("Not saved yet"); private set
     var alignmentA by mutableStateOf<String?>(null); var alignmentB by mutableStateOf<String?>(null)
     var activeSegment by mutableStateOf<String?>(null); private set
     var pendingEndpoint by mutableStateOf<P2?>(null); private set
@@ -44,9 +47,9 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
                 val saved=availableDrafts.firstOrNull()?.let { repository.load(it.id) }
                 doc=saved?.copy(segments=saved.segments.map { s->if(s.source=="ARCORE" && !s.interrupted) s.copy(interrupted=true,reviewedAfterLoss=false) else s }) ?: ScanDocument(venueId=venue,floorId=floor)
                 currentRoomId=doc!!.rooms.lastOrNull()?.id.orEmpty()
-                status=if(saved==null) "Choose AR scanning or measured drawing" else "Draft restored. New AR capture requires two saved alignment references."
+                status=if(saved==null) "Ready to start" else "Welcome back — your saved map is loaded"
                 if(saved!=null) scheduleSave()
-            } catch(e: Exception) { status="Could not open scan: ${e.message}" }
+            } catch(e: Exception) { status="Couldn't open your saved map: ${e.message}" }
         }
     }
     fun message(text: String) { status=text }
@@ -56,10 +59,10 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
         runCatching {
             val after=change(before).copy(updatedAt=System.currentTimeMillis(),status="DRAFT")
             val positions=after.points().map {it.p}+after.walls.flatMap {listOf(it.a,it.b)}+after.doors.flatMap {listOf(it.a,it.b)}
-            require(positions.all {it.finite && abs(it.x)<=1000 && abs(it.y)<=1000}) {"Coordinates must stay within ±1000 m; check units and alignment"}
+            require(positions.all {it.finite && abs(it.x)<=1000 && abs(it.y)<=1000}) {"That would put points more than 1 km away — check the numbers you entered"}
             if(undo) { history.addLast(before.copy(poses=emptyList())); while(history.size>32) history.removeFirst() }
             doc=after; scheduleSave()
-        }.onFailure { status=it.message ?: "Geometry change rejected" }
+        }.onFailure { status=it.message?.takeUnless { m->m=="Failed requirement." } ?: "That change couldn't be made — check the values and try again" }
     }
     private fun scheduleSave() {
         if(saveJob?.isActive==true) return
@@ -67,8 +70,8 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     }
     suspend fun saveNow(): Boolean = writeMutex.withLock {
         val value=doc ?: return@withLock false
-        try { repository.save(value); saveStatus="Draft saved on this phone"; availableDrafts=repository.drafts(value.floorId); true }
-        catch(e: Exception) { if(e is CancellationException) throw e; saveStatus="Draft save failed: ${e.message}. Keep TURN open and retry."; status=saveStatus; false }
+        try { repository.save(value); saveStatus="Saved on this phone"; availableDrafts=repository.drafts(value.floorId); true }
+        catch(e: Exception) { if(e is CancellationException) throw e; saveStatus="Couldn't save: ${e.message}. Keep TURN open and try again."; status=saveStatus; false }
     }
     fun save() { viewModelScope.launch { saveNow() } }
     fun name(value: String)=update(false) {it.copy(name=value.take(80))}
@@ -85,17 +88,17 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     fun clearHiddenCorner() { hiddenDraft=HiddenCornerDraft(); hiddenSegment=null }
     /** Places the corner where the two tapped walls meet (flagged as inferred in the draft and quality report). */
     fun placeHiddenCorner() {
-        val r=room ?: run { status="Start and name a room first"; return }
-        val b=hiddenWallB ?: run { status="Tap the first wall, then Next wall"; return }
+        val r=room ?: run { status="Start a room first"; return }
+        val b=hiddenWallB ?: run { status="Tap points along the first wall, then tap Next wall"; return }
         val segment=hiddenSegment ?: return
-        if(r.confirmed) { status="Outline confirmed; unconfirm it in review before adding corners"; return }
-        runCatching { HiddenCorners.cornerFromWalls(hiddenWallA,b) }.onFailure { status=it.message ?: "Walls cannot be intersected" }.onSuccess { (corner,inference) ->
-            if(r.corners.any { it.p.distance(corner)<0.04 }) { status="Corner duplicates an existing point"; return }
+        if(r.confirmed) { status=ROOM_FINISHED; return }
+        runCatching { HiddenCorners.cornerFromWalls(hiddenWallA,b) }.onFailure { status=it.message ?: "Those two walls don't meet — tap points along two different walls" }.onSuccess { (corner,inference) ->
+            if(r.corners.any { it.p.distance(corner)<0.04 }) { status="There's already a corner there"; return }
             val point=ScanPoint(p=corner,source="INFERRED_FROM_WALLS",segmentId=segment,timestamp=System.currentTimeMillis(),
                 provenance=CornerProvenance.INFERRED,inference=inference)
             update { d->d.copy(rooms=d.rooms.map { if(it.id==r.id) it.copy(corners=it.corners+point) else it }) }
             selectedPointId=point.id; clearHiddenCorner()
-            status="Corner ${r.corners.size+1} inferred from two walls · ${"%.2f, %.2f m".format(corner.x,corner.y)} · walls %.0f° apart".format(inference.angleDegrees)
+            status="Corner ${r.corners.size+1} added where the two walls meet (walls %.0f° apart) — check it with a tape later".format(inference.angleDegrees)
         }
     }
     fun chooseRoom(id: String) {if(doc?.rooms?.any {it.id==id}==true) {currentRoomId=id; pendingEndpoint=null}}
@@ -111,7 +114,7 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
         if(history.isEmpty() || busy) return
         val previous=history.peekLast() ?: return
         if(activeSegment!=null && previous.segments.associate {it.id to it.alignment}!=doc!!.segments.associate {it.id to it.alignment}) {
-            status="Pause the camera before undoing capture-frame or room setup changes"; return
+            status="Tap Pause first — undoing this changes how the camera lines up with the map"; return
         }
         doc=doc!!.restoreGeometry(history.removeLast()).copy(updatedAt=System.currentTimeMillis(),status="DRAFT"); scheduleSave()
     }
@@ -121,37 +124,37 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     fun renameRoom(name: String) = update { it.copy(rooms=it.rooms.map { r->if(r.id==currentRoomId) r.copy(name=name.trim().take(80)) else r }) }
     fun finishRoom() = update { d -> val r=room ?: error("Start a room first"); require(ScanGeometry.outlineError(r.corners.map { it.p })==null) { ScanGeometry.outlineError(r.corners.map { it.p }).orEmpty() }; d.copy(rooms=d.rooms.map { if(it.id==r.id) it.copy(confirmed=true) else it }) }
     fun measuredPoint(x: Double,y: Double) {
-        require(x.isFinite() && y.isFinite() && abs(x)<1000 && abs(y)<1000) { "Enter finite measured metre coordinates below 1000 m" }
+        require(x.isFinite() && y.isFinite() && abs(x)<1000 && abs(y)<1000) { "Enter distances in metres (less than 1000)" }
         // Numeric input is already in the CURRENT map frame, never in a previously scaled AR frame.
         val segment=doc!!.segments.lastOrNull {it.source=="MANUAL_MEASURED" && it.alignment==Alignment()}?.id ?: "manual:${scanId()}"
         if(doc!!.segments.none { it.id==segment }) update(false) { it.copy(segments=it.segments+ScanSegment(segment,"MANUAL_MEASURED")) }
         receivePoint(P2(x,y),scanId(),"MANUAL_MEASURED",System.currentTimeMillis(),segment)
     }
     private fun receivePoint(p: P2,id: String,source: String,time: Long,segment: String,height: Double?=null) {
-        if(!p.finite) { status="Invalid surface coordinate rejected"; return }
-        val r=room ?: run { status="Start and name a room first"; return }
+        if(!p.finite) { status="That tap couldn't be measured — try again"; return }
+        val r=room ?: run { status="Start a room first"; return }
         val s=doc!!.segments.firstOrNull { it.id==segment } ?: return
-        if(!s.aligned || s.interrupted) { status="Section needs alignment before capture"; return }
+        if(!s.aligned || s.interrupted) { status="Finish setting the starting point and direction (steps 1 and 2) before marking corners"; return }
         val point=s.alignment.apply(p)
         when(tool) {
             "CORNER","BOUNDARY","ENTRANCE" -> {
-                if(r.confirmed) { status="Outline confirmed; unconfirm it in review before adding corners"; return }
-                if(r.corners.any { it.p.distance(point)<0.04 }) { status="Corner duplicates an existing point"; return }
+                if(r.confirmed) { status=ROOM_FINISHED; return }
+                if(r.corners.any { it.p.distance(point)<0.04 }) { status="There's already a corner there"; return }
                 val provenance=HiddenCorners.provenanceForHeight(height)
                 update { d->d.copy(rooms=d.rooms.map { if(it.id==r.id) it.copy(corners=it.corners+ScanPoint(id,point,source,segment,time,provenance=provenance,heightAboveFloor=height)) else it }) }
-                selectedPointId=id; status="Corner ${r.corners.size+1} placed · ${"%.2f, %.2f m".format(point.x,point.y)}"+
-                    if(provenance==CornerProvenance.PROJECTED) " · projected down from %.1f m".format(height) else ""
+                selectedPointId=id; status="Corner ${r.corners.size+1} added"+
+                    if(provenance==CornerProvenance.PROJECTED) " (measured from %.1f m up the wall — check it with a tape later)".format(height) else ""
             }
             "WALL_CORNER" -> {
-                if(r.confirmed) { status="Outline confirmed; unconfirm it in review before adding corners"; return }
+                if(r.confirmed) { status=ROOM_FINISHED; return }
                 hiddenDraft=hiddenDraft.add(point)
                 hiddenSegment=segment
-                status=if(hiddenWallB==null) "Wall 1: ${hiddenWallA.size} points · tap more along it, then Next wall"
-                    else "Wall 2: ${hiddenWallB!!.size} points · tap more along it, then Place corner"
+                status=if(hiddenWallB==null) "First wall: ${hiddenWallA.size} points — tap more along it, then Next wall"
+                    else "Second wall: ${hiddenWallB!!.size} points — tap more along it, then Place corner"
             }
             "WALL","DOOR" -> {
                 val a=pendingEndpoint
-                if(a==null) { pendingEndpoint=point; status="First endpoint selected · mark the second"; return }
+                if(a==null) { pendingEndpoint=point; status="First end marked — now mark the other end"; return }
                 pendingEndpoint=null
                 if(tool=="WALL") {
                     if(a.distance(point)<0.4) { status="Wall must be at least 0.4 m long"; return }
@@ -159,12 +162,12 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
                     update { it.copy(walls=it.walls+wall) }; selectedWallId=wall.id
                 } else {
                     val w=doc!!.allWalls().firstOrNull { it.id==selectedWallId }
-                    if(w==null) { status="Select a confirmed wall in preview before marking a doorway"; return }
-                    if(a.distance(ScanGeometry.projection(a,w.a,w.b))>doc!!.thresholds.doorToleranceMetres || point.distance(ScanGeometry.projection(point,w.a,w.b))>doc!!.thresholds.doorToleranceMetres) { status="Door endpoints are too far from the selected wall; edit measured coordinates in review"; return }
+                    if(w==null) { status="First tap the wall with the doorway on the map, then mark both sides of the opening"; return }
+                    if(a.distance(ScanGeometry.projection(a,w.a,w.b))>doc!!.thresholds.doorToleranceMetres || point.distance(ScanGeometry.projection(point,w.a,w.b))>doc!!.thresholds.doorToleranceMetres) { status="Those points are too far from the chosen wall — tap both sides of the opening on that wall"; return }
                     val door=ScanDoor(wallId=w.id,a=ScanGeometry.projection(a,w.a,w.b),b=ScanGeometry.projection(point,w.a,w.b),roomIds=listOf(r.id))
                     update { it.copy(doors=it.doors+door) }
                 }
-                status="${tool.lowercase().replaceFirstChar { it.uppercase() }} saved in draft"
+                status=if(tool=="WALL") "Wall added" else "Doorway added"
             }
         }
     }
@@ -179,23 +182,23 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     }
     fun wallDecision(id: String,accept: Boolean) = update { d->d.copy(walls=d.walls.map { if(it.id==id) it.copy(status=if(accept) "CONFIRMED" else "REJECTED") else it }) }
     fun editWall(id: String,a: P2,b: P2) = update { d-> require(a.finite && b.finite && a.distance(b)>=0.1); d.copy(walls=d.walls.map { if(it.id==id) it.copy(a=a,b=b,source="MANUAL_ADJUSTED",status="CONFIRMED") else it }) }
-    fun splitWall(id: String) = update { d -> val w=d.walls.first { it.id==id }; require(d.doors.none { it.wallId==id }) { "Remove/reassign openings before splitting this wall" }; val middle=P2((w.a.x+w.b.x)/2,(w.a.y+w.b.y)/2)
+    fun splitWall(id: String) = update { d -> val w=d.walls.first { it.id==id }; require(d.doors.none { it.wallId==id }) { "Remove the doorway on this wall before splitting it" }; val middle=P2((w.a.x+w.b.x)/2,(w.a.y+w.b.y)/2)
         d.copy(walls=d.walls.filterNot { it.id==id }+listOf(w.copy(id=scanId(),b=middle),w.copy(id=scanId(),a=middle))) }
-    fun joinWalls(first: String,second: String) = update { d -> require(d.doors.none { it.wallId==first || it.wallId==second }) { "Reassign doorways before joining walls" }
+    fun joinWalls(first: String,second: String) = update { d -> require(d.doors.none { it.wallId==first || it.wallId==second }) { "Remove the doorways on these walls before joining them" }
         val a=d.walls.first { it.id==first }; val b=d.walls.first { it.id==second }; val merged=ScanGeometry.mergeWalls(listOf(a,b),d.thresholds.snapMetres)
-        require(merged.size==1) { "Walls must be near-collinear and touching" }; d.copy(walls=d.walls.filterNot { it.id==first || it.id==second }+merged) }
+        require(merged.size==1) { "Only walls that touch and run in a straight line can be joined" }; d.copy(walls=d.walls.filterNot { it.id==first || it.id==second }+merged) }
     fun door(id: String,a: P2,b: P2,roomIds: List<String>,walkable: Boolean)=update { d->require(a.finite && b.finite); d.copy(doors=d.doors.map { if(it.id==id) it.copy(a=a,b=b,roomIds=roomIds,walkable=walkable) else it }) }
     fun removeDoor(id: String)=update { it.copy(doors=it.doors.filterNot { d->d.id==id }) }
     fun measurement(a: String,b: String,length: Double,purpose: String) = update { d ->
-        require(length.isFinite() && length>0 && a!=b) { "Choose two points and a positive measured length" }
+        require(length.isFinite() && length>0 && a!=b) { "Pick two different corners and type the length you measured" }
         val points=d.points().associateBy { it.id }; val estimated=points.getValue(a).p.distance(points.getValue(b).p)
         require(estimated>0.01)
         d.copy(measurements=d.measurements+ScanMeasurement(pointA=a,pointB=b,measured=length,estimatedAtCapture=estimated,purpose=purpose))
     }
     fun applyCalibration(id: String) = update { d ->
-        val m=d.measurements.first { it.id==id && it.purpose=="CALIBRATION" }; require(!m.calibrationApplied) { "This calibration was already applied" }
+        val m=d.measurements.first { it.id==id && it.purpose=="CALIBRATION" }; require(!m.calibrationApplied) { "This size fix is already applied" }
         val points=d.points().associateBy { it.id }; val current=points.getValue(m.pointA).p.distance(points.getValue(m.pointB).p)
-        val scale=m.measured/current; require(scale in 0.5..2.0) { "Scale correction over 2×: check units or rescan" }
+        val scale=m.measured/current; require(scale in 0.5..2.0) { "That would change the map size by more than 2× — check you typed metres, or map the room again" }
         d.transformed(Alignment(scale=scale)).copy(measurements=d.measurements.map { if(it.id==id) it.copy(scaleApplied=scale) else it })
     }
     fun rotate(degrees: Double)=update { require(degrees.isFinite()); it.transformed(Alignment(radians=Math.toRadians(degrees))) }
@@ -209,17 +212,24 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
             segments=d.segments.map { if(it.id==segment) it.copy(alignment=t.after(old.alignment),aligned=true,reviewedAfterLoss=true) else it })
     }
     fun reviewInterruptedSections()=update { it.copy(segments=it.segments.map { s->s.copy(reviewedAfterLoss=true) }) }
-    fun thresholds(snap: Double,tolerance: Double,inlier: Double,minimumWall: Double)=update { require(snap in 0.001..0.3 && tolerance in 0.01..0.2 && inlier in .01..0.2 && minimumWall in .4..2.0); it.copy(thresholds=it.thresholds.copy(snapMetres=snap,validationRelativeTolerance=tolerance,lineInlierMetres=inlier,minimumWallMetres=minimumWall)) }
+    fun thresholds(snap: Double,tolerance: Double,inlier: Double,minimumWall: Double)=update { require(snap in 0.001..0.3 && tolerance in 0.01..0.2 && inlier in .01..0.2 && minimumWall in .4..2.0) {
+            "Allowed ranges: snap 0.001–0.3 m, error 1–20 %, wall-detection 0.01–0.2 m, shortest wall 0.4–2 m" }; it.copy(thresholds=it.thresholds.copy(snapMetres=snap,validationRelativeTolerance=tolerance,lineInlierMetres=inlier,minimumWallMetres=minimumWall)) }
     fun publish(done: (String)->Unit) {
         val value=doc ?: return; if(busy) return
         busy=true
-        viewModelScope.launch { try { writeMutex.withLock { saveJob?.cancel(); repository.save(value); val floor=repository.publish(value); doc=repository.load(value.id); status="Scan saved as a new TURN floor"; done(floor) } }
-            catch(e: Exception) { status="Map not published: ${e.message}" } finally { busy=false } }
+        viewModelScope.launch { try { writeMutex.withLock { saveJob?.cancel(); repository.save(value); val floor=repository.publish(value); doc=repository.load(value.id); status="Floor plan saved"; done(floor) } }
+            catch(e: Exception) { status="Couldn't save the floor plan: ${e.message}" } finally { busy=false } }
     }
-    fun cameraStarted(id: String) { activeSegment=id; pendingEndpoint=null; floorDescription=""; arStatus=ArStatus("Initializing ARCore") }
-    fun cameraStopped() { activeSegment?.let(::interrupted); activeSegment=null; floorDescription=""; save() }
+    fun cameraStarted(id: String) { activeSegment=id; pendingEndpoint=null; floorDescription=""; arNotice=null; arStatus=ArStatus("Starting the camera…") }
+    fun cameraStopped() { activeSegment?.let(::interrupted); activeSegment=null; floorDescription=""; arNotice=null; save() }
     private fun main(block: ()->Unit) { viewModelScope.launch(Dispatchers.Main.immediate) { if(!busy) block() } }
-    override fun status(value: ArStatus)=main { if(value.segment==null || value.segment==activeSegment) arStatus=value }
+    override fun status(value: ArStatus)=main {
+        if(value.segment!=null && value.segment!=activeSegment) return@main
+        if(!value.notice) { arStatus=value; return@main }
+        // A tap notice is shown for a few seconds over the coaching line; it never replaces the tracking state.
+        arNotice=value.text; arStatus=arStatus.copy(originSet=value.originSet)
+        noticeJob?.cancel(); noticeJob=viewModelScope.launch { delay(4000); arNotice=null }
+    }
     override fun floorCandidate(description: String)=main { if(activeSegment!=null) floorDescription=description }
     override fun reference(frame: FloorFrame,segmentId: String,length: Double) = main {
         if(segmentId!=activeSegment) return@main
@@ -227,10 +237,10 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
         val a=d.points().firstOrNull { it.id==alignmentA }; val b=d.points().firstOrNull { it.id==alignmentB }
         val alignment=if(d.points().isEmpty()) Alignment() else if(a!=null && b!=null)
             runCatching { Alignment.between(P2(0.0,0.0),P2(0.0,length),a.p,b.p) }.getOrElse { status=it.message.orEmpty(); return@main }
-            else { status="Two saved alignment references are required"; return@main }
-        if(alignment.scale !in 0.8..1.25) { status="Reference scale disagrees substantially: remeasure/restart capture"; return@main }
+            else { status="Pick two saved corners first, so the camera can line up with your map"; return@main }
+        if(alignment.scale !in 0.8..1.25) { status="The two spots you tapped are a different distance apart than the saved corners A and B. Tap Pause and try again, tapping exactly on those corners."; return@main }
         update(false) { it.copy(segments=it.segments+ScanSegment(segmentId,"ARCORE",frame,alignment,referencePointIds=listOfNotNull(a?.id,b?.id))) }
-        floorDescription=""; status="Floor and orientation confirmed · mark room corners in order"
+        floorDescription=""; status=if(a==null) "Map direction set — now mark the corners of the room" else "Lined up with your saved map — carry on marking corners"
     }
     override fun point(point: P2,id: String,source: String,timestamp: Long,segment: String,heightAboveFloor: Double)=main { receivePoint(point,id,source,timestamp,segment,heightAboveFloor) }
     override fun pose(value: PoseSample,frame: FloorFrame)=main {
@@ -266,6 +276,7 @@ class WalkMapperViewModel @JvmOverloads constructor(app: Application,state: Save
     override fun interrupted(segment: String)=main {
         val id=activeSegment?.takeIf {it==segment} ?: return@main
         update(false) { it.copy(segments=it.segments.map { s->if(s.id==id) s.copy(interrupted=true,reviewedAfterLoss=false) else s }) }
-        status="Capture interrupted. Saved geometry remains; align any new AR section to saved points."
+        status="Camera stopped. Your work is saved. To carry on, start the camera again and line it up with two saved corners."
     }
+    private companion object { const val ROOM_FINISHED="This room is marked finished — tap Reopen room to add more corners" }
 }

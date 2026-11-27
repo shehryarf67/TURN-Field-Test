@@ -28,32 +28,32 @@ import java.util.concurrent.Future
 class WalkMapperActivity: ComponentActivity() {
     private val vm by viewModels<WalkMapperViewModel>()
     private var camera by mutableStateOf<ArScanView?>(null)
-    private var availability by mutableStateOf("Checking ARCore support…")
+    private var availability by mutableStateOf("Checking whether this phone can map with the camera…")
     private var arSupported by mutableStateOf(false)
     private var installPending=false; private var userInstallRequested=true; private var starting=false
     private var closing: Future<*>?=null
     private var permissionPending=false
     private val permission=registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permissionPending=granted
-        if(granted) window.decorView.post { resumeRequestedCamera() } else vm.message("Camera permission denied. Allow Camera in Android Settings, then retry Start camera. Measured drawing is still available.")
+        if(granted) window.decorView.post { resumeRequestedCamera() } else vm.message("TURN needs the camera to map. Allow Camera for TURN in Android Settings, then tap Start camera again — or enter measurements instead.")
     }
     private val exportJson=registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if(uri!=null) lifecycleScope.launch {
             try { val text=com.turn.fieldtest.mapper.data.ScanRepository.json.encodeToString(com.turn.fieldtest.mapper.core.ScanDocument.serializer(),requireNotNull(vm.doc))
-                withContext(Dispatchers.IO) { contentResolver.openOutputStream(uri,"wt")!!.bufferedWriter().use { it.write(text) } }; vm.message("Experimental scan JSON exported")
-            } catch(e: Exception) { vm.message("Export failed: ${e.message}; draft remains saved") }
+                withContext(Dispatchers.IO) { contentResolver.openOutputStream(uri,"wt")!!.bufferedWriter().use { it.write(text) } }; vm.message("Map data file exported")
+            } catch(e: Exception) { vm.message("Export failed: ${e.message}. Your map is still saved.") }
         }
     }
     private val exportPng=registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
         if(uri!=null) lifecycleScope.launch {
             try {
                 val app=application as com.turn.fieldtest.TurnApplication
-                val floor=requireNotNull(vm.doc?.publishedFloorId) { "Save a mapped floor before exporting PNG" }
+                val floor=requireNotNull(vm.doc?.publishedFloorId) { "Save the floor plan before exporting its image" }
                 val asset=app.repositories.floorPlans.observeAsset(floor).firstValue()
-                requireNotNull(asset) { "Generated image unavailable" }
+                requireNotNull(asset) { "The floor plan image isn't available" }
                 withContext(Dispatchers.IO) { contentResolver.openInputStream(android.net.Uri.parse(asset.contentUri))!!.use { input->contentResolver.openOutputStream(uri,"wt")!!.use(input::copyTo) } }
-                vm.message("Floor-plan PNG exported")
-            } catch(e: Exception) { vm.message("PNG export failed: ${e.message}") }
+                vm.message("Floor plan image exported")
+            } catch(e: Exception) { vm.message("Image export failed: ${e.message}") }
         }
     }
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,7 +73,7 @@ class WalkMapperActivity: ComponentActivity() {
                 vm.doc?.publishedFloorId?.let {floor->setResult(RESULT_OK,Intent().putExtra("floorId",floor).putExtra("venueId",vm.doc!!.publishedVenueId ?: vm.doc!!.venueId))}
                 finish()
             } } },
-            onPublish={ vm.publish { floor-> setResult(RESULT_OK,Intent().putExtra("floorId",floor).putExtra("venueId",vm.doc!!.publishedVenueId)); vm.message("Mapped project saved. Export it below or open it in TURN.") } },
+            onPublish={ vm.publish { floor-> setResult(RESULT_OK,Intent().putExtra("floorId",floor).putExtra("venueId",vm.doc!!.publishedVenueId)); vm.message("Floor plan saved. Tap Open saved floor to see it in TURN.") } },
             onJson={ vm.save(); exportJson.launch("turn-walk-scan-${vm.doc?.id}.json") },
             onPng={ exportPng.launch("turn-floor-plan.png") },onCheckSupport=::checkSupport) } }
     }
@@ -92,18 +92,18 @@ class WalkMapperActivity: ComponentActivity() {
         ArCoreApk.getInstance().checkAvailabilityAsync(this) { result ->
             if(isFinishing || isDestroyed) return@checkAvailabilityAsync
             arSupported=result.isSupported
-            availability=when { result.isTransient->"Checking AR support… Tap Check AR support again if this persists."; result.isSupported->"AR supported · tap Start camera to begin"; else->"AR is not available on this phone. You can still import a floor plan or draw using measurements." }
+            availability=when { result.isTransient->"Still checking whether this phone can map with the camera… Tap Check again if this doesn't go away."; result.isSupported->"This phone can map with the camera"; else->"This phone can't map with the camera (no AR support). You can still enter measurements by hand, or import a floor plan image." }
             if(installPending && arSupported) { installPending=false; startCamera() }
         }
     }
     private fun startCamera() {
         if(starting || camera!=null || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         if(vm.doc==null || vm.busy) return
-        if(!vm.cameraMayStart) { vm.message("Choose Reference A and Reference B below: two saved corners at least 0.5 m apart. These align the camera with your existing map."); return }
+        if(!vm.cameraMayStart) { vm.message("First pick two saved corners (A and B) at least half a metre apart, so the camera can line up with your map."); return }
         if(vm.room==null) vm.addRoom("Room ${vm.doc!!.rooms.size+1}")
         val granted=ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED
         when(com.turn.fieldtest.mapper.core.CaptureGuard.entry(arSupported,granted,true)) {
-            com.turn.fieldtest.mapper.core.CaptureGuard.Companion.Entry.MEASURED_ONLY->{vm.message("ARCore support is unavailable/unknown. Use measured drawing or reopen the mapper to retry."); return}
+            com.turn.fieldtest.mapper.core.CaptureGuard.Companion.Entry.MEASURED_ONLY->{vm.message("Camera mapping isn't available on this phone right now. Enter measurements instead, or close and reopen the mapper to try again."); return}
             com.turn.fieldtest.mapper.core.CaptureGuard.Companion.Entry.REQUEST_PERMISSION->{permission.launch(Manifest.permission.CAMERA); return}
             else->Unit // requestInstall below is the authoritative services install/update check.
         }
@@ -114,7 +114,7 @@ class WalkMapperActivity: ComponentActivity() {
                 withContext(Dispatchers.IO) { closing?.get() }
                 if(!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
                 if(ArCoreApk.getInstance().requestInstall(this@WalkMapperActivity,userInstallRequested)==ArCoreApk.InstallStatus.INSTALL_REQUESTED) {
-                    userInstallRequested=false; installPending=true; vm.message("Install/update Google Play Services for AR, then return to TURN"); return@launch
+                    userInstallRequested=false; installPending=true; vm.message("Install or update \"Google Play Services for AR\" when asked, then come back to TURN"); return@launch
                 }
                 session=Session(this@WalkMapperActivity)
                 val automatic=session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
@@ -130,17 +130,17 @@ class WalkMapperActivity: ComponentActivity() {
                 session.resume()
                 camera=ArScanView(this@WalkMapperActivity,session,vm,id,mode).also { it.onResume() }
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                vm.message("ARCore ready · raw depth supported: $raw · automatic depth supported: $automatic")
+                vm.message("Camera started")
                 session=null // View owns the successfully resumed session.
             } catch(e: Exception) {
                 userInstallRequested=true; installPending=false
                 val reason=when(e) {
-                    is com.google.ar.core.exceptions.CameraNotAvailableException -> "The camera is unavailable. Close other camera apps, check Android Camera access, then retry."
-                    is com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException -> "AR is not supported on this phone. Use measured drawing or import a floor plan."
-                    is com.google.ar.core.exceptions.UnavailableApkTooOldException -> "Update Google Play Services for AR, then retry Start camera."
-                    is com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException -> "AR services installation was cancelled. Tap Start camera to try again, or use measured drawing."
-                    is SecurityException -> "Allow Camera access in Android Settings, then retry Start camera."
-                    else -> "The AR camera could not start. Retry Start camera or use measured drawing. Details: ${e.javaClass.simpleName}"
+                    is com.google.ar.core.exceptions.CameraNotAvailableException -> "The camera is busy. Close other camera apps, check TURN may use the camera, then tap Start camera again."
+                    is com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException -> "This phone can't map with the camera. Enter measurements instead, or import a floor plan image."
+                    is com.google.ar.core.exceptions.UnavailableApkTooOldException -> "Update \"Google Play Services for AR\" from the Play Store, then tap Start camera again."
+                    is com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException -> "The AR install was cancelled. Tap Start camera to try again, or enter measurements instead."
+                    is SecurityException -> "Allow Camera for TURN in Android Settings, then tap Start camera again."
+                    else -> "The camera couldn't start. Tap Start camera again, or enter measurements instead. (${e.javaClass.simpleName})"
                 }
                 vm.message(reason)
             }
@@ -154,7 +154,7 @@ class WalkMapperActivity: ComponentActivity() {
         runCatching { view.session.pause() }
         closing=closeExecutor.submit { view.session.close() }
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        vm.cameraStopped(); vm.status(ArStatus("Camera paused · geometry kept. Align a new AR section before capturing again."))
+        vm.cameraStopped(); vm.status(ArStatus("Camera paused — your work is saved"))
     }
     override fun onPause() { stopCamera(); vm.save(); super.onPause() }
     override fun onDestroy() { stopCamera(); super.onDestroy() }

@@ -121,12 +121,13 @@ class WayfinderConsistencyTest {
                 compose.runOnIdle {page=name;state=fixture(dark,name)}
                 compose.waitForIdle()
                 if(name=="ar-review") {
-                    compose.onNodeWithText("2 · Review").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {it()}
-                    compose.onNodeWithText("Check your room outline").assertExists()
+                    compose.onNodeWithText("Finish floor").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {it()}
+                    compose.onNodeWithText("Check the outline").assertExists()
                 }
                 if(name=="ar-verify") {
-                    compose.onNodeWithText("3 · Verify & save").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {it()}
-                    compose.onNodeWithText("Measure, then save").assertExists()
+                    compose.onNodeWithText("Finish floor").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {it()}
+                    compose.onNodeWithText("Next: check the size").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {it()}
+                    compose.onNodeWithText("Check the size with a tape measure").assertExists()
                 }
                 if(name=="direction") {
                     compose.onNodeWithText("Start navigation").performClick()

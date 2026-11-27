@@ -16,7 +16,13 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.*
 
-data class ArStatus(val text: String,val tracking: Boolean=false,val depth: String="Depth unavailable",val planes: Int=0,val segment: String?=null)
+/**
+ * Live camera state for the mapper UI. [text] is a plain-language coaching line. [originSet] is true once the
+ * starting point is confirmed (the wizard uses it to move from step 1 to step 2). [notice] marks short-lived
+ * feedback about a single tap (for example why it was refused) that the UI shows briefly over the coaching line.
+ */
+data class ArStatus(val text: String,val tracking: Boolean=false,val depth: String="Depth unavailable",val planes: Int=0,val segment: String?=null,
+    val originSet: Boolean=false,val notice: Boolean=false)
 interface ArScanSink {
     fun status(value: ArStatus)
     fun floorCandidate(description: String)
@@ -42,7 +48,8 @@ class ArScanView(private val activity: Activity, val session: Session, private v
     private var pendingFloor: HitResult?=null
     private var pendingFloorAt=0L
     @Volatile private var disposed=false
-    private fun report(value: ArStatus) {if(!disposed) sink.status(value.copy(segment=segmentId))}
+    private fun report(value: ArStatus) {if(!disposed) sink.status(value.copy(segment=segmentId,originSet=origin!=null))}
+    private fun notice(text: String) = report(ArStatus(text,true,notice=true))
     private val anchors=linkedMapOf<String,Anchor>()
     private val work=Executors.newSingleThreadExecutor(); private val busy=AtomicBoolean(false)
     private val depthEvidence=DepthWallAccumulator()
@@ -66,8 +73,8 @@ class ArScanView(private val activity: Activity, val session: Session, private v
     fun markAtCentre() = queueEvent { tap=width/2f to height/2f }
     fun confirmFloor() = queueEvent {
         val hit=pendingFloor
-        if(disposed || blocked || trackingFrames<20 || hit==null || System.nanoTime()-pendingFloorAt>10_000_000_000L || hit.trackable.trackingState!=TrackingState.TRACKING) report(ArStatus("Floor reference expired; tap the floor again"))
-        else { origin?.detach(); origin=hit.createAnchor(); pendingFloor=null; sink.floorCandidate(""); report(ArStatus("Now tap a floor point ≥0.5 m ahead. This sets map Up; north is not assumed.",true)) }
+        if(disposed || blocked || trackingFrames<20 || hit==null || System.nanoTime()-pendingFloorAt>10_000_000_000L || hit.trackable.trackingState!=TrackingState.TRACKING) notice("That floor tap timed out — tap the floor again, then confirm within 10 seconds")
+        else { origin?.detach(); origin=hit.createAnchor(); pendingFloor=null; sink.floorCandidate(""); notice("Starting point set") }
     }
     fun rejectFloor()=queueEvent { pendingFloor=null; origin?.detach(); origin=null; ahead?.detach(); ahead=null; sink.floorCandidate("") }
     fun disposeNative() {
@@ -98,7 +105,7 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         session.setCameraTextureNames(intArrayOf(texture))
         rendererReady=true
         } catch(e: Exception) {
-            report(ArStatus("Camera preview could not start (${e.javaClass.simpleName}). Pause and retry, or use measured drawing."))
+            report(ArStatus("The camera picture could not start. Tap Pause, then Start camera again — or enter measurements instead. (${e.javaClass.simpleName})"))
         }
     }
     override fun onSurfaceChanged(gl: GL10?,w: Int,h: Int) { width=w; height=h; GLES20.glViewport(0,0,w,h) }
@@ -112,7 +119,7 @@ class ArScanView(private val activity: Activity, val session: Session, private v
                 val now=System.nanoTime()
                 if(now-cameraWaitStarted>5_000_000_000L && now-lastStatus>1_000_000_000L) {
                     lastStatus=now
-                    report(ArStatus("Waiting for camera images. Check Android Camera access is enabled; pause and retry if the preview stays blank."))
+                    report(ArStatus("Waiting for the camera picture… If it stays blank, check TURN is allowed to use the camera, then tap Pause and try again."))
                 }
                 return
             }
@@ -129,22 +136,22 @@ class ArScanView(private val activity: Activity, val session: Session, private v
                 lastStatus=now
                 val count=session.getAllTrackables(Plane::class.java).count { it.trackingState==TrackingState.TRACKING && it.subsumedBy==null }
                 val label=when {
-                    blocked->"Tracking lost in this section · restart camera and align to saved points"
-                    !tracked->"Tracking limited: ${f.camera.trackingFailureReason.name.lowercase().replace('_',' ')}"
-                    origin==null->"Looking for floor · move slowly, then tap the actual floor"
-                    ahead==null->"Tap a floor point ahead to set the map direction"
-                    local==null->"Floor anchors limited · wait or pause and align a new section"
-                    else->"Tracking · ${if(count==0) "looking for surfaces" else "$count surfaces"}"
+                    blocked->"The phone lost track of where it is, so this camera session can't add more points. Tap Pause, then start the camera again — your work so far is saved."
+                    !tracked->coaching(f.camera.trackingFailureReason)
+                    origin==null->if(count==0) "Move your phone slowly from side to side so it can see the room" else "Ready — tap the floor"
+                    ahead==null->"Ready — tap the floor a few steps ahead"
+                    local==null->"The phone can't see the starting point right now — move slowly, or tap Pause and start again"
+                    else->"Ready — aim at a corner and tap"
                 }
                 report(ArStatus(label,tracked&&!blocked,when {
-                    depthMode==Config.DepthMode.DISABLED->"Depth unavailable · guided plane marking"
-                    rawDepthUnavailable->"Raw depth unavailable · guided plane marking"
-                    depthFrames==0->"Depth supported · waiting for usable raw frames"
-                    else->"Depth available · $depthFrames fresh raw frames"
+                    depthMode==Config.DepthMode.DISABLED->"Depth sensing: not on this phone (surface detection only)"
+                    rawDepthUnavailable->"Depth sensing: unavailable right now (surface detection only)"
+                    depthFrames==0->"Depth sensing: supported, waiting for data"
+                    else->"Depth sensing: working ($depthFrames readings)"
                 },count))
             }
             if(!tracked || blocked) { tap=null; return }
-            if(thermal>=4) { tap=null; report(ArStatus("Device hot · pause scanning and let it cool",false)); return }
+            if(thermal>=4) { tap=null; report(ArStatus("The phone is too hot — tap Pause and let it cool down for a few minutes",false)); return }
             tap?.let { (x,y)->tap=null; acceptTap(f,x,y,local) }
             val floor=frame() ?: return
             if(referencePending) { referencePending=false; sink.reference(floor,segmentId,hypot((ahead!!.pose.tx()-origin!!.pose.tx()).toDouble(),(ahead!!.pose.tz()-origin!!.pose.tz()).toDouble())) }
@@ -172,10 +179,10 @@ class ArScanView(private val activity: Activity, val session: Session, private v
                             } else emptyList()
                         } else emptyList()
                         if(!disposed) sink.observations(planes+depthWalls)
-                    } catch(_: Exception) { report(ArStatus("Depth processing unavailable · use guided marking")) } finally { busy.set(false) }
+                    } catch(_: Exception) { report(ArStatus("Depth sensing stopped working — you can keep tapping corners as normal")) } finally { busy.set(false) }
                 }
             }
-        } catch(e: Exception) { report(ArStatus("AR capture unavailable: ${e.javaClass.simpleName}. Pause and retry; saved geometry remains.")) }
+        } catch(e: Exception) { report(ArStatus("The camera stopped working. Tap Pause, then Start camera again — your work so far is saved. (${e.javaClass.simpleName})")) }
     }
     private fun acceptTap(f: Frame,x: Float,y: Float,floor: FloorFrame?) {
         val hit=f.hitTest(x,y).firstOrNull { h ->
@@ -186,16 +193,18 @@ class ArScanView(private val activity: Activity, val session: Session, private v
                 else -> false
             }
         }
-        if(hit==null || trackingFrames<20) { report(ArStatus("No reliable surface at that tap. Move slowly, improve light, or enter measured coordinates.",true)); return }
+        if(trackingFrames<20) { notice("Still getting ready — hold the phone steady for a moment, then tap again"); return }
+        if(hit==null) { notice(if(origin==null || ahead==null) "Couldn't find the floor there — sweep the phone slowly over the floor, or try a spot with more texture or better light"
+            else "Couldn't find a surface there — try a spot with more texture or better light"); return }
         if(origin==null) {
             pendingFloor=hit; pendingFloorAt=System.nanoTime()
             val height=f.camera.pose.ty()-hit.hitPose.ty()
-            if(height<0.3f) {pendingFloor=null; report(ArStatus("Aim at the floor below camera height",true)); return}
-            sink.floorCandidate("Candidate %.2f m below camera. Confirm this is the floor, not furniture. This point is the origin.".format(height)); return
+            if(height<0.3f) {pendingFloor=null; notice("That looks too high to be the floor — aim lower, at the floor itself"); return}
+            sink.floorCandidate("You tapped a flat surface %.2f m below the phone. Check it is the floor, not a table, bed or sofa.".format(height)); return
         }
         if(ahead==null) {
-            if(abs(hit.hitPose.ty()-origin!!.pose.ty())>0.15f) { report(ArStatus("Choose another point on the SAME floor",true)); return }
-            if(hypot((hit.hitPose.tx()-origin!!.pose.tx()).toDouble(),(hit.hitPose.tz()-origin!!.pose.tz()).toDouble())<0.5) { report(ArStatus("Choose a forward point at least 0.5 m away",true)); return }
+            if(abs(hit.hitPose.ty()-origin!!.pose.ty())>0.15f) { notice("That point is not on the same floor — tap the floor itself, not furniture or a step"); return }
+            if(hypot((hit.hitPose.tx()-origin!!.pose.tx()).toDouble(),(hit.hitPose.tz()-origin!!.pose.tz()).toDouble())<0.5) { notice("Too close — tap a floor point at least half a metre (about one step) away"); return }
             ahead=hit.createAnchor(); return
         }
         if(floor==null) return
@@ -204,11 +213,11 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         // Corner tools accept hits up to 3.5 m (projected, flagged); wall and door endpoints keep the 2.5 m limit.
         val tapTool=tool
         if(!HiddenCorners.acceptsHitHeight(height.toDouble(),tapTool)) {
-            report(ArStatus(if(tapTool in HiddenCorners.CORNER_TOOLS) "Tap a floor/wall boundary, a wall, or the ceiling above the corner" else "Tap a floor/wall boundary or enter a measured point",true)); return
+            notice(if(tapTool in HiddenCorners.CORNER_TOOLS) "That spot is too high — tap where the wall meets the floor, the wall, or the ceiling just above the corner" else "That spot is too high — tap where the wall meets the floor"); return
         }
         // Two-wall tool points are positions only; they never use up the section's anchors.
         val anchored=HiddenCorners.anchorsTap(tapTool)
-        if(anchored && anchors.size>=96) { report(ArStatus("Section anchor limit reached. Pause and continue with an aligned new section.",true)); return }
+        if(anchored && anchors.size>=96) { notice("This camera session is full. Tap Pause, then start the camera again to keep going."); return }
         val id=scanId(); if(anchored) anchors[id]=hit.createAnchor()
         val (onFloor,above)=HiddenCorners.projectToFloor(floor,hit.hitPose.v())
         sink.point(onFloor,id,if(hit.trackable is Plane) "AR_PLANE" else "DEPTH_HIT",f.timestamp,segmentId,above)
@@ -266,6 +275,15 @@ class ArScanView(private val activity: Activity, val session: Session, private v
         val v=shader(GLES20.GL_VERTEX_SHADER,vertex); val f=shader(GLES20.GL_FRAGMENT_SHADER,fragment); val p=GLES20.glCreateProgram()
         GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); val ok=IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); check(ok[0]!=0) {"AR renderer unavailable"}; return p
     }
-    companion object { private fun buffer(values: FloatArray)=ByteBuffer.allocateDirect(values.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(values); position(0) } }
+    companion object {
+        /** Plain advice for each reason ARCore gives when it cannot track. */
+        internal fun coaching(reason: TrackingFailureReason): String = when(reason) {
+            TrackingFailureReason.INSUFFICIENT_LIGHT->"Too dark — turn on a light or move somewhere brighter"
+            TrackingFailureReason.EXCESSIVE_MOTION->"Moving too fast — move the phone more slowly"
+            TrackingFailureReason.INSUFFICIENT_FEATURES->"Not enough detail to see — point at a rug, furniture edge or patterned floor"
+            TrackingFailureReason.CAMERA_UNAVAILABLE->"The camera is busy — close other camera apps"
+            else->"Move your phone slowly from side to side so it can see the room"
+        }
+        private fun buffer(values: FloatArray)=ByteBuffer.allocateDirect(values.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(values); position(0) } }
 }
 private fun Pose.v()=V3(tx().toDouble(),ty().toDouble(),tz().toDouble())

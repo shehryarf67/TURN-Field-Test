@@ -35,9 +35,9 @@ object ScanGeometry {
         return adjusted.filter {it.status!="CONFIRMED" || it.id in protected}+split
     }
     fun outlineError(points: List<P2>): String? = runCatching {
-        require(points.size >= 3) { "Room outline is incomplete: mark at least three corners" }
-        require(points.all { it.finite }) { "Room has invalid coordinates" }
-        require(points.all {abs(it.x)<=1000 && abs(it.y)<=1000}) {"Room coordinates exceed ±1000 m; check units"}
+        require(points.size >= 3) { "Mark at least three corners for this room" }
+        require(points.all { it.finite }) { "A corner has an invalid position" }
+        require(points.all {abs(it.x)<=1000 && abs(it.y)<=1000}) {"A corner is more than 1 km away — check the numbers you entered"}
         validateSimpleWalkablePolygon(MetricPolygon(points.map { it.metric() }))
     }.exceptionOrNull()?.message
 
@@ -85,37 +85,37 @@ object ScanGeometry {
     }
 
     fun issues(doc: ScanDocument): List<ScanIssue> = buildList {
-        if(doc.name.isBlank()) add(ScanIssue("Name the mapped floor"))
-        doc.walls.filter {it.status=="CONFIRMED"}.forEach {w->if(!w.a.finite || !w.b.finite || w.a.distance(w.b)<.01) add(ScanIssue("Confirmed wall ${w.id.take(6)} has invalid endpoints"))}
-        if(doc.rooms.isEmpty()) add(ScanIssue("Start and confirm at least one room"))
+        if(doc.name.isBlank()) add(ScanIssue("Give the floor a name"))
+        doc.walls.filter {it.status=="CONFIRMED"}.forEach {w->if(!w.a.finite || !w.b.finite || w.a.distance(w.b)<.01) add(ScanIssue("A wall you added (${w.id.take(6)}) has broken endpoints — fix or delete it under Advanced"))}
+        if(doc.rooms.isEmpty()) add(ScanIssue("Map at least one room and finish it"))
         doc.rooms.forEach { r ->
             outlineError(r.corners.map { it.p })?.let { add(ScanIssue("${r.name}: $it")) }
-            if(!r.confirmed) add(ScanIssue("${r.name}: outline is not confirmed"))
+            if(!r.confirmed) add(ScanIssue("${r.name}: not finished yet — check its outline and tap 'Looks right'"))
             if(r.name.isBlank()) add(ScanIssue("Name every room"))
             HiddenCorners.qualityNote(r)?.let { add(ScanIssue(it,false)) }
         }
         val used=doc.points().map { it.segmentId }.toSet()+doc.walls.filter { it.status=="CONFIRMED" }.map { it.segmentId }
         used.forEach { id ->
             val s=doc.segments.firstOrNull { it.id==id }
-            if(s==null || !s.aligned) add(ScanIssue("Capture section $id has unresolved alignment"))
-            if(s?.interrupted==true && !s.reviewedAfterLoss) add(ScanIssue("Tracking was lost in section $id: review geometry and measurements"))
+            if(s==null || !s.aligned) add(ScanIssue("A camera session (${id.take(6)}) was never lined up with the map — check it under Advanced"))
+            if(s?.interrupted==true && !s.reviewedAfterLoss) add(ScanIssue("Tracking was lost or the camera was paused while mapping (session ${id.take(6)}) — check the rooms still line up, then tap 'Rooms line up'"))
         }
-        if(doc.walls.any { it.status=="CANDIDATE" }) add(ScanIssue("Unconfirmed wall candidates are excluded from the saved map",false))
+        if(doc.walls.any { it.status=="CANDIDATE" }) add(ScanIssue("Walls the camera suggested but you did not confirm will not be saved",false))
         val walls=doc.allWalls().associateBy { it.id }
         doc.doors.forEach { door ->
             val wall=walls[door.wallId]
-            if(wall==null) add(ScanIssue("Doorway ${door.id.take(6)} has not been assigned to an existing wall"))
+            if(wall==null) add(ScanIssue("Doorway ${door.id.take(6)} is not on an existing wall — fix or delete it under Advanced"))
             else if(door.a.distance(projection(door.a,wall.a,wall.b))>doc.thresholds.doorToleranceMetres ||
                 door.b.distance(projection(door.b,wall.a,wall.b))>doc.thresholds.doorToleranceMetres)
-                add(ScanIssue("Doorway ${door.id.take(6)} endpoints do not lie on their wall"))
-            if(door.a.distance(door.b) !in 0.45..3.0) add(ScanIssue("Doorway width must be 0.45–3 m; verify its endpoints"))
-            if(door.roomIds.isEmpty() || door.roomIds.any { id -> doc.rooms.none { it.id==id } }) add(ScanIssue("Assign doorway to existing room(s)"))
+                add(ScanIssue("Doorway ${door.id.take(6)}: its endpoints are not on its wall — fix them under Advanced"))
+            if(door.a.distance(door.b) !in 0.45..3.0) add(ScanIssue("A doorway must be 0.45–3 m wide — check where its two sides are"))
+            if(door.roomIds.isEmpty() || door.roomIds.any { id -> doc.rooms.none { it.id==id } }) add(ScanIssue("A doorway is not linked to any room — tick its rooms under Advanced"))
             door.roomIds.mapNotNull { id -> doc.rooms.firstOrNull { it.id==id } }.forEach { r ->
                 if(outlineError(r.corners.map { it.p })==null) {
                     val mid=P2((door.a.x+door.b.x)/2,(door.a.y+door.b.y)/2)
                     val polygon=MetricPolygon(r.corners.map { it.p.metric() })
                     val boundary=listOf(door.a,mid,door.b).maxOf {polygon.closestBoundaryPoint(it.metric()).distanceMetres}
-                    if(boundary>0.03) add(ScanIssue("Doorway does not match the boundary of ${r.name}; adjust room alignment"))
+                    if(boundary>0.03) add(ScanIssue("A doorway does not sit on the outline (boundary of ${r.name}) — move the doorway or the room corners"))
                 }
             }
         }
@@ -127,32 +127,32 @@ object ScanGeometry {
                 pa.edges.any {pb.contains(MetricPoint((it.start.x+it.end.x)/2,(it.start.y+it.end.y)/2),false)} ||
                 pb.edges.any {pa.contains(MetricPoint((it.start.x+it.end.x)/2,(it.start.y+it.end.y)/2),false)} ||
                 pa.edges.any { ea->pb.edges.any { eb->MetricGeometry.intersection(ea,eb)==SegmentIntersection.CROSS } })
-                add(ScanIssue("${a.name} and ${b.name} overlap: correct their alignment"))
+                add(ScanIssue("${a.name} and ${b.name} overlap — move their corners so they do not cross"))
         } }
         val pairs=doc.measurements.filter { it.purpose=="CALIBRATION" }.map { setOf(it.pointA,it.pointB) }
         doc.measurements.forEach { m ->
             val a=doc.points().firstOrNull { it.id==m.pointA }; val b=doc.points().firstOrNull { it.id==m.pointB }
-            if(a==null || b==null || !m.measured.isFinite() || m.measured<=0) add(ScanIssue("Measurement has missing endpoints or invalid length"))
+            if(a==null || b==null || !m.measured.isFinite() || m.measured<=0) add(ScanIssue("A measurement has missing endpoints (a corner was deleted) or an invalid length — remove it"))
             else if(m.purpose=="VALIDATION") {
-                if(setOf(m.pointA,m.pointB) in pairs) add(ScanIssue("A calibration pair cannot also be independent validation"))
+                if(setOf(m.pointA,m.pointB) in pairs) add(ScanIssue("You used the same two corners to fix the size and to check it (a calibration pair) — check a different wall"))
                 val error=abs(a.p.distance(b.p)-m.measured)
                 if(error>max(doc.thresholds.validationAbsoluteTolerance,m.measured*doc.thresholds.validationRelativeTolerance))
-                    add(ScanIssue("Independent length disagrees by %.2f m: remeasure, correct or rescan".format(error)))
+                    add(ScanIssue("A tape measurement disagrees with the map by %.2f m — measure again, fix the corners, or map the room again".format(error)))
             }
         }
-        if(doc.measurements.none { it.purpose=="VALIDATION" }) add(ScanIssue("Add an independent measured check distance before publishing"))
+        if(doc.measurements.none { it.purpose=="VALIDATION" }) add(ScanIssue("Measure one wall with a tape and enter it (step 5) before saving"))
         val currentPoints=doc.points().associateBy {it.id}
         val scales=doc.measurements.filter {it.purpose=="CALIBRATION"}.mapNotNull {m->
             val a=currentPoints[m.pointA]?.p; val b=currentPoints[m.pointB]?.p
             if(a!=null && b!=null && a.distance(b)>.01) m.measured/a.distance(b) else null
         }
-        if(scales.size>1 && scales.max()/scales.min()>1.05) add(ScanIssue("Scale verification is inconsistent; one scale cannot resolve nonuniform drift"))
+        if(scales.size>1 && scales.max()/scales.min()>1.05) add(ScanIssue("Your size corrections are inconsistent with each other — one map-wide size fix cannot correct this; re-measure or map again"))
         if(doc.rooms.size>1) {
             val reached=mutableSetOf(doc.rooms.first().id); var changed=true
             while(changed) { changed=false; doc.doors.filter { it.walkable && it.roomIds.any(reached::contains) }.forEach {
                 if(reached.addAll(it.roomIds)) changed=true
             } }
-            if(reached.size<doc.rooms.size) add(ScanIssue("Rooms are disconnected: mark and link their doorway openings"))
+            if(reached.size<doc.rooms.size) add(ScanIssue("Some rooms are disconnected — mark the doorway between them and tick both rooms"))
         }
     }
 

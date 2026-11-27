@@ -19,7 +19,7 @@ import kotlin.math.*
 /** Preview and publication both use +X right, +Y up, in metres. Screen Y alone is inverted. */
 @Composable
 fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: Modifier,
-    onPoint: (String)->Unit, onWall: (String)->Unit) {
+    onPoint: (String)->Unit, onWall: (String)->Unit, showFit: Boolean=true) {
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     val currentDoc by rememberUpdatedState(doc)
@@ -85,7 +85,7 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
             val a=Offset(16.dp.toPx(),size.height-20.dp.toPx()); drawLine(palette.onSurface,a,a+Offset(ppm,0f),3f)
             drawContext.canvas.nativeCanvas.drawText("1 m",a.x,a.y-8,android.graphics.Paint().apply { color=palette.onSurface.toArgb(); textSize=11.dp.toPx() })
         }
-        TextButton(onClick={ zoom=1f; pan=Offset.Zero },modifier=Modifier.align(androidx.compose.ui.Alignment.TopEnd)) { Text("Fit map") }
+        if(showFit) TextButton(onClick={ zoom=1f; pan=Offset.Zero },modifier=Modifier.align(androidx.compose.ui.Alignment.TopEnd)) { Text("Fit to screen") }
     }
 }
 private fun screenDistance(p: Offset,a: Offset,b: Offset): Float {

@@ -138,7 +138,7 @@ class ScanCoreTest {
     @Test fun lostOrUnalignedSectionsCannotPublishUntilReviewed() {
         val d=doc(); val s=d.segments.single()
         assertTrue(ScanGeometry.issues(d.copy(segments=listOf(s.copy(interrupted=true)))).any {it.message.contains("Tracking was lost")})
-        assertTrue(ScanGeometry.issues(d.copy(segments=listOf(s.copy(aligned=false)))).any {it.message.contains("unresolved alignment")})
+        assertTrue(ScanGeometry.issues(d.copy(segments=listOf(s.copy(aligned=false)))).any {it.message.contains("never lined up")})
         assertTrue(ScanGeometry.issues(d.copy(segments=listOf(s.copy(interrupted=true,reviewedAfterLoss=true)))).isEmpty())
     }
     @Test fun captureRejectsDuplicateFramesAndLatchesTrackingLoss() {
