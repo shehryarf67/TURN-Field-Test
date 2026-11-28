@@ -20,8 +20,12 @@ internal object SurfaceHits {
     private val distanceRange = 0.2..8.0
     const val PLANE_MARGIN = 0.3
 
-    data class Candidate<out T>(val point: V3, val distance: Double, val source: HitSource, val nativeHit: T)
-    enum class Failure { NO_SURFACE, TOO_FAR, TOO_CLOSE, TOO_HIGH, BELOW_FLOOR }
+    enum class Surface { VERTICAL, HORIZONTAL, UNKNOWN }
+    data class Candidate<out T>(
+        val point: V3, val distance: Double, val source: HitSource, val nativeHit: T,
+        val surface: Surface = Surface.UNKNOWN,
+    )
+    enum class Failure { NO_SURFACE, NO_WALL_FACE, NO_ELEVATED_SURFACE, TOO_FAR, TOO_CLOSE, TOO_HIGH, BELOW_FLOOR }
     data class Selection<T>(val hit: Candidate<T>? = null, val failure: Failure = Failure.NO_SURFACE)
 
     fun <T> select(
@@ -31,13 +35,30 @@ internal object SurfaceHits {
         fun valid(hit: Candidate<T>) = hit.point.finite && hit.distance in distanceRange &&
             HiddenCorners.acceptsHitHeight(hit.point.y - floorY, tool)
 
+        fun matchesTool(hit: Candidate<T>) = when (tool) {
+            "WALL_CORNER" -> hit.surface == Surface.VERTICAL
+            "ABOVE_CORNER" -> hit.point.y - floorY > HiddenCorners.ELEVATED_HIT_METRES
+            else -> true
+        }
         val order = compareBy<Candidate<T>> { it.source }.thenBy { it.distance }
-        candidates.filter(::valid).minWithOrNull(order)?.let { return Selection(hit = it) }
+        val direct = candidates.filter(::valid)
+        val nearest = direct.minOfOrNull { it.distance }
+        // Rank sources only within the foreground surface. A farther plane can be behind the wall under the tap.
+        val foreground = direct.filter { nearest != null && it.distance - nearest <= 0.25 }
+        foreground.filter(::matchesTool).minWithOrNull(order)?.let { return Selection(hit = it) }
         val extended = fallback()
-        extended.filter(::valid).minWithOrNull(order)?.let { return Selection(hit = it) }
+        extended.filter { valid(it) && matchesTool(it) && (nearest == null || it.distance - nearest <= 0.25) }
+            .minByOrNull { it.distance }?.let { return Selection(hit = it) }
 
-        val rejected = (candidates.ifEmpty { extended }).filter { it.point.finite && it.distance.isFinite() }
-            .minWithOrNull(order) ?: return Selection()
+        val rejected = (candidates + extended).filter { matchesTool(it) && it.point.finite && it.distance.isFinite() }
+            .minByOrNull { it.distance }
+        if (rejected == null || valid(rejected)) {
+            return Selection(failure = when (tool) {
+                "WALL_CORNER" -> Failure.NO_WALL_FACE
+                "ABOVE_CORNER" -> Failure.NO_ELEVATED_SURFACE
+                else -> Failure.NO_SURFACE
+            })
+        }
         return Selection(failure = when {
             rejected.distance > distanceRange.endInclusive -> Failure.TOO_FAR
             rejected.distance < distanceRange.start -> Failure.TOO_CLOSE
@@ -47,7 +68,7 @@ internal object SurfaceHits {
     }
 
     /** Distance to the nearest polygon edge, using coordinates local to the plane. */
-    fun withinBoundaryMargin(point: P2, polygon: List<P2>): Boolean {
+    fun withinBoundaryMargin(point: P2, polygon: List<P2>, margin: Double = PLANE_MARGIN): Boolean {
         if (polygon.size < 3) return false
         return polygon.indices.any { i ->
             val a = polygon[i]
@@ -57,7 +78,7 @@ internal object SurfaceHits {
             val squaredLength = dx * dx + dy * dy
             if (squaredLength == 0.0) return@any false
             val t = (((point.x - a.x) * dx + (point.y - a.y) * dy) / squaredLength).coerceIn(0.0, 1.0)
-            point.distance(P2(a.x + dx * t, a.y + dy * t)) <= PLANE_MARGIN
+            point.distance(P2(a.x + dx * t, a.y + dy * t)) <= margin
         }
     }
 

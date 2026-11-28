@@ -59,7 +59,7 @@ object HiddenCorners {
     /** Highest accepted hit for tools that are not room corners (wall and door endpoints), as before hidden corners. */
     const val MAX_ENDPOINT_HIT_HEIGHT_METRES = 2.5
     /** Tools whose hits may be projected down from a wall or the ceiling. */
-    val CORNER_TOOLS = setOf("CORNER", "ENTRANCE", "BOUNDARY", "WALL_CORNER")
+    val CORNER_TOOLS = setOf("CORNER", "ENTRANCE", "BOUNDARY", "WALL_CORNER", "ABOVE_CORNER")
 
     fun acceptsHitHeight(height: Double): Boolean = height.isFinite() && height in MIN_HIT_HEIGHT_METRES..MAX_HIT_HEIGHT_METRES
 

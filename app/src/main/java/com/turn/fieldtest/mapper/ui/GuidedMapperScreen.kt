@@ -39,6 +39,7 @@ internal val MapperTools = listOf(
     "CORNER" to "Corner",
     "WALL_CORNER" to "Corner behind furniture",
     "DOOR" to "Doorway",
+    "ABOVE_CORNER" to "Above corner",
     "WALL" to "Wall (two ends)",
     "ENTRANCE" to "Entrance corner",
     "BOUNDARY" to "Open-side corner",
@@ -129,17 +130,18 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
             val visual: @Composable (Modifier) -> Unit = { modifier ->
                 Box(modifier.clip(MaterialTheme.shapes.extraLarge)) {
                     if (camera != null) AndroidView(factory = { camera }, modifier = Modifier.fillMaxSize(), update = { view ->
-                        view.tool = vm.tool; view.overlay = doc.allWalls() + doc.walls.filter { it.status == "CANDIDATE" }
+                        view.tool = vm.tool; view.overlay = doc.allWalls()
                         view.mapAlignment = doc.segments.firstOrNull { it.id == vm.activeSegment }?.alignment ?: Alignment()
                         view.thresholds = doc.thresholds
                     })
                     if (camera == null || outline) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                        if (doc.points().isEmpty()) Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = UiAlignment.CenterHorizontally) {
+                        if (doc.points().isEmpty() && vm.hiddenDraft.isEmpty) Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = UiAlignment.CenterHorizontally) {
                             Icon(Icons.Outlined.ViewInAr, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.height(12.dp)); Text("Your floor plan will appear here", style = MaterialTheme.typography.titleMedium)
                             Text("Each corner you mark is added to the map as you go.", style = MaterialTheme.typography.bodyMedium)
                         } else ScanPreview(doc, vm.selectedPointId ?: vm.selectedWallId, false, Modifier.fillMaxSize(),
-                            onPoint = { vm.selectedPointId = it; vm.selectedWallId = null }, onWall = { vm.selectedWallId = it; vm.selectedPointId = null })
+                            onPoint = { vm.selectedPointId = it; vm.selectedWallId = null }, onWall = { vm.selectedWallId = it; vm.selectedPointId = null },
+                            wallSamples = vm.hiddenDraft)
                     }
                     if (camera != null && !outline) {
                         val (aimLabel, aimColor) = when (vm.arStatus.reticle) {
@@ -149,8 +151,8 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                         }
                         Icon(Icons.Outlined.Add, aimLabel, Modifier.align(UiAlignment.Center).size(32.dp), tint = aimColor)
                         CoachingBanner(vm.arNotice ?: vm.arStatus.text, vm.arNotice != null, Modifier.align(UiAlignment.TopCenter).padding(10.dp))
-                        if (doc.points().isNotEmpty()) Box(Modifier.align(UiAlignment.BottomEnd).padding(10.dp).size(120.dp).clip(MaterialTheme.shapes.medium)) {
-                            ScanPreview(doc, vm.selectedPointId ?: vm.selectedWallId, false, Modifier.fillMaxSize(), {}, {}, showFit = false)
+                        if (doc.points().isNotEmpty() || !vm.hiddenDraft.isEmpty) Box(Modifier.align(UiAlignment.BottomEnd).padding(10.dp).size(120.dp).clip(MaterialTheme.shapes.medium)) {
+                            ScanPreview(doc, vm.selectedPointId ?: vm.selectedWallId, false, Modifier.fillMaxSize(), {}, {}, showFit = false, wallSamples = vm.hiddenDraft)
                             Box(Modifier.matchParentSize().clickable(onClickLabel = "Show the map full size") { outline = true })
                         }
                     }
@@ -315,7 +317,7 @@ private fun CornersStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArSc
     val bigButton = Modifier.fillMaxWidth().heightIn(min = 52.dp)
     StepHeader(3, MAPPER_STEPS, "Mark the corners of this room",
         if (measured && camera == null) "Type in where each corner is, measured with a tape, going round the room in order."
-        else "Walk around and tap each corner where the wall meets the floor (or the ceiling above it). Hidden behind furniture? Use 'Corner behind furniture'.",
+        else "Tap the corners in order from wherever you have a clear view. Use Above corner or Corner behind furniture when the floor corner is hidden.",
         "The corners make the room's outline on the map.",
         "Go round the room in one direction. If furniture covers the bottom of a corner, aim at the wall or ceiling straight above it — TURN drops the point down to the floor. " +
             "If a wardrobe or sofa hides the whole corner, choose 'Corner behind furniture' and tap along the two walls instead. " +
@@ -336,13 +338,13 @@ private fun CornersStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArSc
     ToolPicker(vm)
     if (camera != null) {
         val label = when (vm.tool) {
-            "CORNER", "ENTRANCE", "BOUNDARY" -> "Mark corner"
+            "CORNER", "ENTRANCE", "BOUNDARY", "ABOVE_CORNER" -> "Mark corner"
             "WALL_CORNER" -> "Mark wall point"
             "DOOR" -> if (vm.pendingEndpoint == null) "Mark first side of doorway" else "Mark other side of doorway"
             else -> if (vm.pendingEndpoint == null) "Mark first end of wall" else "Mark other end of wall"
         }
         Button(onClick = { camera.markVisible(view) },
-            enabled = aligned && vm.arStatus.tracking && !view.outline && room != null && (vm.tool !in setOf("CORNER", "WALL_CORNER") || room.confirmed == false),
+            enabled = aligned && vm.arStatus.tracking && !view.outline && room != null && (vm.tool !in HiddenCorners.CORNER_TOOLS || room.confirmed == false),
             shape = MaterialTheme.shapes.small, modifier = bigButton) { Text(label) }
         if (!aligned) Text(TRACKING_LOST_HINT, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
         else if (view.outline) Text("Tap Show camera to mark points.", style = MaterialTheme.typography.bodySmall,
@@ -397,6 +399,7 @@ private fun ToolPicker(vm: WalkMapperViewModel) {
         }
     }
     val hint = when (vm.tool) {
+        "ABOVE_CORNER" -> "Aim directly above the floor corner at the vertical seam or the ceiling corner."
         "WALL_CORNER" -> null
         "DOOR" -> "Doorway: first tap Show map and tap the wall that has the doorway. Then go back to the camera and mark each side of the opening. " +
             if (vm.selectedWallId == null) "No wall chosen yet." else "Wall chosen."
@@ -538,15 +541,18 @@ private fun SaveStep(vm: WalkMapperViewModel, doc: ScanDocument, onPublish: () -
 @Composable
 internal fun HiddenCornerControls(vm: WalkMapperViewModel) {
     val second = vm.hiddenWallB
-    Text("Corner behind furniture: tap 2 or more spots along one wall next to the hidden corner, tap Next wall, then 2 or more along the other wall, then Place corner. " +
-        "TURN puts the corner where the two walls meet.", style = MaterialTheme.typography.bodySmall)
+    Text(if (second == null) "Tap two spots on the first wall face, at least 30 cm apart sideways."
+        else "Tap two spots on the other wall face, then place the corner where the walls meet.",
+        style = MaterialTheme.typography.bodySmall)
     Text(if (second == null) "First wall: ${vm.hiddenWallA.size} points (need 2, spread out by at least 30 cm)"
         else "First wall: ${vm.hiddenWallA.size} points ✓ · Second wall: ${second.size} points (need 2)", style = MaterialTheme.typography.labelLarge)
     Text("The walls must meet at an angle of at least ${HiddenCorners.MIN_ANGLE_DEGREES.toInt()}°. Check the corner with a tape later.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    vm.hiddenCornerFeedback?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    val canMark = vm.room?.confirmed == false && !vm.busy
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = vm::nextHiddenWall, enabled = second == null && vm.hiddenWallA.size >= 2 && !vm.busy) { Text("Next wall") }
-        Button(onClick = vm::placeHiddenCorner, enabled = (second?.size ?: 0) >= 2 && !vm.busy) { Text("Place corner") }
+        if (second == null) OutlinedButton(onClick = vm::nextHiddenWall, enabled = vm.hiddenWallA.size >= 2 && canMark) { Text("Next wall") }
+        else Button(onClick = vm::placeHiddenCorner, enabled = second.size >= 2 && canMark) { Text("Place corner") }
         TextButton(onClick = vm::clearHiddenCorner, enabled = vm.hiddenWallA.isNotEmpty()) { Text("Start over") }
     }
 }

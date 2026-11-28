@@ -296,6 +296,8 @@ class ArScanView(private val activity: Activity, val session: Session, private v
                 SurfaceHits.Failure.TOO_HIGH -> "That spot is too high — aim lower (up to ${if(tapTool in HiddenCorners.CORNER_TOOLS) 3.5 else 2.5} m above the floor)"
                 SurfaceHits.Failure.BELOW_FLOOR -> "That spot is below the floor you set — aim higher"
                 SurfaceHits.Failure.NO_SURFACE -> "No surface detected yet — move sideways a little so the phone can see the wall"
+                SurfaceHits.Failure.NO_WALL_FACE -> "No wall face at that spot. Aim halfway up a visible wall and move a little sideways."
+                SurfaceHits.Failure.NO_ELEVATED_SURFACE -> "Aim directly above the corner at a visible wall or ceiling point."
             })
             return
         }

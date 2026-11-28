@@ -71,11 +71,11 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
                 if(doc==null) { Text(vm.status); return@Column }
                 Box(Modifier.fillMaxWidth().height(surfaceHeight).clip(MaterialTheme.shapes.extraLarge)) {
                     if(camera!=null) AndroidView(factory={camera},modifier=Modifier.fillMaxSize(),update={view->
-                        view.tool=vm.tool; view.overlay=doc.allWalls()+doc.walls.filter { it.status=="CANDIDATE" }
+                        view.tool=vm.tool; view.overlay=doc.allWalls()
                         view.mapAlignment=doc.segments.firstOrNull { it.id==vm.activeSegment }?.alignment ?: Alignment()
                         view.thresholds=doc.thresholds
                     })
-                    if(camera==null && doc.points().isEmpty()) Surface(color=MaterialTheme.colorScheme.surfaceContainerLow,modifier=Modifier.fillMaxSize()) {
+                    if(camera==null && doc.points().isEmpty() && doc.walls.isEmpty() && vm.hiddenDraft.isEmpty) Surface(color=MaterialTheme.colorScheme.surfaceContainerLow,modifier=Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=ComposeAlignment.CenterHorizontally) {
                             Text(if(arSupported) "Your floor plan starts here" else "Map with measurements",style=MaterialTheme.typography.titleLarge)
                             Spacer(Modifier.height(12.dp))
@@ -83,7 +83,8 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
                                 else "This phone can't map with the camera: add a room and type in measured corners below.",style=MaterialTheme.typography.bodyMedium)
                         }
                     } else if(camera==null || preview) ScanPreview(doc,vm.selectedPointId ?: vm.selectedWallId,debug,Modifier.fillMaxSize(),
-                        onPoint={vm.selectedPointId=it; vm.selectedWallId=null},onWall={vm.selectedWallId=it; vm.selectedPointId=null})
+                        onPoint={vm.selectedPointId=it; vm.selectedWallId=null},onWall={vm.selectedWallId=it; vm.selectedPointId=null},
+                        showSuggestions=tab==DETAIL_EDIT,wallSamples=vm.hiddenDraft)
                 }
                 if(camera!=null && vm.floorDescription.isNotEmpty()) {
                     Text(vm.floorDescription,style=MaterialTheme.typography.bodySmall)
@@ -163,7 +164,7 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
                             val suggested=doc.walls.count { it.status=="CANDIDATE" }
                             Text("Walls",style=MaterialTheme.typography.titleMedium)
                             Text(if(suggested==0) "Room outlines already make walls. Walls the camera spots appear here as suggestions to confirm or reject."
-                                else "$suggested suggested by the camera — confirm real walls, reject furniture, mirrors and glass.",style=MaterialTheme.typography.bodySmall)
+                                else "$suggested camera suggestions (dashed lines). Reject furniture, mirrors and glass.",style=MaterialTheme.typography.bodySmall)
                             Choice("Wall",vm.selectedWallId,doc.allWalls().map { it.id to "${wallKind(it.source)} · ${it.id.take(6)}" }+
                                 doc.walls.filter { it.status=="CANDIDATE" }.map { it.id to "Suggested · ${it.id.take(6)}" }) {vm.selectedWallId=it; vm.selectedPointId=null}
                             doc.walls.firstOrNull { it.id==vm.selectedWallId }?.let { w -> key(w.id,w.a,w.b) {

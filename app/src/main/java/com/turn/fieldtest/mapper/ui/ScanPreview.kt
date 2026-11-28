@@ -19,7 +19,8 @@ import kotlin.math.*
 /** Preview and publication both use +X right, +Y up, in metres. Screen Y alone is inverted. */
 @Composable
 fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: Modifier,
-    onPoint: (String)->Unit, onWall: (String)->Unit, showFit: Boolean=true) {
+    onPoint: (String)->Unit, onWall: (String)->Unit, showFit: Boolean=true,
+    showSuggestions: Boolean=false, wallSamples: HiddenCornerDraft=HiddenCornerDraft()) {
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     val currentDoc by rememberUpdatedState(doc)
@@ -41,8 +42,8 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
             }
         }) {
             val d=currentDoc
-            val walls=d.allWalls()+d.walls.filter { it.status=="CANDIDATE" }
-            val coordinates=d.points().map { it.p }+walls.flatMap { listOf(it.a,it.b) }
+            val walls=d.allWalls()+if(showSuggestions) d.walls.filter { it.status=="CANDIDATE" } else emptyList()
+            val coordinates=d.points().map { it.p }+walls.flatMap { listOf(it.a,it.b) }+wallSamples.wallA+wallSamples.wallB.orEmpty()
             val minX=coordinates.minOfOrNull { it.x } ?: -1.0; val minY=coordinates.minOfOrNull { it.y } ?: -1.0
             val maxX=coordinates.maxOfOrNull { it.x } ?: 1.0; val maxY=coordinates.maxOfOrNull { it.y } ?: 1.0
             val ppm=(min(size.width/(maxX-minX+1).toFloat(),size.height/(maxY-minY+1).toFloat())*zoom).coerceAtLeast(.01f)
@@ -64,7 +65,10 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
             }
             walls.forEach { w ->
                 val a=screen(w.a); val b=screen(w.b)
-                drawLine(if(w.id==selected) palette.onSurface else if(w.status=="CONFIRMED") palette.primary else palette.tertiary,a,b,if(w.id==selected) 7f else 4f)
+                val suggested=w.status=="CANDIDATE"
+                drawLine(if(w.id==selected) palette.onSurface else if(suggested) palette.tertiary else palette.primary,
+                    a,b,if(w.id==selected) 7f else 4f,
+                    pathEffect=if(suggested) PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(),5.dp.toPx())) else null)
                 markApproximateEndpoints(w.a,w.b,w.endpointSources)
             }
             d.doors.forEach {
@@ -76,6 +80,8 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
             }
             d.poses.lastOrNull()?.mapPoint?.let { drawCircle(Color(0xFF4D94FF),7f,screen(it)) }
             d.points().forEach { drawCircle(if(it.id==selected) palette.onSurface else palette.primary,if(it.id==selected) 9f else 5f,screen(it.p)) }
+            wallSamples.wallA.forEach { drawCircle(palette.primary, 4.dp.toPx(), screen(it)) }
+            wallSamples.wallB.orEmpty().forEach { drawCircle(palette.tertiary, 4.dp.toPx(), screen(it)) }
             // Inferred (two walls) and projected (high hit) corners get an amber ring; inferred ones show their wall points.
             d.points().filter { it.provenance!=CornerProvenance.OBSERVED || HitSource.isApproximate(it.source) }.forEach { p ->
                 drawCircle(Color(0xFFF5A524),11f,screen(p.p),style=androidx.compose.ui.graphics.drawscope.Stroke(3f))

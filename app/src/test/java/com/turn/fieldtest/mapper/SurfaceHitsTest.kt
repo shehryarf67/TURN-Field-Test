@@ -5,16 +5,36 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SurfaceHitsTest {
-    private fun hit(source: HitSource, distance: Double = 2.0, y: Double = 1.0) =
-        SurfaceHits.Candidate(V3(0.0, y, 0.0), distance, source, Unit)
+    private fun hit(source: HitSource, distance: Double = 2.0, y: Double = 1.0,
+        surface: SurfaceHits.Surface = SurfaceHits.Surface.UNKNOWN) =
+        SurfaceHits.Candidate(V3(0.0, y, 0.0), distance, source, Unit, surface)
 
-    @Test fun eligiblePlaneBeatsDepthWhichBeatsFeaturePointRegardlessOfDistance() {
+    @Test fun eligiblePlaneBeatsDepthWhichBeatsFeatureOnSameSurface() {
         val feature = hit(HitSource.FEATURE, 1.0)
-        val depth = hit(HitSource.DEPTH, 2.0)
-        val plane = hit(HitSource.PLANE_MARGIN, 3.0)
+        val depth = hit(HitSource.DEPTH, 1.1)
+        val plane = hit(HitSource.PLANE_MARGIN, 1.2)
         assertEquals(plane, SurfaceHits.select(listOf(feature, depth, plane), 0.0, "CORNER").hit)
         assertEquals(depth, SurfaceHits.select(listOf(feature, depth), 0.0, "CORNER").hit)
-        assertEquals(feature, SurfaceHits.select(listOf(feature), 0.0, "WALL_CORNER") { error("Fallback is lazy") }.hit)
+        assertEquals(feature, SurfaceHits.select(listOf(feature), 0.0, "CORNER") { error("Fallback is lazy") }.hit)
+    }
+
+    @Test fun elevatedWallDepthWinsOverBackgroundFloorPlane() {
+        val floor = hit(HitSource.PLANE, 4.0, 0.0, SurfaceHits.Surface.HORIZONTAL)
+        val wall = hit(HitSource.DEPTH, 2.0, 1.4)
+        assertEquals(wall, SurfaceHits.select(listOf(floor, wall), 0.0, "CORNER").hit)
+        assertEquals(wall, SurfaceHits.select(listOf(floor, wall), 0.0, "ABOVE_CORNER").hit)
+        assertEquals(SurfaceHits.Failure.NO_ELEVATED_SURFACE,
+            SurfaceHits.select(listOf(floor), 0.0, "ABOVE_CORNER").failure)
+    }
+
+    @Test fun hiddenCornerRequiresWallEvidenceAndRefusesBackgroundWall() {
+        val floor = hit(HitSource.PLANE, 2.0, 0.0, SurfaceHits.Surface.HORIZONTAL)
+        val wall = hit(HitSource.FEATURE, 1.7, 1.4, SurfaceHits.Surface.VERTICAL)
+        assertEquals(wall, SurfaceHits.select(listOf(floor, wall), 0.0, "WALL_CORNER").hit)
+        assertEquals(SurfaceHits.Failure.NO_WALL_FACE, SurfaceHits.select(listOf(floor), 0.0, "WALL_CORNER") {
+            listOf(wall.copy(distance = 2.8, source = HitSource.EXTENDED_PLANE))
+        }.failure)
+        assertEquals(wall, SurfaceHits.select(listOf(hit(HitSource.DEPTH, 1.65), wall), 0.0, "WALL_CORNER").hit)
     }
 
     @Test fun limitsApplyToDirectAndFallbackHits() {

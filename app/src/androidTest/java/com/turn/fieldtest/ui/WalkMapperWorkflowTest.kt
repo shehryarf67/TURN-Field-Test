@@ -12,6 +12,8 @@ import com.turn.fieldtest.TurnApplication
 import com.turn.fieldtest.data.local.*
 import com.turn.fieldtest.mapper.WalkMapperViewModel
 import com.turn.fieldtest.mapper.core.ScanDocument
+import com.turn.fieldtest.mapper.core.CornerProvenance
+import com.turn.fieldtest.mapper.core.P2
 import com.turn.fieldtest.mapper.data.ScanRepository
 import com.turn.fieldtest.mapper.ui.WalkMapperScreen
 import com.turn.fieldtest.mapper.ui.MapperDetailsScreen
@@ -39,6 +41,37 @@ class WalkMapperWorkflowTest {
         compose.waitForIdle()
     }
     @After fun clean() {instrumentation.runOnMainSync {store.clear()}; db?.close(); app.deleteDatabase(name); image?.delete()}
+    @Test fun twoWallCaptureRejectsRepeatedSamplesAndPlacesOneCorner(): Unit=runBlocking {
+        val database=TurnDatabase.build(app,name).also {db=it}
+        database.venueDao().upsert(VenueEntity("v","Home",createdAtEpochMillis=1,updatedAtEpochMillis=1))
+        database.floorPlanDao().upsertFloor(FloorEntity("f","v","Ground floor",0,20.0,20.0,createdAtEpochMillis=1,updatedAtEpochMillis=1))
+        lateinit var vm: WalkMapperViewModel
+        instrumentation.runOnMainSync {
+            vm=WalkMapperViewModel(app,SavedStateHandle(mapOf("venueId" to "v","floorId" to "f")),ScanRepository(database,app))
+            store.put("mapper",vm)
+        }
+        compose.waitUntil(10_000) {vm.doc!=null}
+        instrumentation.runOnMainSync {
+            vm.addRoom("Kitchen")
+            vm.chooseTool("WALL_CORNER")
+            vm.measuredPoint(1.0,0.0)
+            vm.measuredPoint(1.02,0.0)
+            assertEquals(1,vm.hiddenWallA.size)
+            assertNotNull(vm.hiddenCornerFeedback)
+            vm.measuredPoint(1.15,0.0)
+            vm.nextHiddenWall()
+            assertNull(vm.hiddenWallB)
+            vm.measuredPoint(2.0,0.0)
+            vm.nextHiddenWall()
+            vm.measuredPoint(0.0,1.0)
+            vm.measuredPoint(0.0,2.0)
+            vm.placeHiddenCorner()
+            val corner=vm.room!!.corners.single()
+            assertTrue(corner.p.distance(P2(0.0,0.0))<1e-9)
+            assertEquals(CornerProvenance.INFERRED,corner.provenance)
+            assertTrue(vm.hiddenDraft.isEmpty)
+        }
+    }
     @Test fun floorPlansCanBeOpenedDeletedAndClearedIndependently(): Unit=runBlocking {
         val database=TurnDatabase.build(app,name).also {db=it}
         database.venueDao().upsert(VenueEntity("v","Home",createdAtEpochMillis=1,updatedAtEpochMillis=1))
