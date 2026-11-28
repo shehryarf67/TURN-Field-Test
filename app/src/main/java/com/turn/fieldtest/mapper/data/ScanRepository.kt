@@ -24,6 +24,7 @@ class ScanRepository(private val db: TurnDatabase,private val context: Context) 
         json.decodeFromString<ScanDocument>(row.documentJson).also {doc->require(doc.id==row.id && doc.floorId==row.floorId && doc.version==1 && db.floorPlanDao().getFloor(row.floorId)?.venueId==doc.venueId) {"Scan ownership/version is invalid"}}
     }
     suspend fun drafts(floor: String) = db.scanDraftDao().forFloor(floor)
+    suspend fun deleteDraft(id: String, floor: String) { db.scanDraftDao().deleteForFloor(id,floor) }
 
     /** Fork the project: venue+level is unique, so a revision must not masquerade as another storey. */
     suspend fun publish(doc: ScanDocument): String {

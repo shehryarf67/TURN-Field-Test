@@ -146,8 +146,9 @@ class ScanCoreTest {
         assertEquals(CaptureGuard.State.LIMITED,g.observe(1,false,false,0))
         assertEquals(CaptureGuard.State.TRACKING,g.observe(2,true,false,0))
         assertEquals(CaptureGuard.State.STALE,g.observe(2,true,true,0))
-        assertEquals(CaptureGuard.State.LOST,g.observe(3,false,true,0))
-        assertEquals(CaptureGuard.State.LOST,g.observe(4,true,true,0))
+        assertEquals(CaptureGuard.State.RECOVERING,g.observe(3,false,true,0))
+        assertEquals(CaptureGuard.State.LOST,g.observe(3_000_000_003L,false,true,0))
+        assertEquals(CaptureGuard.State.LOST,g.observe(3_000_000_004L,true,true,0))
         assertEquals(CaptureGuard.State.HOT,CaptureGuard().observe(1,true,false,4))
     }
     @Test fun optionalArFallbackPermissionAndInstallAreExplicit() {

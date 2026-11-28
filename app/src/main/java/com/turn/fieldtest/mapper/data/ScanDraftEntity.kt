@@ -10,5 +10,6 @@ data class ScanDraftEntity(@PrimaryKey val id: String,val floorId: String,val do
 @Dao interface ScanDraftDao {
     @Query("SELECT * FROM walk_scan_drafts WHERE floorId=:floor ORDER BY updatedAtEpochMillis DESC") suspend fun forFloor(floor: String): List<ScanDraftEntity>
     @Query("SELECT * FROM walk_scan_drafts WHERE id=:id") suspend fun get(id: String): ScanDraftEntity?
+    @Query("DELETE FROM walk_scan_drafts WHERE id=:id AND floorId=:floor") suspend fun deleteForFloor(id: String, floor: String): Int
     @Upsert suspend fun save(value: ScanDraftEntity)
 }

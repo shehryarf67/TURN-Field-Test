@@ -52,9 +52,9 @@ fun scanId() = UUID.randomUUID().toString()
 @Serializable data class ScanRoom(val id: String = scanId(), val name: String, val corners: List<ScanPoint> = emptyList(), val confirmed: Boolean = false)
 @Serializable data class ScanWall(val id: String = scanId(), val a: P2, val b: P2, val source: String,
     val segmentId: String, val observations: Int = 1, val confidence: Double = 0.5, val height: Double = 0.0,
-    val lastTimestamp: Long = 0, val status: String = "CANDIDATE")
+    val lastTimestamp: Long = 0, val status: String = "CANDIDATE", val endpointSources: List<String> = emptyList())
 @Serializable data class ScanDoor(val id: String = scanId(), val wallId: String, val a: P2, val b: P2,
-    val roomIds: List<String>, val walkable: Boolean = true)
+    val roomIds: List<String>, val walkable: Boolean = true, val endpointSources: List<String> = emptyList())
 @Serializable data class ScanSegment(val id: String, val source: String, val frame: FloorFrame? = null,
     val alignment: Alignment = Alignment(), val aligned: Boolean = true, val interrupted: Boolean = false,
     val referencePointIds: List<String> = emptyList(), val reviewedAfterLoss: Boolean = false)

@@ -70,7 +70,10 @@ class WalkMapperActivity: ComponentActivity() {
             TurnTheme(darkTheme = appearance.darkTheme) { WalkMapperScreen(vm,camera,availability,arSupported,
             onStartCamera=::startCamera,onStopCamera=::stopCamera,
             onExit={ lifecycleScope.launch { if(vm.doc==null || vm.saveNow()) {
-                vm.doc?.publishedFloorId?.let {floor->setResult(RESULT_OK,Intent().putExtra("floorId",floor).putExtra("venueId",vm.doc!!.publishedVenueId ?: vm.doc!!.venueId))}
+                val draft=vm.doc
+                val floor=draft?.publishedFloorId
+                if(draft!=null && floor!=null) setResult(RESULT_OK,Intent().putExtra("floorId",floor).putExtra("venueId",draft.publishedVenueId ?: draft.venueId))
+                else setResult(RESULT_CANCELED)
                 finish()
             } } },
             onPublish={ vm.publish { floor-> setResult(RESULT_OK,Intent().putExtra("floorId",floor).putExtra("venueId",vm.doc!!.publishedVenueId)); vm.message("Floor plan saved. Tap Open saved floor to see it in TURN.") } },
@@ -108,18 +111,19 @@ class WalkMapperActivity: ComponentActivity() {
             else->Unit // requestInstall below is the authoritative services install/update check.
         }
         starting=true
+        val requestedDraftId=vm.doc?.id
         lifecycleScope.launch {
             var session: Session?=null
             try {
                 withContext(Dispatchers.IO) { closing?.get() }
-                if(!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
+                if(!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || vm.busy || vm.doc?.id!=requestedDraftId) return@launch
                 if(ArCoreApk.getInstance().requestInstall(this@WalkMapperActivity,userInstallRequested)==ArCoreApk.InstallStatus.INSTALL_REQUESTED) {
                     userInstallRequested=false; installPending=true; vm.message("Install or update \"Google Play Services for AR\" when asked, then come back to TURN"); return@launch
                 }
                 session=Session(this@WalkMapperActivity)
                 val automatic=session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
                 val raw=session.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY)
-                val mode=when { raw->Config.DepthMode.RAW_DEPTH_ONLY; automatic->Config.DepthMode.AUTOMATIC; else->Config.DepthMode.DISABLED }
+                val mode=when { automatic->Config.DepthMode.AUTOMATIC; raw->Config.DepthMode.RAW_DEPTH_ONLY; else->Config.DepthMode.DISABLED }
                 session.configure(Config(session).apply {
                     planeFindingMode=Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                     depthMode=mode; updateMode=Config.UpdateMode.LATEST_CAMERA_IMAGE

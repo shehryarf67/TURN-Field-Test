@@ -11,6 +11,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.turn.fieldtest.TurnApplication
 import com.turn.fieldtest.data.local.*
 import com.turn.fieldtest.mapper.WalkMapperViewModel
+import com.turn.fieldtest.mapper.core.ScanDocument
 import com.turn.fieldtest.mapper.data.ScanRepository
 import com.turn.fieldtest.mapper.ui.WalkMapperScreen
 import com.turn.fieldtest.mapper.ui.MapperDetailsScreen
@@ -38,6 +39,57 @@ class WalkMapperWorkflowTest {
         compose.waitForIdle()
     }
     @After fun clean() {instrumentation.runOnMainSync {store.clear()}; db?.close(); app.deleteDatabase(name); image?.delete()}
+    @Test fun floorPlansCanBeOpenedDeletedAndClearedIndependently(): Unit=runBlocking {
+        val database=TurnDatabase.build(app,name).also {db=it}
+        database.venueDao().upsert(VenueEntity("v","Home",createdAtEpochMillis=1,updatedAtEpochMillis=1))
+        database.floorPlanDao().upsertFloor(FloorEntity("f","v","Ground floor",0,20.0,20.0,createdAtEpochMillis=1,updatedAtEpochMillis=1))
+        val repository=ScanRepository(database,app)
+        val previous=ScanDocument(id="first",venueId="v",floorId="f",name="First layout",updatedAt=1)
+        val current=previous.copy(id="second",name="Second layout",updatedAt=2)
+        repository.save(previous)
+        repository.save(current)
+        lateinit var vm: WalkMapperViewModel
+        instrumentation.runOnMainSync {
+            vm=WalkMapperViewModel(app,SavedStateHandle(mapOf("venueId" to "v","floorId" to "f")),repository)
+            store.put("mapper",vm)
+        }
+        compose.waitUntil(10_000) {vm.doc?.id==current.id}
+        compose.setContent {TurnTheme {WalkMapperScreen(vm,null,"Measured mode",false,{},{},{},{},{},{})}}
+        compose.onNodeWithText("Floor plans").performClick()
+        compose.onNodeWithText("Editing").assertExists()
+        compose.onNodeWithText("Open").performClick()
+        compose.waitUntil(10_000) {vm.doc?.id==previous.id && !vm.busy}
+        compose.onNodeWithText("Floor plans").performClick()
+        compose.onAllNodesWithText("Delete draft").onFirst().performClick()
+        compose.onNodeWithText("Delete First layout?").assertExists()
+        compose.onNodeWithText("Keep draft").performClick()
+        compose.runOnIdle {assertEquals(previous.id,vm.doc?.id)}
+        compose.onAllNodesWithText("Delete draft").onFirst().performClick()
+        compose.onNodeWithText("Delete draft").performClick()
+        compose.waitUntil(10_000) {vm.doc?.id!=previous.id && !vm.busy}
+        assertNull(repository.load(previous.id))
+        assertEquals(current,repository.load(current.id))
+        assertNotNull(database.floorPlanDao().getFloor("f"))
+
+        compose.onNodeWithText("New floor plan").performClick()
+        compose.onNodeWithText("Floor plan name").performTextInput("Kitchen")
+        compose.onNodeWithText("Create draft").performClick()
+        compose.waitUntil(10_000) {vm.doc?.name=="Kitchen" && !vm.busy}
+        val kitchenId=vm.doc!!.id
+        compose.onNodeWithText("Enter measurements").performScrollTo().performClick()
+        compose.runOnIdle {vm.addRoom("Kitchen"); vm.measuredPoint(1.0,1.0)}
+        compose.onNodeWithText("Floor plans").performClick()
+        compose.onNodeWithText("Clear plan").performClick()
+        compose.onNodeWithText("Clear Kitchen?").assertExists()
+        compose.onNodeWithText("Clear plan").performClick()
+        compose.waitUntil(10_000) {vm.doc?.rooms?.isEmpty()==true && !vm.busy}
+        compose.onNodeWithText("Step 1 of 6").assertExists()
+        val cleared=repository.load(kitchenId)!!
+        assertEquals("Kitchen",cleared.name)
+        assertTrue(cleared.points().isEmpty() && cleared.segments.isEmpty())
+        assertEquals(current,repository.load(current.id))
+    }
+
     @Test fun supportedPhoneCanRequestCameraBeforeCreatingRoom(): Unit=runBlocking {
         val database=TurnDatabase.build(app,name).also {db=it}
         lateinit var vm: WalkMapperViewModel

@@ -127,6 +127,20 @@ class HiddenCornersTest {
         assertEquals(CornerProvenance.OBSERVED, point.provenance)
         assertNull(point.inference); assertNull(point.heightAboveFloor)
 
+        val approximate = room.corners.first().copy(source = "AR_FEATURE_POINT")
+        val inferred = room.corners[2].copy(inference = inference.copy(
+            wallPointSources = listOf("AR_PLANE", "AR_EXTENDED_PLANE", "AR_PLANE", "AR_FEATURE_POINT"),
+        ))
+        val sourcedDoc = doc.copy(
+            rooms = listOf(room.copy(corners = listOf(approximate, room.corners[1], inferred, room.corners[3]))),
+            walls = listOf(ScanWall(id = "wall", a = P2(0.0, 0.0), b = P2(4.0, 0.0),
+                source = "GUIDED_AR_PLANE", segmentId = "s", endpointSources = listOf("DEPTH_HIT", "AR_PLANE"))),
+            doors = listOf(ScanDoor(wallId = "wall", a = P2(1.0, 0.0), b = P2(2.0, 0.0),
+                roomIds = listOf(room.id), endpointSources = listOf("AR_PLANE_MARGIN", "AR_PLANE"))),
+        )
+        assertEquals(sourcedDoc, json.decodeFromString(ScanDocument.serializer(), json.encodeToString(ScanDocument.serializer(), sourcedDoc)))
+        assertTrue(HiddenCorners.qualityNote(sourcedDoc.rooms.single()).orEmpty().contains("approximate surface hits"))
+
         // Map corrections move an inferred corner together with the wall points it came from.
         val turned = doc.transformed(Alignment(radians = Math.PI / 2, tx = 1.0))
         val moved = turned.rooms.single().corners[2]

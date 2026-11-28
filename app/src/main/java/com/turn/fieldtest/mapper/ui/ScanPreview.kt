@@ -57,18 +57,27 @@ fun ScanPreview(doc: ScanDocument, selected: String?, debug: Boolean, modifier: 
                     drawContext.canvas.nativeCanvas.drawText(r.name,s.x,s.y,android.graphics.Paint().apply { color=palette.onSurface.toArgb(); textSize=13.dp.toPx(); textAlign=android.graphics.Paint.Align.CENTER })
                 }
             }
+            fun markApproximateEndpoints(a: P2, b: P2, sources: List<String>) {
+                listOf(a,b).zip(sources).forEach { (point,source) ->
+                    if (HitSource.isApproximate(source)) drawCircle(Color(0xFFF5A524), 8f, screen(point), style=Stroke(2f))
+                }
+            }
             walls.forEach { w ->
                 val a=screen(w.a); val b=screen(w.b)
                 drawLine(if(w.id==selected) palette.onSurface else if(w.status=="CONFIRMED") palette.primary else palette.tertiary,a,b,if(w.id==selected) 7f else 4f)
+                markApproximateEndpoints(w.a,w.b,w.endpointSources)
             }
-            d.doors.forEach { drawLine(if(it.walkable) Color(0xFF6EE7A1) else Color(0xFFF97F7F),screen(it.a),screen(it.b),9f) }
+            d.doors.forEach {
+                drawLine(if(it.walkable) Color(0xFF6EE7A1) else Color(0xFFF97F7F),screen(it.a),screen(it.b),9f)
+                markApproximateEndpoints(it.a,it.b,it.endpointSources)
+            }
             if(debug) d.poses.zipWithNext().filter { it.first.segmentId==it.second.segmentId }.forEach { (a,b)->
                 if(a.mapPoint!=null && b.mapPoint!=null) drawLine(Color(0x889BA9C1),screen(a.mapPoint),screen(b.mapPoint),2f)
             }
             d.poses.lastOrNull()?.mapPoint?.let { drawCircle(Color(0xFF4D94FF),7f,screen(it)) }
             d.points().forEach { drawCircle(if(it.id==selected) palette.onSurface else palette.primary,if(it.id==selected) 9f else 5f,screen(it.p)) }
             // Inferred (two walls) and projected (high hit) corners get an amber ring; inferred ones show their wall points.
-            d.points().filter { it.provenance!=CornerProvenance.OBSERVED }.forEach { p ->
+            d.points().filter { it.provenance!=CornerProvenance.OBSERVED || HitSource.isApproximate(it.source) }.forEach { p ->
                 drawCircle(Color(0xFFF5A524),11f,screen(p.p),style=androidx.compose.ui.graphics.drawscope.Stroke(3f))
                 p.inference?.let { i -> (i.wallA+i.wallB).forEach { w -> drawCircle(Color(0xFFF5A524),3f,screen(w)) } }
             }

@@ -79,6 +79,15 @@ class WalkMapperPersistenceTest {
         assertEquals(mapped,ScanRepository(reopened,context).load("scan")!!.publishedFloorId)
         assertEquals(2,ProjectRepository(reopened).load(ProjectContext(mappedVenue,mapped)).regions.size)
         assertTrue(after.validationErrors().isEmpty())
+
+        val drafts=ScanRepository(reopened,context)
+        drafts.deleteDraft("scan",mapped)
+        assertNotNull(drafts.load("scan"))
+        drafts.deleteDraft("scan","f")
+        assertNull(drafts.load("scan"))
+        assertTrue(image.isFile)
+        assertEquals(2,ProjectRepository(reopened).load(ProjectContext(mappedVenue,mapped)).regions.size)
+        assertEquals(before.aggregatedWifiFingerprints,reopened.backupDao().createExport(13).aggregatedWifiFingerprints)
     }
     @Test fun failedPublicationRollsBackDatabaseAndDeletesOnlyItsNewImage()=runBlocking {
         val database=open(); seed(database); val repository=ScanRepository(database,context); repository.save(document())

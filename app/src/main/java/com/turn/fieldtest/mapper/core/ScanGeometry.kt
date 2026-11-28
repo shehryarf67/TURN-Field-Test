@@ -30,7 +30,15 @@ object ScanGeometry {
                     if(t in 1e-6..(1-1e-6) && u in -1e-6..(1+1e-6)) ts.add(t)
                 }
             }
-            ts.distinct().sorted().zipWithNext().mapIndexedNotNull {i,(a,b)->if((b-a)*w.a.distance(w.b)<.01) null else w.copy(id=if(ts.size==2) w.id else "${w.id}:split$i",a=P2(w.a.x+a*dx,w.a.y+a*dy),b=P2(w.a.x+b*dx,w.a.y+b*dy))}
+            ts.distinct().sorted().zipWithNext().mapIndexedNotNull { i,(a,b) ->
+                if((b-a)*w.a.distance(w.b)<.01) return@mapIndexedNotNull null
+                val sources=if(ts.size==2) w.endpointSources else listOf(
+                    if(a==0.0) w.endpointSources.getOrElse(0) { "" } else "DERIVED",
+                    if(b==1.0) w.endpointSources.getOrElse(1) { "" } else "DERIVED",
+                )
+                w.copy(id=if(ts.size==2) w.id else "${w.id}:split$i",a=P2(w.a.x+a*dx,w.a.y+a*dy),
+                    b=P2(w.a.x+b*dx,w.a.y+b*dy),endpointSources=sources)
+            }
         }
         return adjusted.filter {it.status!="CONFIRMED" || it.id in protected}+split
     }
@@ -60,7 +68,12 @@ object ScanGeometry {
                 val a=result[i]; val dx=a.b.x-a.a.x; val dy=a.b.y-a.a.y; val length=a.a.distance(a.b)
                 val ts=listOf(a.a,a.b,w.a,w.b).map { ((it.x-a.a.x)*dx+(it.y-a.a.y)*dy)/length }
                 fun point(t: Double)=P2(a.a.x+dx/length*t,a.a.y+dy/length*t)
-                result[i]=a.copy(a=point(ts.min()),b=point(ts.max()),observations=a.observations+w.observations)
+                val sources = if(a.endpointSources.isEmpty() && w.endpointSources.isEmpty()) emptyList() else {
+                    val sourceAt = List(2) { a.endpointSources.getOrElse(it) { "" } } +
+                        List(2) { w.endpointSources.getOrElse(it) { "" } }
+                    listOf(sourceAt[ts.indexOf(ts.min())], sourceAt[ts.indexOf(ts.max())])
+                }
+                result[i]=a.copy(a=point(ts.min()),b=point(ts.max()),observations=a.observations+w.observations,endpointSources=sources)
             }
         }
         return if(result.size<input.size) mergeWalls(result,tolerance) else result

@@ -13,6 +13,8 @@ The mapper walks you through six steps. Each step tells you what to do and why; 
 1. **Set the starting point.** Tap **Start camera**, point your phone at a clear patch of floor near where you're standing, and tap it (or put the **+** on it and tap **Use the spot under the +**). Confirm with **Yes, this is the floor** — not a table, bed or sofa. This spot becomes the corner of your map (0,0). *Why the floor?* TURN needs to know where the floor is so it can measure everything flat along the ground, like a tape measure.
 2. **Set which way is "up" on the map.** Tap another floor point a few steps in front of you, e.g. along a hallway. The map is drawn with this direction pointing up. It doesn't need to be north.
 3. **Mark the corners of this room.** Walk around and tap each corner where the wall meets the floor (or the wall or ceiling straight above it), going round the room in order. The counter shows how many corners you've marked, and the mini map in the corner of the camera shows the outline growing.
+   - The **+** shows what TURN can mark at the centre of the camera. Green means a surface is ready, amber means the point is approximate or above the floor, and white means TURN is still looking. You can tap elsewhere on the camera image or use the button to mark under the **+**. Check amber points against the room and a tape measure.
+   - Keep the phone aimed low enough to see some floor and furniture as you walk. Tilt up briefly to mark a wall or ceiling corner, then tilt back down.
    - Corner hidden by a wardrobe or sofa? Choose **Corner behind furniture**, tap 2 or more spots along one wall, **Next wall**, 2 or more along the other wall, then **Place corner**.
    - Going through a door? Choose **Doorway**, tap **Show map**, tap the wall with the door, go back to the camera and mark both sides of the opening. Then tap **Next room**, name it and mark its corners.
    - Made a mistake? Tap **Undo**.
@@ -27,11 +29,16 @@ The mapper walks you through six steps. Each step tells you what to do and why; 
 | --- | --- |
 | Move your phone slowly from side to side so it can see the room | Sweep the phone gently over the floor and furniture until it says Ready. |
 | Too dark / Not enough detail | Turn on a light, or point at a rug, furniture edge or patterned floor. |
-| Couldn't find a surface there | Try a spot with more texture or better light, or move a little closer. |
-| That spot is too high | Tap where the wall meets the floor, the wall itself, or the ceiling just above the corner. |
-| The phone lost track of where it is | Tap **Pause camera**. Your work is saved. Tap **Continue with camera**, pick two corners you've already marked, and tap them on the floor to line up again. |
+| No surface detected yet | Move sideways a little so the phone can see the wall, then aim again. |
+| That spot is too far / too close | Move closer or step back. Marks must be 0.2–8 m from the phone. |
+| That spot is too high / below the floor | Aim between floor level and 3.5 m for room corners, or up to 2.5 m for wall and doorway ends. |
+| Tilt the phone down so it can see the floor and furniture | Lower your aim while walking so the camera can see textured surfaces again. |
+| Lost track — point at the floor or furniture and hold still | Marking pauses briefly. If tracking returns within about three seconds and the camera position is consistent, continue in the same section. |
+| The phone lost track of where it is | Tap **Pause camera**. Your work is saved. Tap **Continue with camera**, pick two corners you've already marked, and tap them on the floor to line up again. If there are no saved corners, set the starting point and direction again. |
 
-**Coming back later.** Everything is saved on the phone as you go. When you reopen the mapper, step 3 asks you to pick two corners you've already marked (**Saved corner A** and **B**, at least half a metre apart). Start the camera and tap the floor exactly at those two corners; the camera then lines up with your saved map and you carry on.
+**Manage your plans.** The mapper header shows the plan and room you're working on. Tap **Floor plans** to rename the current draft, choose **New floor plan** to start a separate draft, or choose **Open** next to an earlier draft for this floor. **Clear plan** removes the current draft's rooms, geometry, camera sections and measurements while keeping its name. **Delete draft** removes the draft from the list. Both actions ask for confirmation. Floors already saved for navigation are available in **Buildings**.
+
+**Coming back later.** Everything is saved on the phone as you go. When you reopen a draft with corners, step 3 asks you to pick two corners you've already marked (**Saved corner A** and **B**, at least half a metre apart). Start the camera and tap the floor exactly at those two corners; the camera then lines up with your saved map and you carry on.
 
 **Advanced.** The **Advanced** button in the mapper opens the full editor: typed coordinates, wall suggestions from the camera, joining and splitting walls, doorway widths and room links, moving/turning/resizing a camera session, fine-tuning settings (corner snap distance, wall-detection tolerance, shortest detected wall, allowed size error) and drafts. You never need it for a normal home.
 
@@ -78,7 +85,7 @@ Choose a physical origin and one perpendicular pair of drawing axes. Coordinates
 
 ## Pause, reopen and align another camera section
 
-Pause/background/exit stops camera capture. Tracking loss after the floor frame is established permanently blocks additions to that AR section. Recovery of camera tracking alone does not unlock it. Saved geometry remains editable. A restored active section after process death is also marked interrupted.
+Pause/background/exit stops camera capture. After the floor frame is established, a tracking gap temporarily disables marking. Tracking can resume in the same section within three seconds when the recovered camera pose is within 1 m and 30° of the last tracked pose. A longer gap or a larger jump interrupts the section and requires a new alignment. Hold still when the recovery message appears. A restored active section after process death is also marked interrupted.
 
 For new AR capture with existing geometry:
 
@@ -136,7 +143,9 @@ After upgrading a phone database to schema 3, use builds that understand schema 
 
 ## AR, coordinate and performance details
 
-Native ARCore **1.57.0** is optional; it is a library in the existing app. Runtime support and actual session capabilities are authoritative for **both Galaxy Z Fold7 and Vivo V50 5G**. Supported does not imply depth, usable frames or good accuracy. Missing depth uses reliable planes and manual marking; missing ARCore uses measured drawing. No simulated scene or sensor fallback is added. Initial Google Play Services for AR setup may require connectivity; local mapping needs no TURN backend.
+Native ARCore **1.57.0** is optional; it is a library in the existing app. Runtime support and actual session capabilities are authoritative for **both Galaxy Z Fold7 and Vivo V50 5G**. Supported does not imply depth, usable frames or good accuracy. TURN tracks both horizontal and vertical planes and prefers Automatic depth when supported. Missing depth still allows plane and oriented feature hits; missing ARCore uses measured drawing. No simulated scene or sensor fallback is added. Initial Google Play Services for AR setup may require connectivity; local mapping needs no TURN backend.
+
+The start and direction taps require hits inside an upward-facing plane polygon, followed by floor confirmation and a same-floor check. After alignment, TURN prefers plane hits, then depth points and feature points with an estimated surface normal. Vertical and downward-facing planes allow a 0.3 m margin around the polygon. If direct hits fail, TURN can extend a tracked wall, the confirmed floor, or a nearby detected ceiling patch. All candidates use the same distance and tool height limits. Margin, feature and extended-plane hits are approximate and appear amber. The draft records the source of direct corners, both wall/door endpoints, and the wall samples used for hidden corners. Extended planes can extend past the real surface, so inspect the position before relying on the map.
 
 AR +Y is vertical. The operator's origin and forward vector define a right-handed floor projection: `x = -dx·forwardZ + dz·forwardX`, `y = dx·forwardX + dz·forwardZ`. Similarity alignment maps sections into the common draft. Publication only translates to positive TURN coordinates with a 0.25 m margin. Screen Y is inverted for rendering; sensor world coordinates are not rotated with the screen. ARCore display geometry/hit testing handles screen rotation and folded/unfolded viewport dimensions. Rotation/folding and renderer lifecycle still require actual Fold7 testing.
 
@@ -160,7 +169,7 @@ Use the Fold7 first, with clear lighting and an unoccupied walking path. Record 
 6. Save as a new floor, export PNG/scan JSON, close and reopen TURN. Confirm the saved map/rooms/doors/POIs and draft measurements persist. Confirm the original floor and any fingerprints are unchanged.
 7. Inspect Paths. Complete missing concave-room/corridor connections, save, select a destination and verify A* goes only through the marked doorway. Test an unmarked wall and a non-walkable opening: neither should permit a crossing. Add a reference point in each room and confirm ownership after reopening.
 8. Optionally collect multiple fresh Wi-Fi snapshots at known points, save/reopen, initialize at a known physical point and declare the correct walking direction. Test existing live navigation on the generated map; distinguish mapping error, heading/stride error and radio ambiguity.
-9. During a second scan, cover the camera/turn toward a blank surface, deny camera permission, background/return, rotate portrait/landscape and fold/unfold. Saved geometry must survive, additions must stop when tracking is lost, and new sessions must demand explicit reference alignment. Test the plane-only and measured fallback honestly when available.
+9. During a second scan, test the reticle and record successful/failed taps at floor corners, above furniture, on both hidden-corner walls, and at ceiling corners. Briefly cover the camera while holding the phone still and check that marking resumes in the same section. Repeat with a longer gap and verify that marking stays blocked until realignment. Deny camera permission, background/return, rotate portrait/landscape and fold/unfold. Saved geometry must survive. Test without depth and with measured drawing when available.
 10. Record battery/thermal status, responsiveness, failure messages, cleanup/camera release, total time and manual corrections. No physical pass has been recorded by automated/emulator tests. Report actual results before using a scan for a public demonstration.
 
 ## Official references used

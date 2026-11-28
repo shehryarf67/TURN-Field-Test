@@ -29,6 +29,7 @@ data class CornerInference(
     val rmsB: Double,
     /** How far the corner lies beyond the nearest tapped point of the farther wall. */
     val extrapolationMetres: Double,
+    val wallPointSources: List<String> = emptyList(),
 )
 
 /** A wall fitted to tapped points: through [point] along unit [direction]. */
@@ -131,9 +132,11 @@ object HiddenCorners {
     fun qualityNote(room: ScanRoom): String? {
         val inferred = room.corners.count { it.provenance == CornerProvenance.INFERRED }
         val projected = room.corners.count { it.provenance == CornerProvenance.PROJECTED }
-        if (inferred == 0 && projected == 0) return null
+        val approximate = room.corners.count { HitSource.isApproximate(it.source) }
+        if (inferred == 0 && projected == 0 && approximate == 0) return null
         val parts = listOfNotNull(
             inferred.takeIf { it > 0 }?.let { "$it ${if (it == 1) "corner" else "corners"} inferred from two walls" },
+            approximate.takeIf { it > 0 }?.let { "$it marked with approximate surface hits" },
             projected.takeIf { it > 0 }?.let { "$it projected down from a high wall or ceiling hit" },
         )
         return "${room.name}: ${parts.joinToString(", ")}; check them with a tape measure"
@@ -144,16 +147,17 @@ object HiddenCorners {
  * Wall points of the "Hidden corner (two walls)" tool while they are being tapped: [wallA], then (after [next])
  * [wallB]. Immutable; [undo] removes the last tapped point (or steps back from wall 2 to wall 1 when wall 2 is empty).
  */
-data class HiddenCornerDraft(val wallA: List<P2> = emptyList(), val wallB: List<P2>? = null) {
+data class HiddenCornerDraft(val wallA: List<P2> = emptyList(), val wallB: List<P2>? = null, val sources: List<String> = emptyList()) {
     val isEmpty: Boolean get() = wallA.isEmpty() && wallB == null
-    fun add(p: P2) = if (wallB == null) copy(wallA = wallA + p) else copy(wallB = wallB + p)
+    fun add(p: P2, source: String = "") = if (wallB == null) copy(wallA = wallA + p, sources = sources + source)
+        else copy(wallB = wallB + p, sources = sources + source)
     fun next(): HiddenCornerDraft {
         require(wallB == null && wallA.size >= 2) { "Tap at least two points along the first wall" }
         return copy(wallB = emptyList())
     }
     fun undo(): HiddenCornerDraft = when {
-        wallB == null -> copy(wallA = wallA.dropLast(1))
+        wallB == null -> copy(wallA = wallA.dropLast(1), sources = sources.dropLast(1))
         wallB.isEmpty() -> copy(wallB = null)
-        else -> copy(wallB = wallB.dropLast(1))
+        else -> copy(wallB = wallB.dropLast(1), sources = sources.dropLast(1))
     }
 }

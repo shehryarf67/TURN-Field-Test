@@ -40,6 +40,7 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
     var x by remember { mutableStateOf("") }; var y by remember { mutableStateOf("") }
     var exitDialog by remember { mutableStateOf(false) }
     var deleteRoom by remember { mutableStateOf(false) }
+    var showFloorPlans by remember { mutableStateOf(false) }
     fun attempt(action: ()->Unit) { runCatching(action).onFailure { vm.message(it.message ?: "Check the values you entered") } }
     BackHandler { exitDialog=true }
     if(exitDialog) AlertDialog(onDismissRequest={exitDialog=false},title={Text("Leave the advanced editor?")},
@@ -48,6 +49,7 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
         dismissButton={TextButton(onClick={exitDialog=false}) { Text("Keep editing") }})
     if(deleteRoom) ConfirmDialog("Delete ${vm.room?.name ?: "this room"}?","Its corners, doorway links and measurements are removed. You can bring it back with Undo.",
         "Delete room",onConfirm=vm::removeRoom,onDismiss={deleteRoom=false})
+    if(showFloorPlans) FloorPlanDrafts(vm,onStopCamera) { showFloorPlans=false }
     Surface(Modifier.fillMaxSize()) {
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
             val surfaceHeight=(maxHeight*0.38f).coerceIn(140.dp,440.dp)
@@ -85,7 +87,7 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
                 }
                 if(camera!=null && vm.floorDescription.isNotEmpty()) {
                     Text(vm.floorDescription,style=MaterialTheme.typography.bodySmall)
-                    ActionRow { Button(onClick={camera.confirmFloor()}) { Text("Yes, this is the floor") }; TextButton(onClick={camera.rejectFloor()}) { Text("No, try again") } }
+                    ActionRow { Button(onClick={camera.confirmFloor()},enabled=vm.arStatus.tracking) { Text("Yes, this is the floor") }; TextButton(onClick={camera.rejectFloor()}) { Text("No, try again") } }
                 }
                 if(camera==null) Button(onClick=onStartCamera,enabled=arSupported && !vm.busy,
                     modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text("Start camera") }
@@ -229,10 +231,7 @@ internal fun MapperDetailsScreen(vm: WalkMapperViewModel,camera: ArScanView?,ava
                                 Text("Wall-detection tolerance is how far depth points may stray from a straight line (RANSAC inlier distance).",style=MaterialTheme.typography.bodySmall)
                                 TextButton(onClick={attempt {vm.thresholds(snap.toDouble(),tolerance.toDouble()/100,inlier.toDouble(),minimumWall.toDouble())}},enabled=camera==null) {Text("Apply settings")}
                             }
-                            if(camera==null) AdvancedSection(title="Drafts",subtitle="Start over or reopen an earlier draft of this floor") {
-                                OutlinedButton(onClick=vm::newDraft,enabled=!vm.busy) {Text("Start another draft")}
-                                vm.availableDrafts.forEach { draft->TextButton(onClick={vm.openDraft(draft.id)}) {Text("Open draft ${draft.id.take(8)} · ${draft.status.lowercase().replace('_',' ')}")} }
-                            }
+                            OutlinedButton(onClick={showFloorPlans=true},enabled=!vm.busy) {Text("Floor plans")}
                         }
                     }
                 }

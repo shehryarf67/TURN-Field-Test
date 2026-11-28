@@ -17,10 +17,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.turn.fieldtest.mapper.WalkMapperViewModel
 import com.turn.fieldtest.mapper.ar.ArScanView
+import com.turn.fieldtest.mapper.ar.Reticle
 import com.turn.fieldtest.mapper.core.*
 import com.turn.fieldtest.ui.components.AdvancedSection
 import com.turn.fieldtest.ui.components.HelpTip
@@ -64,8 +66,23 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
     var measured by rememberSaveable { mutableStateOf(false) }
     var outline by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
+    var showFloorPlans by rememberSaveable { mutableStateOf(false) }
+    var wizardDraftId by rememberSaveable { mutableStateOf<String?>(null) }
+    var wizardDraftRevision by rememberSaveable { mutableIntStateOf(vm.draftRevision) }
     val doc = vm.doc
     LaunchedEffect(camera) { outline = false }
+    LaunchedEffect(doc?.id,vm.draftRevision) {
+        val id = doc?.id ?: return@LaunchedEffect
+        if (wizardDraftId != null && (wizardDraftId != id || wizardDraftRevision != vm.draftRevision)) {
+            stage = MapperStage.CAPTURE
+            measured = false
+            outline = false
+            details = false
+            roomDialog = null
+        }
+        wizardDraftId = id
+        wizardDraftRevision = vm.draftRevision
+    }
     if (details) {
         BackHandler { details = false }
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -84,6 +101,7 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
         confirmButton = { TextButton(onClick = { onStopCamera(); onExit() }) { Text("Save and leave") } },
         dismissButton = { TextButton(onClick = { leaving = false }) { Text("Keep mapping") } })
     roomDialog?.let { mode -> RoomNameDialog(vm, mode) { roomDialog = null } }
+    if (showFloorPlans) FloorPlanDrafts(vm, onStopCamera) { showFloorPlans = false }
     fun goTo(next: MapperStage) { if (next != MapperStage.CAPTURE) onStopCamera(); outline = false; stage = next }
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -91,9 +109,11 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = UiAlignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Map a floor", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(vm.room?.let { "Room: ${it.name}" } ?: "Draw a floor plan by tapping room corners with the camera",
+                    val plan = doc?.name?.ifBlank { "Mapped floor" } ?: "Opening floor plan…"
+                    Text(listOfNotNull(plan, vm.room?.name).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                TextButton(onClick = { showFloorPlans = true }, enabled = doc != null && !vm.busy) { Text("Floor plans") }
                 TextButton(onClick = { onStopCamera(); details = true }, enabled = doc != null) { Text("Advanced") }
                 IconButton(onClick = { leaving = true }) { Icon(Icons.Outlined.Close, "Close mapper") }
             }
@@ -122,7 +142,12 @@ fun WalkMapperScreen(vm: WalkMapperViewModel, camera: ArScanView?, availability:
                             onPoint = { vm.selectedPointId = it; vm.selectedWallId = null }, onWall = { vm.selectedWallId = it; vm.selectedPointId = null })
                     }
                     if (camera != null && !outline) {
-                        Icon(Icons.Outlined.Add, "Aim here", Modifier.align(UiAlignment.Center).size(32.dp), tint = Color.White)
+                        val (aimLabel, aimColor) = when (vm.arStatus.reticle) {
+                            Reticle.VALID -> "Aim here: surface ready" to Color(0xFF6EE7A1)
+                            Reticle.APPROXIMATE -> "Aim here: approximate or elevated surface" to Color(0xFFF5A524)
+                            Reticle.SEARCHING -> "Aim here: looking for a surface" to Color.White
+                        }
+                        Icon(Icons.Outlined.Add, aimLabel, Modifier.align(UiAlignment.Center).size(32.dp), tint = aimColor)
                         CoachingBanner(vm.arNotice ?: vm.arStatus.text, vm.arNotice != null, Modifier.align(UiAlignment.TopCenter).padding(10.dp))
                         if (doc.points().isNotEmpty()) Box(Modifier.align(UiAlignment.BottomEnd).padding(10.dp).size(120.dp).clip(MaterialTheme.shapes.medium)) {
                             ScanPreview(doc, vm.selectedPointId ?: vm.selectedWallId, false, Modifier.fillMaxSize(), {}, {}, showFit = false)
@@ -245,7 +270,7 @@ private fun CaptureStep(vm: WalkMapperViewModel, doc: ScanDocument, camera: ArSc
             if (vm.floorDescription.isNotEmpty()) {
                 StepHeader(1, MAPPER_STEPS, if (resuming) "Find saved corner A" else "Set the starting point",
                     "Is this the floor?", vm.floorDescription, FLOOR_HELP)
-                Button(onClick = { camera.confirmFloor() }, shape = MaterialTheme.shapes.small, modifier = bigButton) { Text("Yes, this is the floor") }
+                Button(onClick = { camera.confirmFloor() }, enabled = vm.arStatus.tracking, shape = MaterialTheme.shapes.small, modifier = bigButton) { Text("Yes, this is the floor") }
                 OutlinedButton(onClick = { camera.rejectFloor() }, modifier = Modifier.fillMaxWidth()) { Text("No, try again") }
             } else {
                 if (resuming) StepHeader(1, MAPPER_STEPS, "Find saved corner A",
