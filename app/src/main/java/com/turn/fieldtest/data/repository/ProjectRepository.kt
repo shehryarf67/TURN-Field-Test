@@ -11,6 +11,8 @@ import com.turn.fieldtest.core.MetricPolygon
 import com.turn.fieldtest.core.WallSegment
 import com.turn.fieldtest.core.validateSimpleWalkablePolygon
 import com.turn.fieldtest.data.local.*
+import com.turn.fieldtest.mapper.core.ScanDocument
+import com.turn.fieldtest.mapper.data.ScanRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import java.util.UUID
@@ -32,6 +34,7 @@ data class ProjectSummary(
     val surveySessionCount: Int,
     val positioningSessionCount: Int,
     val floorLevel: Int = 0,
+    val standaloneArFloor: Boolean = false,
 ) {
     val context: ProjectContext get() = ProjectContext(venueId, floorId)
 }
@@ -117,6 +120,71 @@ class ProjectRepository(private val database: TurnDatabase) {
             widthMetres = 42.0, heightMetres = 28.0, createdAtEpochMillis = now, updatedAtEpochMillis = now))
         context
     }
+
+    /** Moves a published scan into another building without replacing either floor or changing its map frame. */
+    suspend fun moveArFloor(source: ProjectContext, targetVenue: String, floorName: String, level: Int, now: Long): ProjectContext =
+        database.withTransaction {
+            val name = floorName.trim()
+            require(name.isNotEmpty() && name.length <= 120) { "Enter a floor name of at most 120 characters" }
+            require(source.venueId != targetVenue) { "Choose a different building" }
+            val sourceVenue = requireNotNull(repositories.venues.venue(source.venueId)) { "The scan's building is unavailable" }
+            val floors = database.floorPlanDao()
+            val floor = requireNotNull(floors.observeFloors(sourceVenue.id).first().singleOrNull()) {
+                "Only a standalone scan can be moved"
+            }
+            require(sourceVenue.notes?.startsWith("Walk Mapper revision of ") == true && floor.id == source.floorId) {
+                "This action is available for standalone Walk Mapper scans"
+            }
+            requireNotNull(repositories.venues.venue(targetVenue)) { "The destination building is unavailable" }
+            val siblings = floors.observeFloors(targetVenue).first()
+            val slot = siblings.firstOrNull { it.levelNumber == level }
+            require(siblings.none { it.id != slot?.id && it.name.equals(name, ignoreCase = true) }) {
+                "The destination already has a floor named $name"
+            }
+            require(floors.observeTransitions(source.floorId).first().isEmpty()) { "This floor already has a stair or lift link" }
+
+            val records = database.floorMoveDao()
+            val drafts = database.scanDraftDao()
+            val json = ScanRepository.json
+            val slotDrafts = if (slot == null) emptyList() else {
+                require(slot.mapperSourceJson == null && slot.frameAlignmentJson == null &&
+                    siblings.none { FloorAlignment.fromJsonOrNull(it.frameAlignmentJson)?.toFloorId == slot.id } &&
+                    !records.hasSavedFloorData(slot.id)) {
+                    "Level $level already has a saved map, alignment, or recordings"
+                }
+                drafts.referencingFloor(slot.id).mapNotNull { row ->
+                    val doc = json.decodeFromString<ScanDocument>(row.documentJson)
+                    require(doc.publishedFloorId != slot.id) { "Level $level is already a published scan" }
+                    (row to doc).takeIf { row.floorId == slot.id }
+                }
+            }
+            records.duplicateCheckpoint(source.venueId, targetVenue)?.let {
+                throw IllegalArgumentException("Both buildings have a checkpoint named $it. Use a different destination building.")
+            }
+            if (slot != null) {
+                slotDrafts.forEach { (row, doc) ->
+                    val updated = doc.copy(floorId = source.floorId, venueId = targetVenue)
+                    drafts.save(row.copy(floorId = source.floorId, documentJson = json.encodeToString(ScanDocument.serializer(), updated)))
+                }
+                floors.deleteFloor(slot)
+            }
+            floors.moveFloor(source.floorId, targetVenue, name, level, slot?.elevationMetres ?: floor.elevationMetres, now)
+            records.surveys(source.venueId, targetVenue)
+            records.positioning(source.venueId, targetVenue)
+            records.testRuns(source.venueId, targetVenue)
+            records.checkpoints(source.venueId, targetVenue)
+            records.beacons(source.venueId, targetVenue)
+
+            drafts.referencingFloor(source.floorId).forEach { row ->
+                val doc = json.decodeFromString<ScanDocument>(row.documentJson)
+                val updated = doc.copy(
+                    venueId = if (doc.floorId == source.floorId) targetVenue else doc.venueId,
+                    publishedVenueId = if (doc.publishedFloorId == source.floorId) targetVenue else doc.publishedVenueId,
+                )
+                if (updated != doc) drafts.save(row.copy(documentJson = json.encodeToString(ScanDocument.serializer(), updated)))
+            }
+            ProjectContext(targetVenue, source.floorId)
+        }
 
     /**
      * Saves every floor's elevation in one building (schema 8). Either all are null (cleared: nominal storey height)

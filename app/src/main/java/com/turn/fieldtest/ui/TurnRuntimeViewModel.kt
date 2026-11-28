@@ -523,6 +523,29 @@ class TurnRuntimeViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun moveArFloor(source: ProjectContext, targetVenue: String, floorName: String, level: Int) {
+        if (appState.mode != DataMode.REAL_DEVICE || !projectChangeAllowed() || appState.floorLinksBusy) return
+        appState.projectBusy = true
+        viewModelScope.launch {
+            var moved = false
+            try {
+                val context = projects.moveArFloor(source, targetVenue, floorName, level, System.currentTimeMillis())
+                moved = true
+                appState.projects = projects.observeProjects().first()
+                loadProject(context)
+                appState.projectStatus = "Moved $floorName. Mark the staircase on both floors to link them."
+                appState.selectDestination(com.turn.fieldtest.ui.model.TurnDestination.FLOOR_LINKS)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                appState.projectStatus = if (moved) "Floor moved. Open it from Buildings to link the stairs."
+                    else "Could not move floor: ${error.message}"
+            } finally {
+                appState.projectBusy = false
+            }
+        }
+    }
+
     /** Loads the open building's floor links, and with [withFloorMaps] every floor's saved map for picking points. */
     fun refreshFloorLinks() = refreshFloorLinks(withFloorMaps = true)
 

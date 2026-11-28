@@ -118,6 +118,7 @@ class MainActivity : ComponentActivity() {
                     onBundledMapperImport = { floor,replace -> runtimeViewModel.importMapperPackage(asset="mapper/$floor.json",replace=replace) },
                     onBundledFloorAddedToBuilding = { floor, venue -> runtimeViewModel.importMapperPackage(asset = "mapper/$floor.json", intoVenueId = venue) },
                     onFloorAdded = runtimeViewModel::addFloor,
+                    onArFloorMoved = runtimeViewModel::moveArFloor,
                     onFloorLinksRefresh = runtimeViewModel::refreshFloorLinks,
                     onConnectorSaved = runtimeViewModel::saveConnector,
                     onConnectorDeleted = runtimeViewModel::deleteConnector,

@@ -36,8 +36,18 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
     /** Building the imported floor joins; null means a new building. */
     var importInto by remember { mutableStateOf<String?>(null) }
     var addFloorTo by remember { mutableStateOf<String?>(null) }
+    var movingScan by remember { mutableStateOf<ProjectSummary?>(null) }
     val available = !state.projectBusy && !state.startupLoading && !state.sessionLocked && !state.realEvaluationBusy
     val buildings = state.projects.groupBy { it.venueId }.values.toList()
+    val canMoveScan = available && !state.hasUnsavedMapChanges && !state.floorLinksBusy &&
+        state.mode == com.turn.fieldtest.ui.model.DataMode.REAL_DEVICE
+    movingScan?.let { source ->
+        MoveScanDialog(source, buildings.filterNot { it.first().venueId == source.venueId },
+            canMoveScan, onDismiss = { movingScan = null }) { target, name, level ->
+            actions.onArFloorMoved(source.context, target, name, level)
+            movingScan = null
+        }
+    }
     fun startImport(f: String) {
         floorPackage = f
         // Default to the building that already holds this block's floors (e.g. C-F3 joins the building with C-F4).
@@ -176,6 +186,11 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
                     // Highest floor first, as in a lift panel.
                     floors.sortedByDescending { it.floorLevel }.forEach { f ->
                         FloorRow(f, selected = f == current, enabled = available) { open(f.context) }
+                        if (f.standaloneArFloor && buildings.size > 1) {
+                            TextButton(onClick = { movingScan = f }, enabled = canMoveScan) {
+                                Text("Move to building")
+                            }
+                        }
                     }
                     if (current != null) {
                         // Setup progress for the open floor: map, connected places, then completed Wi-Fi survey points.
@@ -232,6 +247,60 @@ fun ProjectsScreen(state: TurnAppState, actions: TurnAppActions) {
         }
         }
     }
+}
+
+@Composable
+private fun MoveScanDialog(
+    source: ProjectSummary,
+    targets: List<List<ProjectSummary>>,
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+    onMove: (String, String, Int) -> Unit,
+) {
+    var targetId by remember(source.floorId) { mutableStateOf<String?>(null) }
+    var name by remember(source.floorId) { mutableStateOf(source.floorName) }
+    var level by remember(source.floorId) { mutableStateOf(source.floorLevel.toString()) }
+    val target = targets.firstOrNull { it.first().venueId == targetId }
+    val chosenLevel = level.toIntOrNull()
+    val nameTaken = target.orEmpty().any { it.floorLevel != chosenLevel && it.floorName.equals(name.trim(), ignoreCase = true) }
+    val levelTaken = target.orEmpty().any { it.floorLevel == chosenLevel }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Move ${source.floorName} to a building") },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Choose the building that contains the other stair landing.")
+                targets.forEach { floors ->
+                    val building = floors.first()
+                    val floorNames = floors.sortedBy { it.floorLevel }.joinToString(", ") { it.floorName }
+                    ChoiceRow("${building.venueName} · $floorNames", targetId == building.venueId) {
+                        targetId = building.venueId
+                        val occupied = floors.map { it.floorLevel }.toSet()
+                        level = if (source.floorLevel == 0 && source.floorLevel in occupied) {
+                            generateSequence(0) { it + 1 }.first { it !in occupied }.toString()
+                        } else source.floorLevel.toString()
+                    }
+                }
+                OutlinedTextField(name, { name = it.take(120) }, label = { Text("Floor name") },
+                    singleLine = true, isError = nameTaken, supportingText = {
+                        if (nameTaken) Text("This building already has that floor name")
+                    })
+                OutlinedTextField(level, { level = it.take(5) }, label = { Text("Level (0 = ground, 1 = upstairs)") },
+                    singleLine = true, supportingText = {
+                        if (levelTaken) Text("TURN can reuse an empty setup floor at this level and keep its drafts. A saved map or recordings block the move.")
+                    })
+                Text("The map and recordings move with the floor.", style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onMove(requireNotNull(targetId), name.trim(), requireNotNull(chosenLevel)) },
+                enabled = enabled && target != null && name.isNotBlank() && !nameTaken && chosenLevel != null) {
+                Text("Move floor")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** Title of the collapsed section holding the bundled university floors (tests expand it by this name). */

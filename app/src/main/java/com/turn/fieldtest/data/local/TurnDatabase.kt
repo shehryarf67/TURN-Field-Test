@@ -50,6 +50,7 @@ abstract class TurnDatabase : RoomDatabase() {
     abstract fun navigationDao(): NavigationDao
     abstract fun venueDao(): VenueDao
     abstract fun floorPlanDao(): FloorPlanDao
+    abstract fun floorMoveDao(): FloorMoveDao
     abstract fun surveyDao(): SurveyDao
     abstract fun positioningDao(): PositioningDao
     abstract fun evaluationDao(): EvaluationDao

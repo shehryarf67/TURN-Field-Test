@@ -14,6 +14,7 @@ data class TurnAppActions(
     val onBundledFloorAddedToBuilding: (String, String) -> Unit = { _, _ -> },
     /** Adds an empty floor to a building (venue id, floor name, level). */
     val onFloorAdded: (String, String, Int) -> Unit = { _, _, _ -> },
+    val onArFloorMoved: (com.turn.fieldtest.data.repository.ProjectContext, String, String, Int) -> Unit = { _, _, _, _ -> },
     val onDestinationSelected: (String?) -> Unit = {},
     val onProjectCreated: (com.turn.fieldtest.data.repository.ProjectInput) -> Unit = {},
     val onProjectOpened: (com.turn.fieldtest.data.repository.ProjectContext, Boolean) -> Unit = { _, _ -> },

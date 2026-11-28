@@ -10,6 +10,10 @@ import com.turn.fieldtest.data.repository.*
 import com.turn.fieldtest.mapper.core.*
 import com.turn.fieldtest.mapper.data.ScanRepository
 import com.turn.fieldtest.core.NavigationGraph
+import com.turn.fieldtest.core.ConnectorDraft
+import com.turn.fieldtest.core.ConnectorKind
+import com.turn.fieldtest.core.MetricPoint
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.*
 import org.junit.Assert.*
@@ -109,5 +113,60 @@ class WalkMapperPersistenceTest {
         assertEquals(3,first.nodes.size); assertEquals(3,second.nodes.size)
         assertTrue(first.nodes.map {it.id}.toSet().intersect(second.nodes.map {it.id}.toSet()).isEmpty())
         assertTrue(database.backupDao().createExport(10).validationErrors().isEmpty())
+    }
+
+    @Test fun standaloneScansCanJoinOneBuildingAndLinkWithoutReplacingTheirSavedMaps()=runBlocking {
+        val database=open()
+        seed(database)
+        val scans=ScanRepository(database,context)
+        val projects=ProjectRepository(database)
+        val ground=scans.publish(document().copy(id="ground-draft",name="Ground floor"))
+        val groundVenue=scans.load("ground-draft")!!.publishedVenueId!!
+        val slot=projects.addFloor(groundVenue,"Upstairs",1,8)
+        val upstairs=scans.publish(document().copy(id="upstairs-draft",name="Upper floor",floorId=slot.floorId,venueId=slot.venueId))
+        val upperVenue=scans.load("upstairs-draft")!!.publishedVenueId!!
+        val upperContext=ProjectContext(upperVenue,upstairs)
+        val upper=projects.load(upperContext)
+        for (map in listOf(projects.load(ProjectContext(groundVenue,ground)), upper)) {
+            images.add(File(Uri.parse(map.asset!!.contentUri).path!!))
+        }
+        database.floorPlanDao().upsertReferencePoint(ReferencePointEntity("rp-upper",upstairs,"Landing",2.0,2.0,true,updatedAtEpochMillis=11))
+        database.surveyDao().upsertSession(SurveySessionEntity("survey-upper",upperVenue,upstairs,"rp-upper",2.0,2.0,"test","test","35","1",
+            dataMode="REAL_DEVICE",startedAtEpochMillis=1,endedAtEpochMillis=2))
+        database.surveyDao().upsertAggregatedFingerprints(listOf(AggregatedWifiFingerprintEntity("fp-upper","rp-upper","survey-upper",
+            "aa:aa",-55.0,-55.0,0.0,-55,-55,1,1,1,1.0,calculatedAtEpochMillis=2)))
+        val before=database.backupDao().createExport(12)
+        assertTrue(projects.observeProjects().first().single { it.floorId==upstairs }.standaloneArFloor)
+
+        val conflict=runCatching { projects.moveArFloor(upperContext,groundVenue,"Upper floor",0,13) }
+        assertTrue(conflict.exceptionOrNull()?.message.orEmpty().contains("level 0",ignoreCase=true))
+        assertEquals(before,database.backupDao().createExport(12))
+
+        val moved=projects.moveArFloor(upperContext,groundVenue,"Upstairs",1,14)
+        assertEquals(ProjectContext(groundVenue,upstairs),moved)
+        val landing=MetricPoint(2.0,2.0)
+        ConnectorRepository(database).save(ConnectorDraft(ConnectorKind.STAIRS,ground,landing,upstairs,landing,"Home stairs",15.0),
+            bidirectional=true,accessible=false,verifiedOnSite=true)
+        database.close()
+        val reopened=open()
+        val movedMap=ProjectRepository(reopened).load(moved)
+        assertEquals(upper.nodes,movedMap.nodes)
+        assertEquals(upper.edges,movedMap.edges)
+        assertEquals(upper.regions,movedMap.regions)
+        assertEquals(upper.asset,movedMap.asset)
+        assertTrue(images.all { it.isFile })
+        val after=reopened.backupDao().createExport(15)
+        assertEquals(before.aggregatedWifiFingerprints,after.aggregatedWifiFingerprints)
+        assertEquals(groundVenue,after.surveySessions.single { it.id=="survey-upper" }.venueId)
+        val restoredDraft=ScanRepository(reopened,context).load("upstairs-draft")!!
+        assertEquals(groundVenue,restoredDraft.publishedVenueId)
+        assertEquals(upstairs,restoredDraft.floorId)
+        assertEquals(document().rooms,restoredDraft.rooms)
+        assertEquals(setOf(ground,upstairs),reopened.floorPlanDao().observeFloors(groundVenue).first().map { it.id }.toSet())
+        val connector=ConnectorRepository(reopened).connectors(groundVenue).single()
+        assertEquals(ground,connector.entity.fromFloorId)
+        assertEquals(upstairs,connector.entity.toFloorId)
+        assertTrue(connector.entity.verifiedOnSite && connector.entity.bidirectional)
+        assertTrue(after.validationErrors().isEmpty())
     }
 }

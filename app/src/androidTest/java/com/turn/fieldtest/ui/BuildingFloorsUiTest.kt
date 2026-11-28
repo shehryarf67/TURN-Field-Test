@@ -85,6 +85,26 @@ class BuildingFloorsUiTest {
         compose.onAllNodesWithText("Add floor").filterToOne(hasClickAction() and hasAnyAncestor(isDialog())).assertIsNotEnabled()
     }
 
+    @Test fun movingStandaloneScanDistinguishesBuildingCopiesAndSelectsAFreeLevel() {
+        val ground = summary("Ground", 0, "home-ground", "Home · mapped layout").copy(standaloneArFloor = true)
+        val upper = summary("Upstairs", 0, "home-upper", "Home · mapped layout").copy(standaloneArFloor = true)
+        val s = state().apply {
+            projects = listOf(ground, upper)
+            activeProject = ground.context
+            destination = TurnDestination.VENUES
+        }
+        var moved: Pair<ProjectContext, Triple<String, String, Int>>? = null
+        compose.setContent { TurnApp(s, TurnAppActions(onArFloorMoved = { source, venue, name, level ->
+            moved = source to Triple(venue, name, level)
+        })) }
+        compose.onAllNodesWithText("Move to building").onLast().performScrollTo().performClick()
+        compose.onNodeWithText("Move Upstairs to a building").assertExists()
+        compose.onNodeWithText("Move floor").assertIsNotEnabled()
+        compose.onNodeWithText("Home · mapped layout · Ground").performClick()
+        compose.onNodeWithText("Move floor").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(upper.context to Triple("home-ground", "Upstairs", 1), moved) }
+    }
+
     @Test fun floorSwitcherOpensAnotherFloorOfTheSameBuilding() {
         val s = state().apply { destination = TurnDestination.LIVE_LOCATE }
         var opened: ProjectContext? = null

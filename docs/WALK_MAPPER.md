@@ -43,7 +43,7 @@ The mapper walks you through six steps. Each step tells you what to do and why; 
 
 **Advanced.** The **Advanced** button in the mapper opens the full editor: typed coordinates, wall suggestions from the camera, joining and splitting walls, doorway widths and room links, moving/turning/resizing a camera session, fine-tuning settings (corner snap distance, wall-detection tolerance, shortest detected wall, allowed size error) and drafts. You never need it for a normal home.
 
-**After saving.** Open the new floor, check it in **Map setup** (add place names and walking paths where needed, and mark Wi-Fi spots), then **Record Wi-Fi** at each spot and try **Explore & navigate**. For two floors, use **Tools → Link floors** to mark the stairs on both floors; setting **Floor heights** (about 2.7 m per storey in a house) and **Line up floors** there is optional.
+**After saving.** Open the new floor, check it in **Map setup** (add place names and walking paths where needed, and mark Wi-Fi spots), then **Record Wi-Fi** at each spot and try **Explore & navigate**. If two Walk Mapper scans appear as separate buildings, find the upstairs scan in **Buildings → Move to building**, choose the building entry that contains the ground-floor scan, and set the upstairs level to **1**. The scan and its recordings move together. TURN can reuse the empty setup floor at that level and keep its drafts. A floor with a saved map or recordings blocks the move. In **Link floors → New link → Stairs**, mark the matching flat landings on both maps, verify them on site, and save the link.
 
 ## Open and use it
 

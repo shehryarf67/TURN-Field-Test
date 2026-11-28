@@ -26,6 +26,8 @@ interface VenueDao {
 interface FloorPlanDao {
     @Query("""
         SELECT v.id AS venueId, f.id AS floorId, v.name AS venueName, f.name AS floorName, f.levelNumber AS floorLevel,
+        (COALESCE(v.notes, '') LIKE 'Walk Mapper revision of %' AND
+            (SELECT COUNT(*) FROM floors WHERE venueId = v.id) = 1) AS standaloneArFloor,
         (SELECT COUNT(*) FROM reference_points r WHERE r.floorId = f.id) AS referencePointCount,
         (SELECT COUNT(DISTINCT a.referencePointId) FROM aggregated_wifi_fingerprints a
          JOIN reference_points r ON r.id = a.referencePointId WHERE r.floorId = f.id) AS fingerprintPointCount,
@@ -50,6 +52,9 @@ interface FloorPlanDao {
 
     @Query("SELECT * FROM floors WHERE id = :floorId")
     suspend fun getFloor(floorId: String): FloorEntity?
+
+    @Query("UPDATE floors SET venueId = :venue, name = :name, levelNumber = :level, elevationMetres = :elevation, updatedAtEpochMillis = :now WHERE id = :floor")
+    suspend fun moveFloor(floor: String, venue: String, name: String, level: Int, elevation: Double?, now: Long)
 
     @Upsert
     suspend fun upsertFloor(floor: FloorEntity)
