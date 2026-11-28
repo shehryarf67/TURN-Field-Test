@@ -3,8 +3,8 @@ package com.turn.fieldtest.mapper
 import com.turn.fieldtest.mapper.core.CaptureGuard
 import com.turn.fieldtest.mapper.core.CaptureGuard.State
 import com.turn.fieldtest.mapper.core.V3
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
 import kotlin.math.cos
 import kotlin.math.sin
 

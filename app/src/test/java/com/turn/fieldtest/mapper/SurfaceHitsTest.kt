@@ -1,8 +1,8 @@
 package com.turn.fieldtest.mapper
 
 import com.turn.fieldtest.mapper.core.*
-import org.junit.Assert.*
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
 
 class SurfaceHitsTest {
     private fun hit(source: HitSource, distance: Double = 2.0, y: Double = 1.0,
